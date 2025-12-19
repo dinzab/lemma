@@ -1,0 +1,16 @@
+import { useState, useCallback, useRef, useEffect } from 'react';
+import { HttpAgent, EventType, AgUIMessage, BaseEvent } from '@ag-ui/client';
+import { Message, ToolCall } from '../components/chat/CustomMessages';
+import { Subject } from 'rxjs';
+
+export interface AgentState {
+    messages: Message[];
+    isLoading: boolean;
+    error: string | null;
+    threadId: string;
+    isInitialized: boolean;
+    agentState?: Record<string, any>;
+}
+
+// ... existing code elsewhere if needed, but I'll focus on the hook logic ...
+// Actually I'll just rewrite the whole file to ensure it's correct.

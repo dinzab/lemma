@@ -1,0 +1,27 @@
+# Backend Development Dockerfile
+FROM node:22-alpine
+
+# Set working directory
+WORKDIR /app
+
+# Install dependencies for hot reload
+RUN apk add --no-cache libc6-compat
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies
+RUN npm ci
+
+# Copy source code
+COPY . .
+
+# Expose port
+EXPOSE 5000
+
+# Set environment
+ENV NODE_ENV=development
+ENV PORT=5000
+
+# Start development server with hot reload
+CMD ["npm", "run", "start:dev"]

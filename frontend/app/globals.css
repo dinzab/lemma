@@ -1,0 +1,179 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-display: var(--font-caveat);
+  --font-body: var(--font-poppins);
+
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  --radius: 0.5rem;
+
+  /* BacPrep AI Light Theme */
+  --background: #FAF8F5;
+  --foreground: #333333;
+
+  --card: #FFFFFF;
+  --card-foreground: #333333;
+
+  --popover: #FFFFFF;
+  --popover-foreground: #333333;
+
+  --primary: #d98a6d;
+  --primary-foreground: #29241f;
+
+  --secondary: #f4f4f5;
+  --secondary-foreground: #18181b;
+
+  --muted: #f4f4f5;
+  --muted-foreground: #666666;
+
+  --accent: #f4f4f5;
+  --accent-foreground: #18181b;
+
+  --destructive: #ef4444;
+  --destructive-foreground: #fafafa;
+
+  --border: #e4e4e7;
+  --input: #e4e4e7;
+  --ring: #d98a6d;
+
+  --chart-1: #e76e50;
+  --chart-2: #2a9d8f;
+  --chart-3: #264653;
+  --chart-4: #f4a261;
+  --chart-5: #e9c46a;
+
+  --sidebar: #FAF8F5;
+  --sidebar-foreground: #333333;
+  --sidebar-primary: #d98a6d;
+  --sidebar-primary-foreground: #29241f;
+  --sidebar-accent: #f4f4f5;
+  --sidebar-accent-foreground: #18181b;
+  --sidebar-border: #e4e4e7;
+  --sidebar-ring: #d98a6d;
+}
+
+.dark {
+  /* BacPrep AI Dark Theme */
+  --background: #29241f;
+  --foreground: #e0d8d0;
+
+  --card: #29241f;
+  --card-foreground: #e0d8d0;
+
+  --popover: #29241f;
+  --popover-foreground: #e0d8d0;
+
+  --primary: #d98a6d;
+  --primary-foreground: #29241f;
+
+  --secondary: #3e3832;
+  --secondary-foreground: #e0d8d0;
+
+  --muted: #3e3832;
+  --muted-foreground: #b3ada6;
+
+  --accent: #3e3832;
+  --accent-foreground: #e0d8d0;
+
+  --destructive: #7f1d1d;
+  --destructive-foreground: #fafafa;
+
+  --border: #3e3832;
+  --input: #3e3832;
+  --ring: #d98a6d;
+
+  --chart-1: #22075e;
+  --chart-2: #5925dc;
+  --chart-3: #875bf7;
+  --chart-4: #b692f6;
+  --chart-5: #d6bbfb;
+
+  --sidebar: #29241f;
+  --sidebar-foreground: #e0d8d0;
+  --sidebar-primary: #d98a6d;
+  --sidebar-primary-foreground: #29241f;
+  --sidebar-accent: #3e3832;
+  --sidebar-accent-foreground: #e0d8d0;
+  --sidebar-border: #3e3832;
+  --sidebar-ring: #d98a6d;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+  }
+
+  /* Custom text selection colors matching the warm palette */
+  ::selection {
+    background-color: #e9b39f !important;
+    /* Lighter tint for light mode */
+    color: #29241f !important;
+    /* Dark text for contrast */
+  }
+
+  ::-moz-selection {
+    background-color: #e9b39f !important;
+    color: #29241f !important;
+  }
+
+  /* Stronger selection for dark mode */
+  .dark ::selection {
+    background-color: #d98a6d !important;
+    /* Primary color */
+    color: #FFFFFF !important;
+    /* White text for dark mode */
+  }
+
+  .dark ::-moz-selection {
+    background-color: #d98a6d !important;
+    color: #FFFFFF !important;
+  }
+}

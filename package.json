@@ -1,0 +1,44 @@
+{
+  "name": "tunisian-bac-ai-tutor",
+  "version": "1.0.0",
+  "description": "Tunisian Baccalaureate AI Tutor - Dockerized Full Stack Application",
+  "private": true,
+  "scripts": {
+    "dev": "docker-compose -f docker-compose.dev.yml up --build -d",
+    "dev:logs": "docker-compose -f docker-compose.dev.yml logs -f",
+    "dev:down": "docker-compose -f docker-compose.dev.yml down",
+    "dev:clean": "docker-compose -f docker-compose.dev.yml down -v --rmi all",
+    "prod": "docker-compose -f docker-compose.prod.yml up --build -d",
+    "prod:down": "docker-compose -f docker-compose.prod.yml down",
+    "build:frontend": "docker build -f frontend/Dockerfile.dev frontend -t bac-tutor-frontend:dev",
+    "build:backend": "docker build -f backend/Dockerfile.dev backend -t bac-tutor-backend:dev",
+    "build:agent": "docker build -f agent/Dockerfile.dev agent -t bac-tutor-agent:dev",
+    "build:all": "npm run build:frontend && npm run build:backend && npm run build:agent",
+    "clean": "docker system prune -f && docker volume prune -f",
+    "clean:all": "docker system prune -af && docker volume prune -f",
+    "restart": "npm run dev:down && npm run dev",
+    "logs:frontend": "docker-compose -f docker-compose.dev.yml logs -f frontend",
+    "logs:backend": "docker-compose -f docker-compose.dev.yml logs -f backend",
+    "logs:agent": "docker-compose -f docker-compose.dev.yml logs -f agent",
+    "shell:frontend": "docker-compose -f docker-compose.dev.yml exec frontend sh",
+    "shell:backend": "docker-compose -f docker-compose.dev.yml exec backend sh",
+    "shell:agent": "docker-compose -f docker-compose.dev.yml exec agent bash"
+  },
+  "keywords": [
+    "ai-tutor",
+    "baccalaureate",
+    "tunisia",
+    "education",
+    "docker",
+    "nextjs",
+    "nestjs",
+    "langgraph",
+    "copilotkit"
+  ],
+  "author": "BacPrep AI Team",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  }
+}

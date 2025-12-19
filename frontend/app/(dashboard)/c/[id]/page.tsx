@@ -1,12 +1,13 @@
 "use client";
 
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useState, useRef, useEffect } from "react";
 import { Paperclip, Mic, ArrowUp, Square, Sparkles, BookOpen, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useAgent } from "@/hooks/useAgent";
-import { CustomUserMessage, CustomAssistantMessage, CustomToolMessage } from "@/components/chat/CustomMessages";
+import { CustomUserMessage, CustomAssistantMessage } from "@/components/chat/CustomMessages";
+import { getThread } from "@/lib/api/threads";
 
 const modes = [
   { id: 'general', label: 'General', icon: Sparkles },
@@ -16,10 +17,14 @@ const modes = [
 
 export default function ChatThreadPage() {
   const params = useParams();
+  const router = useRouter();
   const threadId = params.id as string;
   
   const [input, setInput] = useState("");
   const [selectedMode, setSelectedMode] = useState(modes[0]);
+  const [isValidating, setIsValidating] = useState(true);
+  const [hasValidated, setHasValidated] = useState(false);
+  const [initialMessageSent, setInitialMessageSent] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   // Use AG-UI agent hook
@@ -31,11 +36,63 @@ export default function ChatThreadPage() {
     sendMessage, 
     stopGeneration,
     regenerateLastMessage,
-    clearMessages,
   } = useAgent({
     threadId,
     agentUrl: process.env.NEXT_PUBLIC_AGENT_URL || "http://localhost:8123/agent",
   });
+
+  // Validate thread ownership on mount
+  useEffect(() => {
+    const validateThread = async () => {
+      // Skip validation if threadId is not a valid UUID format
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+      if (!uuidRegex.test(threadId)) {
+        console.error('Invalid thread ID format');
+        router.replace('/new');
+        return;
+      }
+
+      try {
+        // Validate thread exists and belongs to user via API route
+        // Auth is handled server-side using cookies
+        const thread = await getThread(threadId);
+
+        if (!thread) {
+          // Thread not found or not authorized - redirect to new
+          console.error('Thread not found or not authorized');
+          router.replace('/new');
+          return;
+        }
+
+        // Thread is valid!
+        setIsValidating(false);
+        setHasValidated(true);
+      } catch (err) {
+        console.error('Failed to validate thread:', err);
+        router.replace('/new');
+      }
+    };
+
+    validateThread();
+  }, [threadId, router]);
+
+  // Handle initial message from new chat creation
+  useEffect(() => {
+    if (!hasValidated || !isInitialized || initialMessageSent || messages.length > 0) return;
+
+    // Check for initial message in sessionStorage
+    const storageKey = `thread_${threadId}_initial_message`;
+    const initialMessage = sessionStorage.getItem(storageKey);
+
+    if (initialMessage) {
+      // Clear from storage immediately to prevent re-sending
+      sessionStorage.removeItem(storageKey);
+      
+      // Send the initial message
+      setInitialMessageSent(true);
+      sendMessage(initialMessage);
+    }
+  }, [hasValidated, isInitialized, threadId, initialMessageSent, messages.length, sendMessage]);
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
@@ -59,6 +116,16 @@ export default function ChatThreadPage() {
       handleSend();
     }
   };
+
+  // Show loading while validating thread
+  if (isValidating) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center">
+        <div className="h-8 w-8 rounded-full border-2 border-primary/30 border-t-primary animate-spin mb-4" />
+        <p className="text-sm text-muted-foreground">Validating access...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden relative">

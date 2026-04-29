@@ -138,6 +138,102 @@
   --sidebar-ring: #f66e60;
 }
 
+@keyframes orion-card-in {
+  0% {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes orion-draw {
+  0% {
+    stroke-dashoffset: 600;
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+  }
+  100% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+}
+
+@keyframes orion-fade-up {
+  0% {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes orion-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-4px);
+  }
+}
+
+@keyframes border-beam {
+  100% {
+    offset-distance: 100%;
+  }
+}
+
+@keyframes marquee-horizontal {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(calc(-100% - var(--marquee-gap, 2.75rem)));
+  }
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.link-animated {
+  position: relative;
+}
+.link-animated::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform-origin: right;
+  border-bottom: 1px solid currentColor;
+  transform: scaleX(0);
+  transition: transform 300ms ease-in-out;
+}
+.link-animated:hover::before {
+  transform-origin: left;
+  transform: scaleX(1);
+}
+
+@layer utilities {
+  .reveal-on-view {
+    opacity: 0;
+  }
+
+  .reveal-on-view.is-visible {
+    animation: orion-fade-up 0.7s ease-out forwards;
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

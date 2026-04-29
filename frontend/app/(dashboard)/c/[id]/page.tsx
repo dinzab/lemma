@@ -27,7 +27,6 @@ export default function ChatThreadPage() {
   const [initialMessageSent, setInitialMessageSent] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Vercel AI SDK chat (proxied through Next.js → NestJS LangGraph host).
   const {
     messages,
     isLoading,
@@ -40,10 +39,8 @@ export default function ChatThreadPage() {
     hasOlder,
   } = useLemmaChat({ threadId });
 
-  // Validate thread ownership on mount
   useEffect(() => {
     const validateThread = async () => {
-      // Skip validation if threadId is not a valid UUID format
       const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
       if (!uuidRegex.test(threadId)) {
         console.error('Invalid thread ID format');
@@ -52,18 +49,12 @@ export default function ChatThreadPage() {
       }
 
       try {
-        // Validate thread exists and belongs to user via API route
-        // Auth is handled server-side using cookies
         const thread = await getThread(threadId);
-
         if (!thread) {
-          // Thread not found or not authorized - redirect to new
           console.error('Thread not found or not authorized');
           router.replace('/new');
           return;
         }
-
-        // Thread is valid!
         setIsValidating(false);
         setHasValidated(true);
       } catch (err) {
@@ -75,25 +66,19 @@ export default function ChatThreadPage() {
     validateThread();
   }, [threadId, router]);
 
-  // Handle initial message from new chat creation
   useEffect(() => {
     if (!hasValidated || !isInitialized || initialMessageSent || messages.length > 0) return;
 
-    // Check for initial message in sessionStorage
     const storageKey = `thread_${threadId}_initial_message`;
     const initialMessage = sessionStorage.getItem(storageKey);
 
     if (initialMessage) {
-      // Clear from storage immediately to prevent re-sending
       sessionStorage.removeItem(storageKey);
-      
-      // Send the initial message
       setInitialMessageSent(true);
       sendMessage(initialMessage);
     }
   }, [hasValidated, isInitialized, threadId, initialMessageSent, messages.length, sendMessage]);
 
-  // Auto-scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -116,50 +101,46 @@ export default function ChatThreadPage() {
     }
   };
 
-  // Show loading while validating thread
   if (isValidating) {
     return (
-      <div className="flex-1 flex flex-col items-center justify-center">
-        <div className="h-8 w-8 rounded-full border-2 border-primary/30 border-t-primary animate-spin mb-4" />
+      <div className="flex-1 flex flex-col items-center justify-center gap-3">
+        <div className="h-8 w-8 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />
         <p className="text-sm text-muted-foreground">Validating access...</p>
       </div>
     );
   }
 
   return (
-    <div className="flex-1 flex flex-col h-full overflow-hidden relative">
+    <div className="flex-1 flex flex-col h-full overflow-hidden">
       {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto p-4 scroll-smooth">
-        <div className="max-w-3xl mx-auto space-y-4 pb-4">
-          {/* Loading state while restoring messages */}
+      <div className="flex-1 overflow-y-auto scroll-smooth">
+        <div className="max-w-3xl mx-auto px-4 py-6 space-y-1">
           {!isInitialized && (
-            <div className="text-center text-muted-foreground py-8">
+            <div className="text-center text-muted-foreground py-12">
               <div className="h-8 w-8 rounded-full border-2 border-primary/30 border-t-primary animate-spin mx-auto mb-4" />
               <p className="text-sm">Loading conversation...</p>
             </div>
           )}
 
-          {/* Cursor-paginated history: walk older messages on demand. */}
           {isInitialized && hasOlder && (
-            <div className="flex justify-center pb-2">
+            <div className="flex justify-center pb-4">
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => loadOlder()}
-                className="text-xs text-muted-foreground/70 hover:text-foreground"
+                className="text-xs text-muted-foreground hover:text-foreground rounded-full px-4"
               >
                 Load older messages
               </Button>
             </div>
           )}
 
-          {/* Empty state - only show when initialized and no messages */}
           {isInitialized && messages.length === 0 && !isLoading && (
-            <div className="text-center text-muted-foreground py-8">
-              <div className="h-12 w-12 rounded-full bg-primary/10 flex items-center justify-center mx-auto mb-4">
+            <div className="text-center text-muted-foreground py-16">
+              <div className="h-12 w-12 rounded-xl bg-accent flex items-center justify-center mx-auto mb-4">
                 <Sparkles className="h-6 w-6 text-primary" />
               </div>
-              <p className="text-lg font-medium">Start a conversation</p>
+              <p className="text-lg font-semibold text-foreground">Start a conversation</p>
               <p className="text-sm mt-1">Ask me anything about your Baccalaureate studies</p>
             </div>
           )}
@@ -168,7 +149,7 @@ export default function ChatThreadPage() {
             if (message.role === 'user') {
               return <CustomUserMessage key={message.id} message={message} />;
             } else if (message.role === 'tool') {
-              return null; // Tool results are now integrated into the assistant message
+              return null;
             } else if (message.role === 'system') {
               return null;
             } else {
@@ -185,97 +166,94 @@ export default function ChatThreadPage() {
           })}
           
           {error && (
-            <div className="flex justify-center">
-              <div className="bg-destructive/10 text-destructive rounded-lg px-4 py-2 text-sm">
+            <div className="flex justify-center py-2">
+              <div className="bg-destructive/10 text-destructive rounded-xl px-4 py-2.5 text-sm">
                 {error}
               </div>
             </div>
           )}
           
-          {/* Scroll anchor */}
           <div ref={messagesEndRef} />
         </div>
       </div>
 
       {/* Input Area */}
-      <div className="p-6 bg-background/80 backdrop-blur-sm border-t border-border/40">
-        <div className="max-w-3xl mx-auto flex flex-col bg-secondary/40 rounded-[26px] border border-border/40 focus-within:ring-1 focus-within:ring-primary/20 transition-all shadow-sm overflow-hidden relative">
-          <Textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder={`Ask anything in ${selectedMode.label} mode...`}
-            className="w-full bg-transparent border-0 focus-visible:ring-0 shadow-none resize-none min-h-[60px] max-h-[200px] p-4 text-sm placeholder:text-muted-foreground/50 leading-relaxed scrollbar-none"
-            disabled={isLoading}
-            rows={1}
-          />
+      <div className="px-4 pb-4 pt-2 bg-gradient-to-t from-background via-background to-transparent">
+        <div className="max-w-3xl mx-auto">
+          <div className="flex flex-col bg-card rounded-xl border border-border shadow-sm focus-within:shadow-md transition-all overflow-hidden">
+            <Textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={`Ask anything in ${selectedMode.label} mode...`}
+              className="w-full bg-transparent border-0 focus-visible:ring-0 shadow-none resize-none min-h-[52px] max-h-[160px] px-4 pt-3.5 pb-1 text-sm placeholder:text-muted-foreground/50 leading-relaxed scrollbar-none"
+              disabled={isLoading}
+              rows={1}
+            />
 
-          <div className="flex justify-between items-center px-3 pb-3 pt-1">
-            {/* Left: Mode Selection Tabs */}
-            <div className="flex items-center gap-1">
-              {modes.map((mode) => {
-                const Icon = mode.icon;
-                const isActive = selectedMode.id === mode.id;
-                return (
-                  <Button
-                    key={mode.id}
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setSelectedMode(mode)}
-                    className={`h-8 px-3 rounded-full text-xs font-medium transition-all border ${
-                      isActive 
-                        ? "bg-primary/10 text-primary border-primary/20 shadow-sm" 
-                        : "text-muted-foreground/70 hover:text-foreground hover:bg-background/50 border-transparent hover:border-border/40"
-                    }`}
-                  >
-                    <Icon className={`h-3.5 w-3.5 mr-1.5 ${isActive ? "text-primary" : "opacity-70"}`} />
-                    {mode.label}
-                  </Button>
-                );
-              })}
-            </div>
+            <div className="flex justify-between items-center px-3 pb-2.5">
+              {/* Mode Selection */}
+              <div className="flex items-center gap-1">
+                {modes.map((mode) => {
+                  const Icon = mode.icon;
+                  const isActive = selectedMode.id === mode.id;
+                  return (
+                    <button
+                      key={mode.id}
+                      onClick={() => setSelectedMode(mode)}
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-all ${
+                        isActive 
+                          ? "bg-primary/10 text-primary" 
+                          : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                      }`}
+                    >
+                      <Icon className="h-3 w-3" />
+                      {mode.label}
+                    </button>
+                  );
+                })}
+              </div>
 
-            {/* Right: Actions */}
-            <div className="flex items-center gap-1.5">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-muted-foreground/70 hover:text-foreground rounded-full hover:bg-background/50 transition-colors"
-              >
-                <Paperclip className="h-4 w-4" />
-              </Button>
-              
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 text-muted-foreground/70 hover:text-foreground rounded-full hover:bg-background/50 transition-colors"
-              >
-                <Mic className="h-4 w-4" />
-              </Button>
-
-              <div className="pl-1">
-                {isLoading ? (
-                  <Button
-                    onClick={handleStop}
-                    size="icon"
-                    className="h-8 w-8 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm transition-all animate-in fade-in zoom-in duration-200"
-                  >
-                    <Square className="h-3 w-3 fill-current" />
-                  </Button>
-                ) : (
-                  <Button
-                    onClick={handleSend}
-                    disabled={!input.trim()}
-                    size="icon"
-                    className={`h-8 w-8 rounded-full transition-all duration-200 ${
-                      input.trim() 
-                        ? "bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm" 
-                        : "bg-muted/50 text-muted-foreground/50 cursor-not-allowed"
-                    }`}
-                  >
-                    <ArrowUp className="h-5 w-5" />
-                  </Button>
-                )}
+              {/* Actions */}
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 rounded-full text-muted-foreground/60 hover:text-foreground"
+                >
+                  <Paperclip className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 rounded-full text-muted-foreground/60 hover:text-foreground"
+                >
+                  <Mic className="h-4 w-4" />
+                </Button>
+                <div className="pl-0.5">
+                  {isLoading ? (
+                    <Button
+                      onClick={handleStop}
+                      size="icon"
+                      className="h-8 w-8 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm"
+                    >
+                      <Square className="h-3 w-3 fill-current" />
+                    </Button>
+                  ) : (
+                    <Button
+                      onClick={handleSend}
+                      disabled={!input.trim()}
+                      size="icon"
+                      className={`h-8 w-8 rounded-full transition-all ${
+                        input.trim() 
+                          ? "bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm" 
+                          : "bg-muted/50 text-muted-foreground/40 cursor-not-allowed"
+                      }`}
+                    >
+                      <ArrowUp className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
               </div>
             </div>
           </div>

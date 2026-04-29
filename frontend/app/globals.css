@@ -6,8 +6,8 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-display: var(--font-caveat);
-  --font-body: var(--font-poppins);
+  --font-display: var(--font-nunito);
+  --font-body: var(--font-nunito);
 
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
@@ -49,97 +49,93 @@
 }
 
 :root {
-  --radius: 0.5rem;
+  --radius: 0.6rem;
 
-  /* BacPrep AI Light Theme */
-  --background: #FAF8F5;
-  --foreground: #333333;
+  --background: #fcf8f1;
+  --foreground: #4a4037;
 
-  --card: #FFFFFF;
-  --card-foreground: #333333;
+  --card: #fdf7f1;
+  --card-foreground: #4a4037;
 
-  --popover: #FFFFFF;
-  --popover-foreground: #333333;
+  --popover: #fff0d4;
+  --popover-foreground: #4a4037;
 
-  --primary: #d98a6d;
-  --primary-foreground: #29241f;
+  --primary: #f66e60;
+  --primary-foreground: #fff;
 
-  --secondary: #f4f4f5;
-  --secondary-foreground: #18181b;
+  --secondary: #fcaf41;
+  --secondary-foreground: #4a4037;
 
-  --muted: #f4f4f5;
-  --muted-foreground: #666666;
+  --muted: #fbe7d7;
+  --muted-foreground: #8b6e57;
 
-  --accent: #f4f4f5;
-  --accent-foreground: #18181b;
+  --accent: #f5e5c7;
+  --accent-foreground: #715540;
 
-  --destructive: #ef4444;
-  --destructive-foreground: #fafafa;
+  --destructive: #d43030;
 
-  --border: #e4e4e7;
-  --input: #e4e4e7;
-  --ring: #d98a6d;
+  --border: #fad6b3;
+  --input: #fad6b3;
+  --ring: #f66e60;
 
-  --chart-1: #e76e50;
-  --chart-2: #2a9d8f;
-  --chart-3: #264653;
-  --chart-4: #f4a261;
-  --chart-5: #e9c46a;
+  --chart-1: #f66e60;
+  --chart-2: #fcaf41;
+  --chart-3: #fc7146;
+  --chart-4: #ffd756;
+  --chart-5: #d64416;
 
-  --sidebar: #FAF8F5;
-  --sidebar-foreground: #333333;
-  --sidebar-primary: #d98a6d;
-  --sidebar-primary-foreground: #29241f;
-  --sidebar-accent: #f4f4f5;
-  --sidebar-accent-foreground: #18181b;
-  --sidebar-border: #e4e4e7;
-  --sidebar-ring: #d98a6d;
+  --sidebar: #fef3e7;
+  --sidebar-foreground: #4a4037;
+  --sidebar-primary: #f66e60;
+  --sidebar-primary-foreground: #fff;
+  --sidebar-accent: #f5e5c7;
+  --sidebar-accent-foreground: #4a4037;
+  --sidebar-border: #f9ca9c;
+  --sidebar-ring: #f66e60;
 }
 
 .dark {
-  /* BacPrep AI Dark Theme */
-  --background: #29241f;
-  --foreground: #e0d8d0;
+  --background: #2b221a;
+  --foreground: #f9ca9c;
 
-  --card: #29241f;
-  --card-foreground: #e0d8d0;
+  --card: #3c2d21;
+  --card-foreground: #f9ca9c;
 
-  --popover: #29241f;
-  --popover-foreground: #e0d8d0;
+  --popover: #4a392e;
+  --popover-foreground: #f9ca9c;
 
-  --primary: #d98a6d;
-  --primary-foreground: #29241f;
+  --primary: #f66e60;
+  --primary-foreground: #fff;
 
-  --secondary: #3e3832;
-  --secondary-foreground: #e0d8d0;
+  --secondary: #fcaf41;
+  --secondary-foreground: #2b221a;
 
-  --muted: #3e3832;
-  --muted-foreground: #b3ada6;
+  --muted: #4e3f32;
+  --muted-foreground: #d3b591;
 
-  --accent: #3e3832;
-  --accent-foreground: #e0d8d0;
+  --accent: #655144;
+  --accent-foreground: #fff2da;
 
-  --destructive: #7f1d1d;
-  --destructive-foreground: #fafafa;
+  --destructive: #ff6366;
 
-  --border: #3e3832;
-  --input: #3e3832;
-  --ring: #d98a6d;
+  --border: #5a4a3e;
+  --input: #584332;
+  --ring: #f66e60;
 
-  --chart-1: #22075e;
-  --chart-2: #5925dc;
-  --chart-3: #875bf7;
-  --chart-4: #b692f6;
-  --chart-5: #d6bbfb;
+  --chart-1: #f66e60;
+  --chart-2: #fcaf41;
+  --chart-3: #fc7146;
+  --chart-4: #ffd756;
+  --chart-5: #d64416;
 
-  --sidebar: #29241f;
-  --sidebar-foreground: #e0d8d0;
-  --sidebar-primary: #d98a6d;
-  --sidebar-primary-foreground: #29241f;
-  --sidebar-accent: #3e3832;
-  --sidebar-accent-foreground: #e0d8d0;
-  --sidebar-border: #3e3832;
-  --sidebar-ring: #d98a6d;
+  --sidebar: #3c2d21;
+  --sidebar-foreground: #f9ca9c;
+  --sidebar-primary: #f66e60;
+  --sidebar-primary-foreground: #fff;
+  --sidebar-accent: #655144;
+  --sidebar-accent-foreground: #fff2da;
+  --sidebar-border: #6a4f39;
+  --sidebar-ring: #f66e60;
 }
 
 @layer base {
@@ -151,29 +147,23 @@
     @apply bg-background text-foreground;
   }
 
-  /* Custom text selection colors matching the warm palette */
   ::selection {
-    background-color: #e9b39f !important;
-    /* Lighter tint for light mode */
-    color: #29241f !important;
-    /* Dark text for contrast */
+    background-color: #fad6b3 !important;
+    color: #4a4037 !important;
   }
 
   ::-moz-selection {
-    background-color: #e9b39f !important;
-    color: #29241f !important;
+    background-color: #fad6b3 !important;
+    color: #4a4037 !important;
   }
 
-  /* Stronger selection for dark mode */
   .dark ::selection {
-    background-color: #d98a6d !important;
-    /* Primary color */
+    background-color: #f66e60 !important;
     color: #FFFFFF !important;
-    /* White text for dark mode */
   }
 
   .dark ::-moz-selection {
-    background-color: #d98a6d !important;
+    background-color: #f66e60 !important;
     color: #FFFFFF !important;
   }
 }

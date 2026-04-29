@@ -1,32 +1,48 @@
-from langchain_core.messages import SystemMessage
+import logging
+
+from langchain_core.messages import AIMessage, SystemMessage
+
 from model import get_model
-from tools import backend_tools
-from system_prompt import get_system_prompt
 from state import AgentState
+from system_prompt import get_system_prompt
+from tools import backend_tools
+
+logger = logging.getLogger(__name__)
+
 
 def chat_node(state: AgentState):
     """
     Standard chat node based on the ReAct design pattern.
+
+    Wraps the LLM call so that any provider/network failure surfaces as a
+    visible assistant message instead of killing the AG-UI stream mid-flight
+    (which the frontend perceives as a "freeze").
     """
-    
-    # 1. Get the model (defaults to OpenRouter)
-    model = get_model()
 
-    # 2. Bind backend tools only (CopilotKit removed)
-    model_with_tools = model.bind_tools(
-        backend_tools,
-        parallel_tool_calls=False,
-    )
+    try:
+        model = get_model()
+        model_with_tools = model.bind_tools(
+            backend_tools,
+            parallel_tool_calls=False,
+        )
 
-    # 3. Define system message
-    system_message = SystemMessage(
-        content=get_system_prompt()
-    )
+        system_message = SystemMessage(content=get_system_prompt())
 
-    # 4. Invoke model
-    response = model_with_tools.invoke(
-        [system_message, *state["messages"]]
-    )
-
-    # 5. Return update
-    return {"messages": [response]}
+        response = model_with_tools.invoke(
+            [system_message, *state["messages"]]
+        )
+        return {"messages": [response]}
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.exception("chat_node failed: %s", exc)
+        return {
+            "messages": [
+                AIMessage(
+                    content=(
+                        "⚠️ The tutor is temporarily unavailable: "
+                        f"{type(exc).__name__}: {exc}. "
+                        "Please retry in a moment, and if the problem persists "
+                        "ask an administrator to verify the LLM credentials."
+                    )
+                )
+            ]
+        }

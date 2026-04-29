@@ -50,8 +50,15 @@ export async function updateSession(request: NextRequest) {
 
     // 1. Unauthenticated Users
     if (!user) {
-        // Allow access to landing page, login, signup, and auth callback
-        if (path === '/' || path.startsWith('/login') || path.startsWith('/signup') || path.startsWith('/api/auth')) {
+        // Allow access to landing page, login, signup, auth callback,
+        // and the public health check used by the orchestrator/Docker.
+        if (
+            path === '/' ||
+            path.startsWith('/login') ||
+            path.startsWith('/signup') ||
+            path.startsWith('/api/auth') ||
+            path === '/api/health'
+        ) {
             return supabaseResponse
         }
         // Redirect all other requests to login

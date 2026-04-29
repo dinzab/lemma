@@ -52,8 +52,8 @@ interface MessagesPage {
  * turns and pairs it with a paginated history fetch against the NestJS
  * `/threads/:id/messages` endpoint.
  *
- * The returned shape mirrors the legacy `useAgent` API so the existing
- * `CustomMessages` rendering code keeps working unchanged. Internally
+ * The returned shape matches the API expected by `CustomMessages` so the
+ * existing renderer keeps working unchanged. Internally
  * everything goes through the v5 UI message stream protocol —
  * `text-start`/`text-delta`/`text-end` for text, plus
  * `tool-input-available`/`tool-output-available` for tool calls.

@@ -61,6 +61,13 @@ services:
       # Internal Docker network URLs (use container names)
       - FRONTEND_URL=http://frontend:3000
       - AGENT_URL=http://agent:8123
+      # PostgreSQL connection for the shared LangGraph checkpointer.
+      # Same database the legacy Python agent uses, so checkpoints written by
+      # one are readable by the other during the migration window.
+      - POSTGRES_URI=postgresql://langgraph:langgraph_dev_password@postgres:5432/langgraph_checkpoints
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks:
       - bac-tutor-network
     restart: unless-stopped

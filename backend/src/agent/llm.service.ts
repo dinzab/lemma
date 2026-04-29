@@ -1,0 +1,109 @@
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { ChatOpenAI } from '@langchain/openai';
+
+type Provider = 'nvidia' | 'openrouter' | 'openai';
+
+/**
+ * LlmService — central factory for the chat model used by the agent.
+ *
+ * Mirrors the provider switch in the Python `agent/model.py` so we can swap
+ * between NVIDIA (default, OpenAI-compatible at integrate.api.nvidia.com),
+ * OpenRouter, and OpenAI without touching the graph / nodes.
+ */
+@Injectable()
+export class LlmService implements OnModuleInit {
+  private readonly logger = new Logger(LlmService.name);
+  private readonly provider: Provider;
+
+  constructor(private readonly config: ConfigService) {
+    const raw = (
+      this.config.get<string>('MODEL_PROVIDER') ?? 'nvidia'
+    ).toLowerCase();
+    if (raw === 'openrouter' || raw === 'openai' || raw === 'nvidia') {
+      this.provider = raw;
+    } else {
+      this.provider = 'nvidia';
+    }
+  }
+
+  onModuleInit(): void {
+    this.logger.log(`LLM provider: ${this.provider}`);
+  }
+
+  /**
+   * Build a ChatOpenAI instance for the configured provider.
+   * Throws if the provider's API key is missing — surfaced as a graceful
+   * AIMessage by `chat.node.ts`'s try/catch rather than crashing the stream.
+   */
+  getChatModel(): ChatOpenAI {
+    switch (this.provider) {
+      case 'nvidia':
+        return this.buildNvidia();
+      case 'openrouter':
+        return this.buildOpenRouter();
+      case 'openai':
+        return this.buildOpenAi();
+    }
+  }
+
+  private buildNvidia(): ChatOpenAI {
+    const apiKey =
+      this.config.get<string>('NVIDIA_API_KEY') ??
+      this.config.get<string>('NVIDEA_API_KEY');
+    if (!apiKey) {
+      throw new Error(
+        'NVIDIA_API_KEY is not set. Configure it in backend/.env.local or ' +
+          'switch MODEL_PROVIDER to openrouter / openai.',
+      );
+    }
+    return new ChatOpenAI({
+      model:
+        this.config.get<string>('NVIDIA_MODEL_NAME') ??
+        'meta/llama-3.3-70b-instruct',
+      apiKey,
+      configuration: {
+        baseURL:
+          this.config.get<string>('NVIDIA_BASE_URL') ??
+          'https://integrate.api.nvidia.com/v1',
+      },
+      temperature: 0,
+      streaming: true,
+    });
+  }
+
+  private buildOpenRouter(): ChatOpenAI {
+    const apiKey = this.config.get<string>('OPENROUTER_API_KEY');
+    if (!apiKey) {
+      throw new Error('OPENROUTER_API_KEY is not set.');
+    }
+    return new ChatOpenAI({
+      model:
+        this.config.get<string>('OPENROUTER_MODEL_NAME') ??
+        'meta-llama/llama-3.3-70b-instruct',
+      apiKey,
+      configuration: {
+        baseURL: 'https://openrouter.ai/api/v1',
+        defaultHeaders: {
+          'HTTP-Referer': 'https://lemma.local',
+          'X-Title': 'Lemma',
+        },
+      },
+      temperature: 0,
+      streaming: true,
+    });
+  }
+
+  private buildOpenAi(): ChatOpenAI {
+    const apiKey = this.config.get<string>('OPENAI_API_KEY');
+    if (!apiKey) {
+      throw new Error('OPENAI_API_KEY is not set.');
+    }
+    return new ChatOpenAI({
+      model: this.config.get<string>('OPENAI_MODEL_NAME') ?? 'gpt-4o-mini',
+      apiKey,
+      temperature: 0,
+      streaming: true,
+    });
+  }
+}

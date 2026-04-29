@@ -5,7 +5,7 @@ import { useState, useRef, useEffect } from "react";
 import { Paperclip, Mic, ArrowUp, Square, Sparkles, BookOpen, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { useAgent } from "@/hooks/useAgent";
+import { useLemmaChat } from "@/hooks/useChat";
 import { CustomUserMessage, CustomAssistantMessage } from "@/components/chat/CustomMessages";
 import { getThread } from "@/lib/api/threads";
 
@@ -27,19 +27,18 @@ export default function ChatThreadPage() {
   const [initialMessageSent, setInitialMessageSent] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Use AG-UI agent hook
-  const { 
-    messages, 
-    isLoading, 
-    error, 
+  // Vercel AI SDK chat (proxied through Next.js → NestJS LangGraph host).
+  const {
+    messages,
+    isLoading,
+    error,
     isInitialized,
-    sendMessage, 
+    sendMessage,
     stopGeneration,
     regenerateLastMessage,
-  } = useAgent({
-    threadId,
-    agentUrl: process.env.NEXT_PUBLIC_AGENT_URL || "http://localhost:8123/agent",
-  });
+    loadOlder,
+    hasOlder,
+  } = useLemmaChat({ threadId });
 
   // Validate thread ownership on mount
   useEffect(() => {
@@ -137,6 +136,20 @@ export default function ChatThreadPage() {
             <div className="text-center text-muted-foreground py-8">
               <div className="h-8 w-8 rounded-full border-2 border-primary/30 border-t-primary animate-spin mx-auto mb-4" />
               <p className="text-sm">Loading conversation...</p>
+            </div>
+          )}
+
+          {/* Cursor-paginated history: walk older messages on demand. */}
+          {isInitialized && hasOlder && (
+            <div className="flex justify-center pb-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => loadOlder()}
+                className="text-xs text-muted-foreground/70 hover:text-foreground"
+              >
+                Load older messages
+              </Button>
             </div>
           )}
 

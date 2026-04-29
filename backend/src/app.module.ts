@@ -4,6 +4,8 @@ import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './auth';
 import { ThreadsModule } from './threads';
+import { AgentModule } from './agent/agent.module';
+import { ChatModule } from './chat/chat.module';
 
 @Module({
   imports: [
@@ -16,6 +18,10 @@ import { ThreadsModule } from './threads';
     AuthModule,
     // ThreadsModule provides thread management endpoints
     ThreadsModule,
+    // AgentModule owns the LangGraph + shared CheckpointerService
+    AgentModule,
+    // ChatModule exposes /chat/stream + /threads/:id/messages
+    ChatModule,
   ],
   controllers: [AppController],
   providers: [AppService],

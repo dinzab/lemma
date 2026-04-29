@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { motion } from "motion/react";
-import { EllipsisVertical, Loader2, AlertCircle } from "lucide-react";
+import { Loader2, AlertCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
@@ -95,10 +95,8 @@ function WorkflowCard({
             <Icon className={cn("size-4", iconColorClasses[color])} />
           </div>
           <div className="grow text-sm font-medium">{data.title}</div>
-          {data.time && type === "input" ? (
+          {data.time && type === "input" && (
             <span className="text-[10px] text-muted-foreground">{data.time}</span>
-          ) : (
-            <EllipsisVertical className="size-4 text-muted-foreground/50" />
           )}
         </div>
 
@@ -152,7 +150,7 @@ function WorkflowCard({
               {data.model ?? "BacPrep AI"}
             </Badge>
           ) : (
-            <span className="text-[10px] text-muted-foreground">{data.time ?? "0.0 sec"}</span>
+            <span className="text-[10px] text-muted-foreground">{data.time ?? ""}</span>
           )}
         </div>
       </div>
@@ -160,28 +158,74 @@ function WorkflowCard({
   );
 }
 
-function FlowPath({ d, delay }: { d: string; delay: number }) {
+type PathShape = "step-down-right" | "step-up-right";
+
+function WorkflowPath({
+  start,
+  end,
+  shape,
+  delay,
+}: {
+  start: { x: number; y: number };
+  end: { x: number; y: number };
+  shape: PathShape;
+  delay: number;
+}) {
+  const r = 20;
+  const cardY = shape === "step-down-right" ? start.y - 6 : start.y + 6;
+  const d =
+    shape === "step-down-right"
+      ? `M ${start.x} ${cardY} L ${start.x} ${end.y - r} Q ${start.x} ${end.y} ${start.x + r} ${end.y} L ${end.x} ${end.y}`
+      : `M ${start.x} ${cardY} L ${start.x} ${end.y + r} Q ${start.x} ${end.y} ${start.x + r} ${end.y} L ${end.x} ${end.y}`;
+
   return (
-    <g>
+    <g className="text-primary/40">
+      {/* Dashed line that draws from start to end */}
       <motion.path
         d={d}
-        fill="none"
         stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
+        strokeWidth="2"
         strokeDasharray="4 4"
-        className="text-border"
-        initial={{ pathLength: 0, opacity: 0 }}
-        animate={{ pathLength: 1, opacity: 1 }}
-        transition={{ duration: 1.2, delay, ease: "easeInOut" }}
+        strokeLinecap="round"
+        fill="none"
+        initial={{ pathLength: 0 }}
+        animate={{ pathLength: 1 }}
+        transition={{ duration: 1, delay: delay + 0.3, ease: "easeInOut" }}
       />
+      {/* Diamond marker at the start of the path */}
+      <motion.path
+        d={`M ${start.x - 6} ${start.y} L ${start.x} ${start.y - 6} L ${start.x + 6} ${start.y} L ${start.x} ${start.y + 6} Z`}
+        fill="currentColor"
+        initial={{ opacity: 0, scale: 0 }}
+        animate={{ opacity: 1, scale: 1 }}
+        transition={{ duration: 0.3, delay }}
+      />
+      {/* Chevron arrow at the end, appears once the line has finished drawing */}
+      <motion.path
+        d={`M ${end.x - 8} ${end.y - 6} L ${end.x} ${end.y} L ${end.x - 8} ${end.y + 6}`}
+        stroke="currentColor"
+        strokeWidth="2"
+        fill="none"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        initial={{ opacity: 0, x: -5 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ duration: 0.3, delay: delay + 1.1 }}
+      />
+      {/* Slow-moving dot to show data flow once the line is drawn */}
       <motion.circle
         r="3"
         className="fill-primary"
         initial={{ opacity: 0 }}
         animate={{ offsetDistance: ["0%", "100%"], opacity: [0, 1, 1, 0] }}
         style={{ offsetPath: `path("${d}")` }}
-        transition={{ duration: 2, delay: delay + 0.5, ease: "linear", repeat: Infinity, repeatDelay: 1 }}
+        transition={{
+          duration: 2,
+          delay: delay + 1.4,
+          ease: "linear",
+          repeat: Infinity,
+          repeatDelay: 2,
+        }}
       />
     </g>
   );
@@ -193,15 +237,20 @@ export type WorkflowSpec = {
   output: WorkflowCardData;
 };
 
+type Coord = { x: number; y: number };
+
 export function WorkflowAnimation({ spec }: { spec: WorkflowSpec }) {
   const containerRef = React.useRef<HTMLDivElement>(null);
   const inputRef = React.useRef<HTMLDivElement>(null);
   const actionRef = React.useRef<HTMLDivElement>(null);
   const outputRef = React.useRef<HTMLDivElement>(null);
 
-  const [coords, setCoords] = React.useState({
-    path1: { sx: 0, sy: 0, ex: 0, ey: 0 },
-    path2: { sx: 0, sy: 0, ex: 0, ey: 0 },
+  const [coords, setCoords] = React.useState<{
+    path1: { start: Coord; end: Coord };
+    path2: { start: Coord; end: Coord };
+  }>({
+    path1: { start: { x: 0, y: 0 }, end: { x: 0, y: 0 } },
+    path2: { start: { x: 0, y: 0 }, end: { x: 0, y: 0 } },
   });
 
   const updateCoords = React.useCallback(() => {
@@ -211,17 +260,15 @@ export function WorkflowAnimation({ spec }: { spec: WorkflowSpec }) {
     const a = actionRef.current.getBoundingClientRect();
     const o = outputRef.current.getBoundingClientRect();
     setCoords({
+      // Input bottom-center -> Action left-middle (step-down-right)
       path1: {
-        sx: i.left - c.left + i.width / 2,
-        sy: i.bottom - c.top + 6,
-        ex: a.left - c.left,
-        ey: a.top - c.top + a.height / 2,
+        start: { x: i.left - c.left + i.width / 2, y: i.bottom - c.top },
+        end: { x: a.left - c.left, y: a.top - c.top + a.height / 2 },
       },
+      // Action top-center -> Output left-middle (step-up-right)
       path2: {
-        sx: a.left - c.left + a.width / 2,
-        sy: a.top - c.top - 6,
-        ex: o.left - c.left,
-        ey: o.top - c.top + o.height / 2,
+        start: { x: a.left - c.left + a.width / 2, y: a.top - c.top },
+        end: { x: o.left - c.left, y: o.top - c.top + o.height / 2 },
       },
     });
   }, []);
@@ -239,36 +286,33 @@ export function WorkflowAnimation({ spec }: { spec: WorkflowSpec }) {
     };
   }, [updateCoords]);
 
-  const path1d = `M ${coords.path1.sx} ${coords.path1.sy} C ${coords.path1.sx} ${(coords.path1.sy + coords.path1.ey) / 2}, ${coords.path1.ex - 40} ${coords.path1.ey}, ${coords.path1.ex} ${coords.path1.ey}`;
-  const path2d = `M ${coords.path2.sx} ${coords.path2.sy} C ${coords.path2.sx} ${(coords.path2.sy + coords.path2.ey) / 2}, ${coords.path2.ex - 40} ${coords.path2.ey}, ${coords.path2.ex} ${coords.path2.ey}`;
-
   return (
     <div
       ref={containerRef}
       className="relative flex h-full min-h-[420px] w-full items-center justify-center md:min-h-[550px]"
     >
-      {/* Mobile fallback: stack cards vertically with a thin connector line */}
+      {/* Mobile fallback: stack cards vertically */}
       <div className="flex w-full max-w-sm flex-col items-center gap-10 md:hidden">
         <WorkflowCard data={spec.input} type="input" delay={0} />
         <WorkflowCard data={spec.actions[0]} type="action" delay={0.3} />
         <WorkflowCard data={spec.output} type="output" delay={0.6} />
       </div>
 
-      {/* Desktop layout */}
+      {/* Desktop layout: input top-left, action bottom-center, output top-right */}
       <div className="relative hidden h-full w-full max-w-5xl md:block">
         <div ref={inputRef} className="absolute top-[10%] left-[5%] z-10">
           <WorkflowCard data={spec.input} type="input" delay={0} />
         </div>
         <div ref={actionRef} className="absolute bottom-[10%] left-[35%] z-10">
-          <WorkflowCard data={spec.actions[0]} type="action" delay={0.6} />
+          <WorkflowCard data={spec.actions[0]} type="action" delay={1.5} />
         </div>
         <div ref={outputRef} className="absolute top-[5%] right-[5%] z-10">
-          <WorkflowCard data={spec.output} type="output" delay={1.1} />
+          <WorkflowCard data={spec.output} type="output" delay={3} />
         </div>
 
-        <svg className="absolute inset-0 h-full w-full" aria-hidden>
-          <FlowPath d={path1d} delay={0.4} />
-          <FlowPath d={path2d} delay={1.0} />
+        <svg className="pointer-events-none absolute inset-0 h-full w-full overflow-visible" aria-hidden>
+          <WorkflowPath start={coords.path1.start} end={coords.path1.end} shape="step-down-right" delay={0.5} />
+          <WorkflowPath start={coords.path2.start} end={coords.path2.end} shape="step-up-right" delay={2} />
         </svg>
       </div>
     </div>

@@ -310,7 +310,7 @@ export function FeaturesSection() {
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <div className="border-b px-4 sm:px-6 lg:px-8">
           <div className="mx-auto max-w-7xl border-x">
-            <TabsList className="w-full justify-start overflow-x-auto rounded-none bg-transparent p-0">
+            <TabsList className="no-scrollbar w-full justify-start overflow-x-auto rounded-none bg-transparent p-0">
               {TABS.map((tab) => {
                 const Icon = tab.icon;
                 const isActive = tab.id === activeTab;

@@ -15,15 +15,17 @@ import {
   Search,
   Calendar,
   Target,
-  ArrowDownUp,
   CircleCheck,
   ChartBar,
+  ListChecks,
+  StickyNote,
+  Activity,
+  TrendingUp,
+  Zap,
+  GraduationCap,
 } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  WorkflowAnimation,
-  type WorkflowSpec,
-} from "./workflow-animation";
+import { WorkflowAnimation, type WorkflowSpec } from "./workflow-animation";
 
 type Tab = {
   id: string;
@@ -32,12 +34,77 @@ type Tab = {
   spec: WorkflowSpec;
 };
 
+/* --- Mini visual bodies used inside cards --- */
+
+function MiniCalendarBody() {
+  const days = Array.from({ length: 14 });
+  const studyDays = [1, 2, 4, 5, 8, 9, 11, 12];
+  return (
+    <div className="rounded-lg border bg-muted/40 p-3">
+      <div className="mb-2 flex items-center justify-between text-[10px] uppercase tracking-wider text-muted-foreground">
+        <span>Next 2 weeks</span>
+        <span>3h/day</span>
+      </div>
+      <div className="grid grid-cols-7 gap-1.5">
+        {days.map((_, i) => {
+          const isStudy = studyDays.includes(i);
+          return (
+            <motion.div
+              key={i}
+              initial={{ scale: 0.6, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              transition={{ delay: 1.8 + i * 0.04, duration: 0.25 }}
+              className={`h-6 rounded-md ${isStudy ? "bg-primary/80" : "bg-muted"}`}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function MiniChartBody() {
+  const bars = [
+    { label: "Maths", value: 78, color: "bg-emerald-500/80" },
+    { label: "Physics", value: 62, color: "bg-amber-500/80" },
+    { label: "Bio", value: 84, color: "bg-emerald-500/80" },
+    { label: "Philo", value: 41, color: "bg-rose-500/80" },
+    { label: "Arabic", value: 70, color: "bg-emerald-500/80" },
+  ];
+  return (
+    <div className="rounded-lg border bg-muted/40 p-3">
+      <div className="mb-2 flex items-center justify-between text-[10px] uppercase tracking-wider text-muted-foreground">
+        <span>Confidence by subject</span>
+        <span>This week</span>
+      </div>
+      <div className="space-y-1.5">
+        {bars.map((b, i) => (
+          <div key={b.label} className="flex items-center gap-2">
+            <span className="w-12 text-[10px] text-muted-foreground">{b.label}</span>
+            <div className="relative h-2 grow overflow-hidden rounded-full bg-muted">
+              <motion.div
+                initial={{ width: 0 }}
+                animate={{ width: `${b.value}%` }}
+                transition={{ delay: 1.6 + i * 0.12, duration: 0.7, ease: "easeOut" }}
+                className={`absolute inset-y-0 left-0 ${b.color}`}
+              />
+            </div>
+            <span className="w-8 text-right text-[10px] tabular-nums text-muted-foreground">{b.value}%</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 const TABS: Tab[] = [
+  /* 1. Concept Explainer — three-corner */
   {
     id: "concept-explainer",
     label: "Concept Explainer",
     icon: Compass,
     spec: {
+      kind: "three-corner",
       input: {
         icon: BookOpen,
         title: "Lesson question",
@@ -49,21 +116,19 @@ const TABS: Tab[] = [
           { icon: BookOpen, text: "Textbook page", color: "amber" },
         ],
       },
-      actions: [
-        {
-          icon: Sparkles,
-          title: "Adaptive Reasoning",
-          desc: "Breaks the topic into the right level of detail with worked examples.",
-          color: "amber",
-          time: "1.4 sec",
-          subtasks: [
-            { icon: CircleCheck, text: "Curriculum-aligned terms", color: "green" },
-            { icon: CircleCheck, text: "Step-by-step working", color: "green" },
-            { icon: CircleCheck, text: "Quick check question", color: "green" },
-          ],
-          model: "GPT-4 · BacPrep",
-        },
-      ],
+      action: {
+        icon: Sparkles,
+        title: "Adaptive reasoning",
+        desc: "Breaks the topic into the right level of detail with worked examples.",
+        color: "amber",
+        time: "1.4 sec",
+        subtasks: [
+          { icon: CircleCheck, text: "Curriculum-aligned terms", color: "green" },
+          { icon: CircleCheck, text: "Step-by-step working", color: "green" },
+          { icon: CircleCheck, text: "Quick check question", color: "green" },
+        ],
+        model: "GPT-4 · BacPrep",
+      },
       output: {
         icon: CheckCircle2,
         title: "Clear explanation",
@@ -74,11 +139,14 @@ const TABS: Tab[] = [
       },
     },
   },
+
+  /* 2. Past Exam Practice — split-action (2 parallel checks) */
   {
     id: "past-exam",
     label: "Past Exam Practice",
     icon: ClipboardList,
     spec: {
+      kind: "split-action",
       input: {
         icon: ClipboardList,
         title: "Past Bac question",
@@ -92,15 +160,26 @@ const TABS: Tab[] = [
       },
       actions: [
         {
-          icon: ArrowDownUp,
-          title: "Scoring & Feedback",
-          desc: "Compares your answer with the official mark scheme and gives targeted hints.",
+          icon: Target,
+          title: "Match against rubric",
+          desc: "Scores your answer against the official mark scheme.",
           color: "amber",
-          time: "2.1 sec",
+          time: "1.6 sec",
           subtasks: [
-            { icon: CircleCheck, text: "Match against rubric", color: "green" },
-            { icon: CircleCheck, text: "Detect missing steps", color: "green" },
-            { icon: CircleCheck, text: "Build improvement plan", color: "green" },
+            { icon: CircleCheck, text: "Method points", color: "green" },
+            { icon: CircleCheck, text: "Working out", color: "green" },
+          ],
+          model: "GPT-4 · BacPrep",
+        },
+        {
+          icon: Search,
+          title: "Detect missing steps",
+          desc: "Finds gaps and flags concepts you should revisit.",
+          color: "amber",
+          time: "1.4 sec",
+          subtasks: [
+            { icon: CircleCheck, text: "Reasoning gaps", color: "green" },
+            { icon: CircleCheck, text: "Common pitfalls", color: "green" },
           ],
           model: "GPT-4 · BacPrep",
         },
@@ -115,51 +194,63 @@ const TABS: Tab[] = [
       },
     },
   },
+
+  /* 3. Smart Summaries — fan-in (multiple sources -> 1 revision card) */
   {
     id: "smart-summaries",
     label: "Smart Summaries",
     icon: FileText,
     spec: {
-      input: {
-        icon: BookOpen,
-        title: "Pick a chapter",
-        desc: "Choose any chapter from your curriculum or paste your own notes.",
-        color: "sky",
-        time: "0.0 sec",
-        subtasks: [
-          { icon: FileText, text: "Philosophy — Ch. 4", color: "blue" },
-          { icon: BookOpen, text: "Class notes attached", color: "amber" },
-        ],
-      },
-      actions: [
+      kind: "fan-in",
+      inputs: [
         {
-          icon: Sparkles,
-          title: "Distilling key ideas",
-          desc: "Definitions, formulas, and quotes are pulled out and organised.",
-          color: "amber",
-          time: "1.8 sec",
-          subtasks: [
-            { icon: CircleCheck, text: "Highlight essentials", color: "green" },
-            { icon: CircleCheck, text: "Build revision card", color: "green" },
-          ],
-          model: "GPT-4 · BacPrep",
+          icon: BookOpen,
+          title: "Textbook chapter",
+          desc: "Philosophy — Ch. 4, Reason & belief.",
+          color: "sky",
+          typeLabel: "source",
+          time: "0.0 sec",
+        },
+        {
+          icon: StickyNote,
+          title: "Class notes",
+          desc: "Your handwritten notes from the last 3 lessons.",
+          color: "sky",
+          typeLabel: "source",
+          time: "0.1 sec",
+        },
+        {
+          icon: GraduationCap,
+          title: "Past Bac questions",
+          desc: "Recurring patterns from the last 5 years.",
+          color: "sky",
+          typeLabel: "source",
+          time: "0.2 sec",
         },
       ],
       output: {
-        icon: FileText,
+        icon: ListChecks,
         title: "Revision card",
-        desc: "Printable summary card focused on the highest-impact points.",
+        desc: "A focused summary built from every source — definitions, key quotes, common questions.",
         color: "green",
-        time: "0.4 sec",
-        footer: { icon: CircleCheck, text: "Card saved to library", color: "green" },
+        time: "1.4 sec",
+        subtasks: [
+          { icon: CircleCheck, text: "5 essential definitions", color: "green" },
+          { icon: CircleCheck, text: "3 quotes to remember", color: "green" },
+          { icon: CircleCheck, text: "2 likely Bac questions", color: "green" },
+        ],
+        footer: { icon: CircleCheck, text: "Saved to revision deck", color: "green" },
       },
     },
   },
+
+  /* 4. Study Plan — linear (goals -> 2-week calendar) */
   {
     id: "study-plan",
     label: "Study Plan",
     icon: Pencil,
     spec: {
+      kind: "linear",
       input: {
         icon: Calendar,
         title: "Your goals",
@@ -169,59 +260,58 @@ const TABS: Tab[] = [
         subtasks: [
           { icon: Target, text: "Target: 16 / 20", color: "blue" },
           { icon: Calendar, text: "Bac in 12 weeks", color: "amber" },
+          { icon: Zap, text: "≈ 3h / day", color: "purple" },
         ],
       },
-      actions: [
-        {
-          icon: Sparkles,
-          title: "Prioritising weak areas",
-          desc: "We weigh your recent scores against the official syllabus.",
-          color: "amber",
-          time: "2.4 sec",
-          subtasks: [
-            { icon: CircleCheck, text: "Read past results", color: "green" },
-            { icon: CircleCheck, text: "Pick high-impact topics", color: "green" },
-            { icon: CircleCheck, text: "Schedule daily sessions", color: "green" },
-          ],
-          model: "GPT-4 · BacPrep",
-        },
-      ],
       output: {
         icon: ClipboardList,
-        title: "Today's plan",
-        desc: "Three focused sessions, with exercises and a short check-in.",
+        title: "Your 2-week plan",
+        desc: "Sessions sized to your weak areas, scheduled around your existing classes.",
         color: "green",
-        time: "0.5 sec",
-        footer: { icon: Calendar, text: "Added to your calendar", color: "green" },
+        time: "1.4 sec",
+        body: <MiniCalendarBody />,
+        footer: { icon: Calendar, text: "Synced with your calendar", color: "green" },
       },
     },
   },
+
+  /* 5. Multilingual Q&A — split-action (translate + answer in parallel) */
   {
     id: "multilingual",
     label: "Multilingual Q&A",
     icon: Languages,
     spec: {
+      kind: "split-action",
       input: {
         icon: Languages,
         title: "Ask in any language",
-        desc: "Mix Arabic, French, and English freely — vocabulary stays consistent.",
+        desc: "Mix Arabic, French, and English freely — the tutor keeps up.",
         color: "sky",
         time: "0.0 sec",
-        subtasks: [
-          { icon: Languages, text: "AR · FR · EN", color: "blue" },
-        ],
+        subtasks: [{ icon: Languages, text: "“ما هي الدوال المثلثية؟”", color: "blue" }],
       },
       actions: [
         {
-          icon: Search,
-          title: "Curriculum-aware reasoning",
-          desc: "Curriculum terms map to the official Tunisian programme.",
+          icon: Languages,
+          title: "Detect & translate",
+          desc: "Detects the language mix and aligns terms across AR/FR/EN.",
           color: "amber",
-          time: "1.6 sec",
+          time: "0.6 sec",
           subtasks: [
-            { icon: CircleCheck, text: "Detect language mix", color: "green" },
-            { icon: CircleCheck, text: "Match syllabus terms", color: "green" },
-            { icon: CircleCheck, text: "Format answer", color: "green" },
+            { icon: CircleCheck, text: "Language mix detected", color: "green" },
+            { icon: CircleCheck, text: "Glossary linked", color: "green" },
+          ],
+          model: "GPT-4 · BacPrep",
+        },
+        {
+          icon: Search,
+          title: "Curriculum match",
+          desc: "Maps the question to the official Tunisian Bac syllabus.",
+          color: "amber",
+          time: "1.0 sec",
+          subtasks: [
+            { icon: CircleCheck, text: "Syllabus terms matched", color: "green" },
+            { icon: CircleCheck, text: "Worked example fetched", color: "green" },
           ],
           model: "GPT-4 · BacPrep",
         },
@@ -229,50 +319,43 @@ const TABS: Tab[] = [
       output: {
         icon: CheckCircle2,
         title: "Answer in your language",
-        desc: "A clear answer in the same language you asked, with curriculum terms.",
+        desc: "A clear, curriculum-aligned answer in the language you asked.",
         color: "green",
-        time: "0.4 sec",
+        time: "0.5 sec",
         footer: { icon: BookOpen, text: "Glossary linked", color: "green" },
       },
     },
   },
+
+  /* 6. Progress Tracker — linear with rich activity feed + chart bodies */
   {
     id: "progress",
     label: "Progress Tracker",
     icon: LineChart,
     spec: {
+      kind: "linear",
       input: {
-        icon: ClipboardList,
-        title: "Quiz attempt",
-        desc: "Each quiz, exercise, and chat answer feeds your progress profile.",
+        icon: Activity,
+        title: "Live activity",
+        desc: "Every quiz, exercise, and chat answer feeds your profile.",
         color: "sky",
-        time: "0.0 sec",
+        typeLabel: "feed",
+        time: "live",
         subtasks: [
-          { icon: ClipboardList, text: "Weekly mock test", color: "blue" },
-          { icon: FileText, text: "Chat history", color: "amber" },
+          { icon: CircleCheck, text: "Quiz: Algebra · 18/20", color: "green" },
+          { icon: CircleCheck, text: "Chat: Limits explained", color: "blue" },
+          { icon: CircleCheck, text: "Exercise: Vectors · 14/20", color: "amber" },
+          { icon: CircleCheck, text: "Mock: Maths Bac · 15/20", color: "green" },
         ],
       },
-      actions: [
-        {
-          icon: ChartBar,
-          title: "Performance analysis",
-          desc: "Strengths, gaps, and a confidence score per chapter, refreshed live.",
-          color: "amber",
-          time: "1.2 sec",
-          subtasks: [
-            { icon: CircleCheck, text: "Compute scores", color: "green" },
-            { icon: CircleCheck, text: "Detect knowledge gaps", color: "green" },
-            { icon: CircleCheck, text: "Pick next steps", color: "green" },
-          ],
-          model: "GPT-4 · BacPrep",
-        },
-      ],
       output: {
-        icon: LineChart,
+        icon: TrendingUp,
         title: "Recommendations",
-        desc: "The three highest-impact things to study before your next session.",
+        desc: "Confidence per subject, with the next three things to study.",
         color: "green",
-        time: "0.4 sec",
+        typeLabel: "chart",
+        time: "1.2 sec",
+        body: <MiniChartBody />,
         footer: { icon: CircleCheck, text: "Tracker updated", color: "green" },
       },
     },
@@ -296,7 +379,6 @@ export function FeaturesSection() {
 
   return (
     <section id="features" className="flex flex-col">
-      <div className="h-px w-full bg-border" />
       <div className="relative z-10 overflow-hidden pt-8 pb-5 text-center">
         <div className="space-y-4">
           <h2 className="text-xl font-medium uppercase tracking-wider">Features</h2>

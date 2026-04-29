@@ -286,13 +286,11 @@ export function FeaturesSection() {
 
   React.useEffect(() => {
     const interval = setInterval(() => {
-      setActiveTab((prev) => {
-        const idx = TABS.findIndex((t) => t.id === prev);
-        return TABS[(idx + 1) % TABS.length].id;
-      });
+      const idx = TABS.findIndex((t) => t.id === activeTab);
+      setActiveTab(TABS[(idx + 1) % TABS.length].id);
     }, ROTATION_MS);
     return () => clearInterval(interval);
-  }, []);
+  }, [activeTab]);
 
   const active = TABS.find((t) => t.id === activeTab) ?? TABS[0];
 

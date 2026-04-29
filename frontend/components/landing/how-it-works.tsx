@@ -50,10 +50,10 @@ export function HowItWorks() {
 
   React.useEffect(() => {
     const id = setInterval(() => {
-      setActiveStep((prev) => (prev + 1) % STEPS.length);
+      setActiveStep((activeStep + 1) % STEPS.length);
     }, STEP_DURATION);
     return () => clearInterval(id);
-  }, []);
+  }, [activeStep]);
 
   return (
     <section id="how-it-works" className="flex flex-col">

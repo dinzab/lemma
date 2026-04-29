@@ -12,17 +12,14 @@
     "prod:down": "docker-compose -f docker-compose.prod.yml down",
     "build:frontend": "docker build -f frontend/Dockerfile.dev frontend -t bac-tutor-frontend:dev",
     "build:backend": "docker build -f backend/Dockerfile.dev backend -t bac-tutor-backend:dev",
-    "build:agent": "docker build -f agent/Dockerfile.dev agent -t bac-tutor-agent:dev",
-    "build:all": "npm run build:frontend && npm run build:backend && npm run build:agent",
+    "build:all": "npm run build:frontend && npm run build:backend",
     "clean": "docker system prune -f && docker volume prune -f",
     "clean:all": "docker system prune -af && docker volume prune -f",
     "restart": "npm run dev:down && npm run dev",
     "logs:frontend": "docker-compose -f docker-compose.dev.yml logs -f frontend",
     "logs:backend": "docker-compose -f docker-compose.dev.yml logs -f backend",
-    "logs:agent": "docker-compose -f docker-compose.dev.yml logs -f agent",
     "shell:frontend": "docker-compose -f docker-compose.dev.yml exec frontend sh",
-    "shell:backend": "docker-compose -f docker-compose.dev.yml exec backend sh",
-    "shell:agent": "docker-compose -f docker-compose.dev.yml exec agent bash"
+    "shell:backend": "docker-compose -f docker-compose.dev.yml exec backend sh"
   },
   "keywords": [
     "ai-tutor",

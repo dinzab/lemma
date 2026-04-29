@@ -33,13 +33,15 @@ def chat_node(state: AgentState):
         )
         return {"messages": [response]}
     except Exception as exc:  # pragma: no cover - defensive
+        # Log full diagnostic context server-side, but never echo provider
+        # internals (model ids, base URLs, HTTP bodies, connection strings)
+        # back to the end user.
         logger.exception("chat_node failed: %s", exc)
         return {
             "messages": [
                 AIMessage(
                     content=(
-                        "⚠️ The tutor is temporarily unavailable: "
-                        f"{type(exc).__name__}: {exc}. "
+                        "⚠️ The tutor is temporarily unavailable. "
                         "Please retry in a moment, and if the problem persists "
                         "ask an administrator to verify the LLM credentials."
                     )

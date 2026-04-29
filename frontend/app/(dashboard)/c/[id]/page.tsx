@@ -137,7 +137,7 @@ export default function ChatThreadPage() {
 
           {isInitialized && messages.length === 0 && !isLoading && (
             <div className="text-center text-muted-foreground py-16">
-              <div className="h-12 w-12 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto mb-4">
+              <div className="h-12 w-12 rounded-xl bg-accent flex items-center justify-center mx-auto mb-4">
                 <Sparkles className="h-6 w-6 text-primary" />
               </div>
               <p className="text-lg font-semibold text-foreground">Start a conversation</p>
@@ -180,7 +180,7 @@ export default function ChatThreadPage() {
       {/* Input Area */}
       <div className="px-4 pb-4 pt-2 bg-gradient-to-t from-background via-background to-transparent">
         <div className="max-w-3xl mx-auto">
-          <div className="flex flex-col bg-card rounded-2xl border border-border/60 shadow-sm focus-within:border-primary/30 focus-within:shadow-md transition-all overflow-hidden">
+          <div className="flex flex-col bg-card rounded-xl border border-border shadow-sm focus-within:shadow-md transition-all overflow-hidden">
             <Textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}

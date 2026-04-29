@@ -85,7 +85,7 @@ export default function SignupPage() {
                 <div className="mt-1.5">
                   <Input
                     autoComplete="name"
-                    className="h-11 rounded-xl border-border bg-card px-4 text-sm placeholder:text-muted-foreground/50 focus-visible:ring-primary"
+                    className="h-11 rounded-lg border-border bg-card px-4 text-sm placeholder:text-muted-foreground/50 focus-visible:ring-primary"
                     id="fullName"
                     placeholder="Enter your full name"
                     type="text"
@@ -104,7 +104,7 @@ export default function SignupPage() {
                 <div className="mt-1.5">
                   <Input
                     autoComplete="email"
-                    className="h-11 rounded-xl border-border bg-card px-4 text-sm placeholder:text-muted-foreground/50 focus-visible:ring-primary"
+                    className="h-11 rounded-lg border-border bg-card px-4 text-sm placeholder:text-muted-foreground/50 focus-visible:ring-primary"
                     id="email"
                     placeholder="you@example.com"
                     type="email"
@@ -124,7 +124,7 @@ export default function SignupPage() {
                   <div className="relative mt-1.5">
                     <Input
                       autoComplete="new-password"
-                      className="h-11 rounded-xl border-border bg-card px-4 pr-10 text-sm placeholder:text-muted-foreground/50 focus-visible:ring-primary"
+                      className="h-11 rounded-lg border-border bg-card px-4 pr-10 text-sm placeholder:text-muted-foreground/50 focus-visible:ring-primary"
                       id="password"
                       placeholder="Create a password"
                       type={showPassword ? "text" : "password"}
@@ -150,7 +150,7 @@ export default function SignupPage() {
                   <div className="mt-1.5">
                     <Input
                       autoComplete="new-password"
-                      className="h-11 rounded-xl border-border bg-card px-4 text-sm placeholder:text-muted-foreground/50 focus-visible:ring-primary"
+                      className="h-11 rounded-lg border-border bg-card px-4 text-sm placeholder:text-muted-foreground/50 focus-visible:ring-primary"
                       id="confirm-password"
                       placeholder="Confirm your password"
                       type="password"
@@ -164,7 +164,7 @@ export default function SignupPage() {
               </div>
 
               <Button
-                className="w-full h-11 rounded-xl text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90"
+                className="w-full h-11 rounded-lg text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90"
                 type="submit"
                 disabled={isPending || !isValid}
               >
@@ -191,7 +191,7 @@ export default function SignupPage() {
             </div>
 
             <button
-              className="inline-flex w-full items-center justify-center rounded-xl border border-border bg-card h-11 px-4 text-sm font-medium shadow-sm transition-colors hover:bg-accent"
+              className="inline-flex w-full items-center justify-center rounded-lg border border-border bg-card h-11 px-4 text-sm font-medium shadow-sm transition-colors hover:bg-accent"
               onClick={() => signInWithGoogle()}
               type="button"
             >

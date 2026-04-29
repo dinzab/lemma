@@ -80,7 +80,7 @@ export default function LoginPage() {
                 </Label>
                 <Input
                   autoComplete="email"
-                  className="h-11 rounded-xl border-border bg-card px-4 text-sm placeholder:text-muted-foreground/50 focus-visible:ring-primary"
+                  className="h-11 rounded-lg border-border bg-card px-4 text-sm placeholder:text-muted-foreground/50 focus-visible:ring-primary"
                   id="email"
                   placeholder="you@example.com"
                   type="email"
@@ -103,7 +103,7 @@ export default function LoginPage() {
                 <div className="relative">
                   <Input
                     autoComplete="current-password"
-                    className="h-11 rounded-xl border-border bg-card px-4 pr-10 text-sm placeholder:text-muted-foreground/50 focus-visible:ring-primary"
+                    className="h-11 rounded-lg border-border bg-card px-4 pr-10 text-sm placeholder:text-muted-foreground/50 focus-visible:ring-primary"
                     id="password"
                     placeholder="Enter your password"
                     type={showPassword ? "text" : "password"}
@@ -123,7 +123,7 @@ export default function LoginPage() {
               </div>
 
               <Button
-                className="w-full h-11 rounded-xl text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90"
+                className="w-full h-11 rounded-lg text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90"
                 type="submit"
                 disabled={isPending || !isValid}
               >
@@ -150,7 +150,7 @@ export default function LoginPage() {
             </div>
 
             <button
-              className="inline-flex w-full items-center justify-center rounded-xl border border-border bg-card h-11 px-4 text-sm font-medium shadow-sm transition-colors hover:bg-accent"
+              className="inline-flex w-full items-center justify-center rounded-lg border border-border bg-card h-11 px-4 text-sm font-medium shadow-sm transition-colors hover:bg-accent"
               onClick={() => signInWithGoogle()}
               type="button"
             >

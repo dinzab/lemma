@@ -108,7 +108,7 @@ const SidebarContent = ({ setIsSidebarOpen }: SidebarContentProps) => {
       {/* New Chat Button */}
       <div className="px-2 pt-5">
         <Link href="/new">
-          <Button className="w-full justify-center gap-2 rounded-lg h-9 text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm">
+          <Button className="w-full justify-center gap-2 rounded-lg h-9 text-sm font-semibold bg-secondary text-secondary-foreground hover:bg-secondary/90 shadow-sm">
             <Plus className="h-4 w-4" />
             New Chat
           </Button>

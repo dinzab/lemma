@@ -6,7 +6,7 @@ import { useTheme } from "next-themes";
 import {
   Moon,
   Sun,
-  ArrowRight,
+  ArrowUpRight,
   BookOpen,
   Brain,
   MessageSquare,
@@ -15,6 +15,7 @@ import {
   Zap,
   GraduationCap,
   Star,
+  ChevronRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -28,26 +29,26 @@ export default function Home() {
 
   return (
     <div className="relative flex min-h-screen w-full flex-col bg-background text-foreground">
-      {/* Header */}
-      <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-background/80 backdrop-blur-md">
+      {/* Header — matches Orion: 64px, transparent bg, blur */}
+      <header className="sticky top-0 z-50 w-full bg-background/80 backdrop-blur-md">
         <div className="container mx-auto flex h-16 items-center justify-between px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2.5">
             <div className="bg-primary rounded-lg p-1.5">
               <GraduationCap className="h-5 w-5 text-primary-foreground" />
             </div>
-            <span className="text-lg font-bold font-body">BacPrep AI</span>
+            <span className="text-xl font-semibold">BacPrep AI</span>
           </div>
-          <nav className="hidden items-center gap-8 md:flex">
-            <a className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground" href="#features">
+          <nav className="hidden items-center gap-6 md:flex">
+            <a className="text-base font-medium text-muted-foreground transition-colors hover:text-foreground" href="#features">
               Features
             </a>
-            <a className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground" href="#how-it-works">
+            <a className="text-base font-medium text-muted-foreground transition-colors hover:text-foreground" href="#how-it-works">
               How it Works
             </a>
-            <a className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground" href="#testimonials">
+            <a className="text-base font-medium text-muted-foreground transition-colors hover:text-foreground" href="#testimonials">
               Testimonials
             </a>
-            <Link className="text-sm font-medium text-muted-foreground transition-colors hover:text-foreground" href="/login">
+            <Link className="text-base font-medium text-muted-foreground transition-colors hover:text-foreground" href="/login">
               Login
             </Link>
           </nav>
@@ -55,16 +56,15 @@ export default function Home() {
             <Button
               variant="ghost"
               size="icon"
-              className="h-9 w-9 rounded-full"
+              className="h-10 w-10 rounded-lg"
               onClick={() => mounted && setTheme(theme === "dark" ? "light" : "dark")}
             >
-              {mounted && theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+              {mounted && theme === "dark" ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
               <span className="sr-only">Toggle theme</span>
             </Button>
             <Link href="/signup">
-              <Button className="rounded-full px-5 h-9 text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90">
-                Get Started
-                <ArrowRight className="ml-1.5 h-4 w-4" />
+              <Button className="h-10 px-6 text-base font-medium rounded-lg bg-secondary text-secondary-foreground hover:bg-secondary/90">
+                Sign up
               </Button>
             </Link>
           </div>
@@ -72,56 +72,61 @@ export default function Home() {
       </header>
 
       <main className="flex-grow">
-        {/* Hero Section */}
+        {/* Hero Section — matches Orion layout */}
         <section className="relative overflow-hidden">
-          <div className="absolute inset-0 bg-gradient-to-b from-primary/5 via-transparent to-transparent" />
-          <div className="container relative mx-auto px-4 pt-20 pb-24 sm:px-6 lg:px-8 lg:pt-28 lg:pb-32">
-            <div className="flex flex-col items-center gap-8 text-center max-w-4xl mx-auto">
-              <div className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-4 py-1.5">
-                <Sparkles className="h-3.5 w-3.5 text-primary" />
-                <span className="text-xs font-semibold text-primary">AI-Powered Tutoring for Bac Students</span>
+          <div className="container mx-auto px-4 pt-16 pb-20 sm:px-6 lg:px-8 lg:pt-24 lg:pb-28">
+            <div className="flex flex-col items-center gap-6 text-center max-w-4xl mx-auto">
+              {/* Badge pill — matches Orion style */}
+              <div className="inline-flex items-center gap-2 rounded-full border border-border bg-accent px-3 py-1">
+                <span className="text-xs font-semibold text-primary">🔥 New</span>
+                <span className="text-xs font-medium text-foreground">Introducing AI Tutor</span>
               </div>
 
-              <h1 className="text-4xl font-bold leading-tight tracking-tight text-foreground sm:text-5xl md:text-6xl lg:text-7xl">
-                Study smarter,{" "}
-                <span className="text-primary">ace your Bac</span>
+              <h1 className="text-4xl font-semibold leading-tight text-foreground sm:text-5xl lg:text-6xl">
+                Study with AI tutor{" "}
+                <br className="hidden sm:block" />
+                that helps you ace{" "}
+                <span className="text-primary">your Bac</span>
               </h1>
 
-              <p className="max-w-2xl text-base text-muted-foreground md:text-lg leading-relaxed">
-                Your personal AI tutor that adapts to your learning style. Get instant explanations, 
-                practice exams, and structured summaries tailored to the Tunisian Baccalaureate curriculum.
+              <p className="max-w-3xl text-lg text-muted-foreground md:text-xl leading-relaxed">
+                Get instant explanations, practice with past exams, and receive structured 
+                summaries tailored to the Tunisian Baccalaureate curriculum.
               </p>
 
-              <div className="flex flex-col sm:flex-row items-center gap-4 pt-2">
+              <div className="flex flex-col sm:flex-row items-center gap-3 pt-2">
                 <Link href="/signup">
-                  <Button size="lg" className="rounded-full px-8 h-12 text-base font-semibold bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20">
-                    Start Studying Free
-                    <ArrowRight className="ml-2 h-5 w-5" />
+                  <Button className="h-10 px-6 text-base font-medium rounded-lg bg-primary text-primary-foreground hover:bg-primary/90">
+                    <ArrowUpRight className="mr-2 h-4 w-4" />
+                    Get Started
                   </Button>
                 </Link>
-                <Link href="/login">
-                  <Button variant="outline" size="lg" className="rounded-full px-8 h-12 text-base font-semibold border-border/60 hover:bg-accent">
-                    I have an account
+                <Link href="#features">
+                  <Button variant="outline" className="h-10 px-6 text-base font-medium rounded-lg border-border bg-secondary text-secondary-foreground hover:bg-secondary/90">
+                    <Sparkles className="mr-2 h-4 w-4" />
+                    View Features
                   </Button>
                 </Link>
               </div>
 
+              {/* Social proof — matches Orion style */}
               <div className="flex items-center gap-6 pt-4 text-sm text-muted-foreground">
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-2">
                   <div className="flex -space-x-2">
-                    {[1, 2, 3, 4].map((i) => (
-                      <div key={i} className="h-7 w-7 rounded-full border-2 border-background bg-primary/20 flex items-center justify-center">
-                        <span className="text-[10px] font-bold text-primary">{String.fromCharCode(64 + i)}</span>
+                    {["A", "S", "Y", "M"].map((letter, i) => (
+                      <div key={i} className="h-8 w-8 rounded-full border-2 border-background bg-accent flex items-center justify-center">
+                        <span className="text-xs font-bold text-accent-foreground">{letter}</span>
                       </div>
                     ))}
                   </div>
-                  <span className="font-medium">10K+ students</span>
+                  <span className="font-medium">10K+ Students</span>
                 </div>
+                <div className="h-4 w-px bg-border" />
                 <div className="flex items-center gap-1">
                   {[1, 2, 3, 4, 5].map((i) => (
-                    <Star key={i} className="h-3.5 w-3.5 fill-primary text-primary" />
+                    <Star key={i} className={`h-4 w-4 ${i <= 4 ? "fill-secondary text-secondary" : "fill-secondary/40 text-secondary/40"}`} />
                   ))}
-                  <span className="ml-1 font-medium">4.8</span>
+                  <span className="ml-1 font-medium">4.8 Rating</span>
                 </div>
               </div>
             </div>
@@ -129,34 +134,31 @@ export default function Home() {
         </section>
 
         {/* Features Section */}
-        <section id="features" className="py-20 lg:py-28">
+        <section id="features" className="py-20 lg:py-24">
           <div className="container mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="text-center mb-16">
-              <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">
-                Everything you need to{" "}
-                <span className="text-primary">succeed</span>
-              </h2>
-              <p className="mt-4 max-w-2xl mx-auto text-muted-foreground">
-                Built specifically for Tunisian Baccalaureate students with AI that understands your curriculum.
+            <div className="mb-16">
+              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-4">Features</p>
+              <p className="max-w-2xl text-lg text-muted-foreground">
+                Boost your grades with an AI tutor that eliminates confusion and streamlines your exam preparation.
               </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
               {[
                 {
                   icon: Brain,
                   title: "Adaptive AI Tutoring",
-                  description: "Get personalized explanations that adapt to your learning style and pace. The AI identifies gaps and reinforces weak areas.",
+                  description: "Personalized explanations that adapt to your learning style and pace. The AI identifies gaps and reinforces weak areas.",
                 },
                 {
                   icon: BookOpen,
                   title: "Exam Preparation",
-                  description: "Practice with past exam questions, get instant feedback, and track your progress across all subjects.",
+                  description: "Practice with past Baccalaureate questions, get instant feedback, and track your progress across all subjects.",
                 },
                 {
                   icon: MessageSquare,
                   title: "Interactive Chat",
-                  description: "Ask questions naturally in Arabic, French, or English. Get detailed, step-by-step explanations.",
+                  description: "Ask questions naturally in Arabic, French, or English. Get detailed, step-by-step explanations instantly.",
                 },
                 {
                   icon: Target,
@@ -176,12 +178,12 @@ export default function Home() {
               ].map((feature, i) => (
                 <div
                   key={i}
-                  className="group relative rounded-2xl border border-border/60 bg-card p-6 transition-all hover:border-primary/30 hover:shadow-lg hover:shadow-primary/5"
+                  className="group rounded-xl border border-border bg-card p-6 transition-all hover:shadow-md"
                 >
-                  <div className="mb-4 inline-flex rounded-xl bg-primary/10 p-3">
-                    <feature.icon className="h-6 w-6 text-primary" />
+                  <div className="mb-4 inline-flex rounded-lg bg-accent p-2.5">
+                    <feature.icon className="h-5 w-5 text-primary" />
                   </div>
-                  <h3 className="mb-2 text-lg font-semibold">{feature.title}</h3>
+                  <h3 className="mb-2 text-base font-semibold">{feature.title}</h3>
                   <p className="text-sm text-muted-foreground leading-relaxed">{feature.description}</p>
                 </div>
               ))}
@@ -190,40 +192,38 @@ export default function Home() {
         </section>
 
         {/* How it Works */}
-        <section id="how-it-works" className="py-20 lg:py-28 bg-muted/30">
+        <section id="how-it-works" className="py-20 lg:py-24">
           <div className="container mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="text-center mb-16">
-              <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">
-                How it works
-              </h2>
-              <p className="mt-4 max-w-2xl mx-auto text-muted-foreground">
-                Get started in minutes. No complicated setup required.
+            <div className="mb-16">
+              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-4">How it works</p>
+              <p className="max-w-2xl text-lg text-muted-foreground">
+                Here&apos;s a quick look at how the AI tutor effectively helps you study.
               </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-4xl mx-auto">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-5xl">
               {[
                 {
                   step: "01",
-                  title: "Create your account",
-                  description: "Sign up for free and tell us your section and subjects. We personalize everything from the start.",
+                  title: "Describe what you need",
+                  description: "Tell the tutor what you want to study — from daily summaries to exam practice — and it personalizes everything from the start.",
                 },
                 {
                   step: "02",
                   title: "Ask anything",
-                  description: "Type your question in any language. Our AI tutor breaks down complex topics into clear, digestible explanations.",
+                  description: "Type your question in any language. The AI tutor breaks down complex topics into clear, digestible explanations with examples.",
                 },
                 {
                   step: "03",
-                  title: "Master your subjects",
-                  description: "Practice with targeted exercises, review summaries, and track your improvement over time.",
+                  title: "Review and master",
+                  description: "Every answer is transparent. Practice with exercises, review summaries, and track your improvement over time.",
                 },
               ].map((item, i) => (
-                <div key={i} className="relative text-center">
-                  <div className="mb-6 inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground text-lg font-bold">
+                <div key={i} className="relative">
+                  <div className="mb-5 inline-flex h-12 w-12 items-center justify-center rounded-xl bg-primary text-primary-foreground text-sm font-bold">
                     {item.step}
                   </div>
-                  <h3 className="mb-3 text-lg font-semibold">{item.title}</h3>
+                  <h3 className="mb-3 text-base font-semibold">{item.title}</h3>
                   <p className="text-sm text-muted-foreground leading-relaxed">{item.description}</p>
                 </div>
               ))}
@@ -232,26 +232,35 @@ export default function Home() {
         </section>
 
         {/* Testimonials */}
-        <section id="testimonials" className="py-20 lg:py-28">
+        <section id="testimonials" className="py-20 lg:py-24">
           <div className="container mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="text-center mb-16">
-              <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">
-                Loved by students
-              </h2>
-              <p className="mt-4 max-w-2xl mx-auto text-muted-foreground">
-                Join thousands of students who improved their grades with BacPrep AI.
+            <div className="mb-16">
+              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-4">Testimonials</p>
+              <p className="max-w-2xl text-lg text-muted-foreground">
+                Real experiences from students who improved their grades with AI tutoring.
               </p>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
+            {/* Featured testimonial */}
+            <div className="rounded-xl border border-border bg-card p-8 md:p-12 mb-8 max-w-4xl">
+              <p className="text-xl md:text-2xl font-medium leading-relaxed mb-8">
+                &ldquo;BacPrep AI completely transformed how I prepare for exams. What used to take hours of searching through notes now happens in minutes, and I&apos;ve never felt more confident going into my Bac.&rdquo;
+              </p>
+              <div className="flex items-center gap-3">
+                <div className="h-10 w-10 rounded-full bg-accent flex items-center justify-center">
+                  <span className="text-sm font-bold text-accent-foreground">AB</span>
+                </div>
+                <div>
+                  <p className="text-sm font-semibold">Amira B.</p>
+                  <p className="text-sm text-muted-foreground">Sciences Section, Tunis</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5 max-w-4xl">
               {[
                 {
-                  quote: "BacPrep AI helped me understand physics concepts I struggled with for months. I went from 10/20 to 16/20 in my Bac exam.",
-                  name: "Amira B.",
-                  detail: "Sciences Section, Tunis",
-                },
-                {
-                  quote: "The exam prep mode is incredible. It gives you questions just like the real Bac and explains every answer step by step.",
+                  quote: "The exam prep mode gives you questions just like the real Bac and explains every answer step by step. My score went from 10 to 16.",
                   name: "Youssef M.",
                   detail: "Maths Section, Sfax",
                 },
@@ -260,19 +269,24 @@ export default function Home() {
                   name: "Salma K.",
                   detail: "Lettres Section, Sousse",
                 },
+                {
+                  quote: "Having an AI tutor that speaks Arabic and French is a game-changer. It understands exactly what I need for my curriculum.",
+                  name: "Mohamed T.",
+                  detail: "Sciences Section, Sfax",
+                },
               ].map((testimonial, i) => (
-                <div key={i} className="rounded-2xl border border-border/60 bg-card p-6">
-                  <div className="flex gap-1 mb-4">
+                <div key={i} className="rounded-xl border border-border bg-card p-5">
+                  <div className="flex gap-1 mb-3">
                     {[1, 2, 3, 4, 5].map((s) => (
-                      <Star key={s} className="h-4 w-4 fill-primary text-primary" />
+                      <Star key={s} className="h-3.5 w-3.5 fill-secondary text-secondary" />
                     ))}
                   </div>
-                  <p className="text-sm text-foreground/90 leading-relaxed mb-6">
+                  <p className="text-sm text-foreground/90 leading-relaxed mb-5">
                     &ldquo;{testimonial.quote}&rdquo;
                   </p>
                   <div className="flex items-center gap-3">
-                    <div className="h-9 w-9 rounded-full bg-primary/15 flex items-center justify-center">
-                      <span className="text-xs font-bold text-primary">{testimonial.name[0]}</span>
+                    <div className="h-8 w-8 rounded-full bg-accent flex items-center justify-center">
+                      <span className="text-[10px] font-bold text-accent-foreground">{testimonial.name.split(' ').map(n => n[0]).join('')}</span>
                     </div>
                     <div>
                       <p className="text-sm font-semibold">{testimonial.name}</p>
@@ -286,20 +300,27 @@ export default function Home() {
         </section>
 
         {/* CTA Section */}
-        <section className="py-20 lg:py-28">
+        <section className="py-20 lg:py-24">
           <div className="container mx-auto px-4 sm:px-6 lg:px-8">
-            <div className="relative overflow-hidden rounded-3xl bg-primary/5 border border-primary/10 px-8 py-16 text-center sm:px-16">
-              <div className="relative z-10 max-w-2xl mx-auto">
-                <h2 className="text-3xl font-bold tracking-tight sm:text-4xl mb-4">
-                  Ready to boost your grades?
-                </h2>
-                <p className="text-muted-foreground mb-8">
-                  Start studying with AI today. It&apos;s free to get started, no credit card required.
-                </p>
+            <div className="rounded-xl border border-border bg-card p-8 md:p-14 max-w-4xl">
+              <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-4">Get started</p>
+              <h2 className="text-2xl md:text-3xl font-semibold mb-4">
+                Ready to boost your grades?
+              </h2>
+              <p className="text-muted-foreground mb-8 max-w-lg">
+                Start studying with AI today. It&apos;s free to get started, no credit card required.
+              </p>
+              <div className="flex flex-col sm:flex-row gap-3">
                 <Link href="/signup">
-                  <Button size="lg" className="rounded-full px-8 h-12 text-base font-semibold bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20">
-                    Get Started for Free
-                    <ArrowRight className="ml-2 h-5 w-5" />
+                  <Button className="h-10 px-6 text-base font-medium rounded-lg bg-primary text-primary-foreground hover:bg-primary/90">
+                    <ArrowUpRight className="mr-2 h-4 w-4" />
+                    Get Started
+                  </Button>
+                </Link>
+                <Link href="/login">
+                  <Button variant="outline" className="h-10 px-6 text-base font-medium rounded-lg border-border hover:bg-accent">
+                    <ChevronRight className="mr-2 h-4 w-4" />
+                    Learn More
                   </Button>
                 </Link>
               </div>
@@ -309,10 +330,10 @@ export default function Home() {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-border/40 py-8">
+      <footer className="border-t border-border py-8">
         <div className="container mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-            <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2.5">
               <div className="bg-primary rounded-lg p-1.5">
                 <GraduationCap className="h-4 w-4 text-primary-foreground" />
               </div>

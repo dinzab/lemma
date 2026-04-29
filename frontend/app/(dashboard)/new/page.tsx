@@ -103,7 +103,7 @@ export default function NewChatPage() {
 
           {/* Input Area */}
           <div className="w-full max-w-xl">
-            <div className="relative flex flex-col bg-card rounded-2xl border border-border/60 shadow-sm focus-within:border-primary/30 focus-within:shadow-md transition-all overflow-hidden">
+            <div className="relative flex flex-col bg-card rounded-xl border border-border shadow-sm focus-within:shadow-md transition-all overflow-hidden">
               <Textarea
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
@@ -185,9 +185,9 @@ export default function NewChatPage() {
                     key={item.title}
                     onClick={() => handleSuggestionClick(item.title)}
                     disabled={isLoading}
-                    className="flex gap-3 p-4 rounded-xl border border-border/60 bg-card text-left hover:border-primary/30 hover:shadow-sm transition-all group disabled:opacity-50"
+                    className="flex gap-3 p-4 rounded-xl border border-border bg-card text-left hover:shadow-md transition-all group disabled:opacity-50"
                   >
-                    <div className="shrink-0 h-9 w-9 rounded-lg bg-primary/10 flex items-center justify-center group-hover:bg-primary/15 transition-colors">
+                    <div className="shrink-0 h-9 w-9 rounded-lg bg-accent flex items-center justify-center group-hover:bg-accent/80 transition-colors">
                       <Icon className="h-4 w-4 text-primary" />
                     </div>
                     <div className="min-w-0">

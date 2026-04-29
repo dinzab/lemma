@@ -148,7 +148,7 @@ export function useLemmaChat({
   const sendText = useCallback(
     (text: string) => {
       if (!text.trim()) return;
-      sendMessage({ text });
+      return sendMessage({ text });
     },
     [sendMessage],
   );
@@ -162,9 +162,10 @@ export function useLemmaChat({
 
   const loadOlder = useCallback(async () => {
     if (!olderCursor) return;
+    const base = historyApi(threadId).replace(/[?&]before=[^&]*/g, "");
     const url =
-      historyApi(threadId).replace(/[?&]before=[^&]*/g, "") +
-      (historyApi(threadId).includes("?") ? "&" : "?") +
+      base +
+      (base.includes("?") ? "&" : "?") +
       `before=${encodeURIComponent(olderCursor)}`;
     const res = await fetch(url, { credentials: "include" });
     if (!res.ok) return;

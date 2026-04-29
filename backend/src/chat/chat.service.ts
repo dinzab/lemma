@@ -53,6 +53,11 @@ export class ChatService {
         // can correlate streamed deltas to a single message bubble.
         const turnId = randomUUID();
         let textOpen = false;
+        // Tracks whether `messages`-mode already streamed text for this turn.
+        // When true we skip emitting the same content again from the
+        // `updates`-mode AIMessage at the end of the node, which carries the
+        // full reply and would otherwise duplicate every assistant message.
+        let textStreamedViaMessages = false;
         const openTextOnce = () => {
           if (!textOpen) {
             writer.write({ type: 'start' });
@@ -71,6 +76,7 @@ export class ChatService {
                 const delta = chunkToText(chunk);
                 if (delta) {
                   openTextOnce();
+                  textStreamedViaMessages = true;
                   writer.write({
                     type: 'text-delta',
                     id: turnId,
@@ -111,13 +117,17 @@ export class ChatService {
                       output: safeParse(m.content as string),
                       dynamic: true,
                     });
-                  } else if (m instanceof AIMessage) {
+                  } else if (
+                    m instanceof AIMessage &&
+                    !textStreamedViaMessages
+                  ) {
                     // AIMessage without tool_calls — covers the chat node's
                     // fallback error reply and any non-streamed assistant
-                    // turn. The `messages` stream mode only carries chunks
-                    // emitted by an actual LLM call, so without this branch
-                    // these messages would be silently dropped and the
-                    // client would see a `finish` with no text.
+                    // turn. We only emit it when nothing came through
+                    // `messages` mode for this turn; otherwise LangGraph
+                    // would deliver the same content twice (incremental
+                    // chunks from the LLM stream + the full message in the
+                    // node-level state update).
                     const text =
                       typeof m.content === 'string'
                         ? m.content

@@ -132,8 +132,14 @@ export class CheckpointerService implements OnModuleInit, OnModuleDestroy {
 
     const startInclusive = Math.max(0, endExclusive - limit);
     const page = allMessages.slice(startInclusive, endExclusive);
-    const nextCursor =
-      startInclusive > 0 && page.length > 0 ? getMessageId(page[0]) : null;
+    // Coerce empty-string ids to null. An id-less first message in the page
+    // would otherwise produce a falsy-but-non-null cursor: the client treats
+    // it as "more pages", echoes it back as `before=""`, the `if (opts.before)`
+    // guard sees a falsy value and ignores it — and we'd hand back the same
+    // latest page forever.
+    const headId =
+      startInclusive > 0 && page.length > 0 ? getMessageId(page[0]) : '';
+    const nextCursor = headId || null;
 
     return { messages: page, nextCursor, total };
   }

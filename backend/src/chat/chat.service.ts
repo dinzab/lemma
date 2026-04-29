@@ -111,17 +111,45 @@ export class ChatService {
                       output: safeParse(m.content as string),
                       dynamic: true,
                     });
+                  } else if (m instanceof AIMessage) {
+                    // AIMessage without tool_calls — covers the chat node's
+                    // fallback error reply and any non-streamed assistant
+                    // turn. The `messages` stream mode only carries chunks
+                    // emitted by an actual LLM call, so without this branch
+                    // these messages would be silently dropped and the
+                    // client would see a `finish` with no text.
+                    const text =
+                      typeof m.content === 'string'
+                        ? m.content
+                        : JSON.stringify(m.content);
+                    if (text) {
+                      openTextOnce();
+                      writer.write({
+                        type: 'text-delta',
+                        id: turnId,
+                        delta: text,
+                      });
+                    }
                   }
                 }
               }
             }
           }
-        } finally {
+        } catch (err) {
+          // Close the text part if it was opened, but skip `finish` so the
+          // SDK's `onError` handler can surface the failure to the client
+          // instead of seeing an apparently successful run.
           if (textOpen) {
             writer.write({ type: 'text-end', id: turnId });
           }
-          writer.write({ type: 'finish' });
+          throw err;
         }
+
+        // Success path only — error path returns above via `throw`.
+        if (textOpen) {
+          writer.write({ type: 'text-end', id: turnId });
+        }
+        writer.write({ type: 'finish' });
       },
       onError: (err) => {
         this.logger.error(`stream execute failed: ${String(err)}`);

@@ -1,0 +1,133 @@
+# Railway hosting
+
+This repository is configured to deploy to [Railway](https://railway.com) as a
+two-service project (Next.js frontend + NestJS backend) backed by a managed
+Postgres add-on.
+
+## Layout
+
+```
+lemma/
+├── frontend/
+│   ├── Dockerfile.prod    ← used by Railway build
+│   └── railway.json       ← Railway service config (frontend)
+├── backend/
+│   ├── Dockerfile.prod    ← used by Railway build
+│   └── railway.json       ← Railway service config (backend)
+└── RAILWAY.md             ← this file
+```
+
+Each service is configured in Railway with **Root Directory** set to its
+folder (`frontend` or `backend`). Railway then picks up the corresponding
+`railway.json`, builds the production Dockerfile, runs the start command, and
+hits the healthcheck endpoint.
+
+| Service  | Port | Healthcheck    | Start command        |
+| -------- | ---- | -------------- | -------------------- |
+| frontend | 3000 | `/api/health`  | `node server.js`     |
+| backend  | 5000 | `/health`      | `npm run start:prod` |
+
+`PORT` is injected by Railway and respected by both Dockerfiles / `main.ts`.
+
+## Required environment variables
+
+Set these in Railway (Service → Variables). Variables are exposed both at
+build time (as Docker build args, when declared with `ARG`) and at runtime.
+
+### `frontend`
+
+| Variable                          | Required | Notes                                                                             |
+| --------------------------------- | -------- | --------------------------------------------------------------------------------- |
+| `NEXT_PUBLIC_SUPABASE_URL`        | yes      | Baked into the build via `Dockerfile.prod`. Supabase project URL.                 |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY`   | yes      | Baked into the build. Supabase anon key.                                          |
+| `NEXT_PUBLIC_SITE_URL`            | yes      | Public URL of the frontend, e.g. `https://${{RAILWAY_PUBLIC_DOMAIN}}`.            |
+| `BACKEND_URL`                     | yes      | Internal backend URL, e.g. `http://${{backend.RAILWAY_PRIVATE_DOMAIN}}:5000`.     |
+| `NODE_ENV`                        | no       | Defaults to `production` in Dockerfile.                                            |
+
+### `backend`
+
+| Variable                          | Required | Notes                                                                             |
+| --------------------------------- | -------- | --------------------------------------------------------------------------------- |
+| `SUPABASE_URL`                    | yes      | **Read at boot** — backend will not start without it.                             |
+| `SUPABASE_ANON_KEY`               | yes      | **Read at boot.**                                                                  |
+| `SUPABASE_SERVICE_ROLE_KEY`       | yes      | **Read at boot.** Server-side service role key.                                   |
+| `FRONTEND_URL`                    | yes      | CORS allow-list, e.g. `https://${{frontend.RAILWAY_PUBLIC_DOMAIN}}`.              |
+| `POSTGRES_URI`                    | no       | Falls back to `MemorySaver`. Use `${{Postgres.DATABASE_URL}}` to wire the add-on. |
+| `OPENAI_API_KEY`                  | chat     | Required only when chat is exercised (lazy-thrown).                               |
+| `OPENAI_MODEL_NAME`               | no       | Defaults to `gpt-4o-mini`.                                                         |
+| `EMBEDDING_MODEL`                 | no       | Optional embedding model override.                                                 |
+| `QDRANT_URL` / `QDRANT_API_KEY`   | no       | Optional vector store. Tools no-op when absent.                                   |
+| `QDRANT_COLLECTION_NAME`          | no       | Optional collection override.                                                      |
+| `NEO4J_URI` / `NEO4J_USERNAME` / `NEO4J_PASSWORD` | no | Optional knowledge graph. Tools no-op when absent.                |
+| `PORT`                            | auto     | Injected by Railway.                                                              |
+
+## First-time setup with the Railway CLI
+
+```bash
+# 1. Install
+npm i -g @railway/cli
+
+# 2. Authenticate (use an account token from https://railway.com/account/tokens)
+export RAILWAY_API_TOKEN=...
+
+# 3. Create a project
+railway init --name lemma
+
+# 4. Add Postgres
+railway add --database postgres
+
+# 5. Add the two services from this repo
+railway add --service frontend --variables NEXT_PUBLIC_SITE_URL='https://placeholder' \
+                                          BACKEND_URL='http://backend.railway.internal:5000' \
+                                          NEXT_PUBLIC_SUPABASE_URL='...' \
+                                          NEXT_PUBLIC_SUPABASE_ANON_KEY='...'
+railway add --service backend  --variables SUPABASE_URL='...' \
+                                          SUPABASE_ANON_KEY='...' \
+                                          SUPABASE_SERVICE_ROLE_KEY='...' \
+                                          FRONTEND_URL='https://placeholder' \
+                                          POSTGRES_URI='${{Postgres.DATABASE_URL}}'
+
+# 6. Set each service's Root Directory in the Railway dashboard:
+#    frontend → frontend
+#    backend  → backend
+#    (or via the CLI: railway service settings → Source → Root Directory)
+
+# 7. Deploy
+railway up --service frontend --detach
+railway up --service backend  --detach
+
+# 8. Generate public domains
+railway domain --service frontend
+railway domain --service backend
+```
+
+After `frontend` has a public domain, update `NEXT_PUBLIC_SITE_URL` and
+`FRONTEND_URL` (on `backend`) to that domain. After `backend` has a private
+domain, confirm `BACKEND_URL` on `frontend` matches it.
+
+## Subsequent deploys
+
+Pushing to `main` (or whichever branch is connected) triggers Railway's
+GitHub integration to build & roll out both services automatically.
+
+CLI alternative:
+
+```bash
+railway up --service frontend --detach   # from repo root
+railway up --service backend  --detach
+```
+
+## Notes / gotchas
+
+- **`Dockerfile*` is in `.dockerignore`.** That's fine — Railway loads the
+  Dockerfile *before* build context filtering, so the build still uses
+  `Dockerfile.prod`.
+- **Frontend build args.** `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`,
+  and `NEXT_PUBLIC_SITE_URL` must be set on the frontend service before the
+  first build, otherwise the bundle ships with empty values.
+- **Backend boots eagerly on Supabase.** `ConfigService.getOrThrow('SUPABASE_URL')`
+  runs in service constructors, so missing Supabase vars crash the deploy with
+  a stack trace — set them up front.
+- **Postgres is optional.** Without `POSTGRES_URI`, the LangGraph
+  checkpointer falls back to `MemorySaver` (state is lost on redeploy). Wire
+  `${{Postgres.DATABASE_URL}}` once Postgres is provisioned.

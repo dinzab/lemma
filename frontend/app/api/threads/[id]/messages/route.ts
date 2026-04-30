@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/utils/supabase/server';
+import { getAuthenticatedUser } from '@/utils/supabase/auth';
 
 const BACKEND_URL = process.env.BACKEND_URL || 'http://backend:5000';
 
@@ -15,15 +15,10 @@ export async function GET(
   context: { params: Promise<{ id: string }> },
 ) {
   try {
-    const supabase = await createClient();
-    const {
-      data: { session },
-      error: sessionError,
-    } = await supabase.auth.getSession();
-
-    if (sessionError || !session) {
+    const auth = await getAuthenticatedUser();
+    if (!auth.ok) {
       return NextResponse.json(
-        { error: 'Unauthorized', message: 'No active session.' },
+        { error: 'Unauthorized', message: auth.message },
         { status: 401 },
       );
     }
@@ -36,7 +31,7 @@ export async function GET(
       `${BACKEND_URL}/threads/${id}/messages${search ? `?${search}` : ''}`,
       {
         headers: {
-          Authorization: `Bearer ${session.access_token}`,
+          Authorization: `Bearer ${auth.accessToken}`,
         },
       },
     );

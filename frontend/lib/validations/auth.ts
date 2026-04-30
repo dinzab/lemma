@@ -5,10 +5,12 @@ export const loginSchema = z.object({
         .string()
         .trim()
         .min(1, { message: "Email is required" })
+        .max(254, { message: "Email is too long" })
         .email({ message: "Invalid email address" }),
     password: z
         .string()
-        .min(1, { message: "Password is required" }),
+        .min(1, { message: "Password is required" })
+        .max(128, { message: "Password must be less than 128 characters" }),
 });
 
 export const signupSchema = z.object({
@@ -16,16 +18,21 @@ export const signupSchema = z.object({
         .string()
         .trim()
         .min(2, { message: "Name must be at least 2 characters" })
-        .max(50, { message: "Name must be less than 50 characters" })
-        .regex(/^[a-zA-Z\s\-\']+$/, { message: "Name can only contain letters, spaces, hyphens, and apostrophes" }),
+        .max(80, { message: "Name must be less than 80 characters" })
+        // Accept any unicode letter so non-Latin scripts and accented Latin
+        // characters (e.g. José, محمد, 张伟) aren't rejected. Still excludes
+        // digits, punctuation other than space / hyphen / apostrophe.
+        .regex(/^[\p{L}\s'-]+$/u, { message: "Name can only contain letters, spaces, hyphens, and apostrophes" }),
     email: z
         .string()
         .trim()
         .min(1, { message: "Email is required" })
+        .max(254, { message: "Email is too long" })
         .email({ message: "Invalid email address" }),
     password: z
         .string()
         .min(8, { message: "Password must be at least 8 characters" })
+        .max(128, { message: "Password must be less than 128 characters" })
         .regex(/[A-Z]/, { message: "Password must contain at least one uppercase letter" })
         .regex(/[a-z]/, { message: "Password must contain at least one lowercase letter" })
         .regex(/[0-9]/, { message: "Password must contain at least one number" })

@@ -1,11 +1,30 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/utils/supabase/server'
 
+/**
+ * Returns true only when `target` is a same-site path safe for redirect.
+ *
+ * Rejects:
+ *  - absolute URLs (`https://evil.com/...`)
+ *  - protocol-relative (`//evil.com/...`)
+ *  - backslash variants browsers may resolve as protocol-relative (`/\evil`)
+ *  - anything not starting with `/`
+ *
+ * This prevents an attacker from crafting a phishing link like
+ * `/api/auth/callback?next=//evil.com` that bounces a logged-in user
+ * off-domain after the OAuth round-trip.
+ */
+function safeNextPath(target: string | null): string {
+    if (!target) return '/new'
+    if (!target.startsWith('/')) return '/new'
+    if (target.startsWith('//') || target.startsWith('/\\')) return '/new'
+    return target
+}
+
 export async function GET(request: Request) {
     const { searchParams, origin } = new URL(request.url)
     const code = searchParams.get('code')
-    // if "next" is in param, use it as the redirect URL
-    const next = searchParams.get('next') ?? '/new'
+    const next = safeNextPath(searchParams.get('next'))
 
     if (code) {
         const supabase = await createClient()

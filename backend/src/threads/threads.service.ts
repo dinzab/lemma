@@ -2,10 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { CreateThreadDto, ThreadResponseDto, ThreadsListResponseDto } from './dto';
-import {
-    ThreadNotFoundException,
-    ThreadAccessDeniedException,
-} from './exceptions/thread.exceptions';
+import { ThreadNotFoundException } from './exceptions/thread.exceptions';
 
 /**
  * Service for managing chat threads in Supabase
@@ -19,8 +16,9 @@ export class ThreadsService {
         const supabaseUrl = this.configService.getOrThrow<string>('SUPABASE_URL');
         const supabaseServiceKey = this.configService.getOrThrow<string>('SUPABASE_SERVICE_ROLE_KEY');
 
-        // Use service role key for server-side operations
-        // RLS policies still apply based on the user_id we pass
+        // Service role key BYPASSES Row Level Security entirely. Every query
+        // in this service MUST scope itself with `.eq('user_id', userId)`
+        // (or a similar explicit filter) — there is no RLS safety net.
         this.supabase = createClient(supabaseUrl, supabaseServiceKey);
     }
 
@@ -58,23 +56,21 @@ export class ThreadsService {
      * @param threadId - The thread ID to retrieve
      * @param userId - The authenticated user's ID for ownership check
      * @returns The thread if found and owned by user
-     * @throws ThreadNotFoundException if thread doesn't exist
-     * @throws ThreadAccessDeniedException if user doesn't own the thread
+     * @throws ThreadNotFoundException if thread doesn't exist OR caller doesn't own it
      */
     async getThread(threadId: string, userId: string): Promise<ThreadResponseDto> {
+        // Filter by both id AND user_id so a non-owner gets a flat 404 and
+        // doesn't learn whether the thread exists. Avoids leaking the
+        // existence of other users' thread IDs through the response code.
         const { data, error } = await this.supabase
             .from('threads')
             .select('id, title, user_id, created_at, updated_at')
             .eq('id', threadId)
+            .eq('user_id', userId)
             .single();
 
         if (error || !data) {
             throw new ThreadNotFoundException(threadId);
-        }
-
-        // Verify ownership
-        if (data.user_id !== userId) {
-            throw new ThreadAccessDeniedException();
         }
 
         return ThreadResponseDto.fromRecord(data);
@@ -126,8 +122,7 @@ export class ThreadsService {
      * 
      * @param threadId - The thread ID to delete
      * @param userId - The authenticated user's ID for ownership check
-     * @throws ThreadNotFoundException if thread doesn't exist
-     * @throws ThreadAccessDeniedException if user doesn't own the thread
+     * @throws ThreadNotFoundException if thread doesn't exist OR caller doesn't own it
      */
     async deleteThread(threadId: string, userId: string): Promise<void> {
         // First verify the thread exists and user owns it

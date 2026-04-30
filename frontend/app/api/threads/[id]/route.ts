@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/utils/supabase/server';
+import { getAuthenticatedUser } from '@/utils/supabase/auth';
 
 // Backend URL - only accessible within Docker network
 const BACKEND_URL = process.env.BACKEND_URL || 'http://backend:5000';
@@ -16,23 +16,20 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
     try {
         const { id: threadId } = await params;
 
-        const supabase = await createClient();
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-
-        if (sessionError || !session) {
+        const auth = await getAuthenticatedUser();
+        if (!auth.ok) {
             return NextResponse.json(
-                { error: 'Unauthorized', message: 'You must be logged in' },
-                { status: 401 }
+                { error: 'Unauthorized', message: auth.message },
+                { status: 401 },
             );
         }
 
         const response = await fetch(`${BACKEND_URL}/threads/${threadId}`, {
             headers: {
-                'Authorization': `Bearer ${session.access_token}`,
+                'Authorization': `Bearer ${auth.accessToken}`,
             },
         });
 
-        // Return null-like response for 404/403 so frontend can handle redirect
         if (response.status === 404 || response.status === 403) {
             return NextResponse.json(null, { status: response.status });
         }
@@ -61,20 +58,18 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
     try {
         const { id: threadId } = await params;
 
-        const supabase = await createClient();
-        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-
-        if (sessionError || !session) {
+        const auth = await getAuthenticatedUser();
+        if (!auth.ok) {
             return NextResponse.json(
-                { error: 'Unauthorized', message: 'You must be logged in' },
-                { status: 401 }
+                { error: 'Unauthorized', message: auth.message },
+                { status: 401 },
             );
         }
 
         const response = await fetch(`${BACKEND_URL}/threads/${threadId}`, {
             method: 'DELETE',
             headers: {
-                'Authorization': `Bearer ${session.access_token}`,
+                'Authorization': `Bearer ${auth.accessToken}`,
             },
         });
 

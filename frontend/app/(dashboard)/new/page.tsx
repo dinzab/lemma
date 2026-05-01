@@ -121,6 +121,16 @@ export default function NewChatPage() {
         </button>
       </div>
 
+      {/* Ambient backdrop */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 -z-10 overflow-hidden"
+      >
+        <div className="absolute left-1/2 top-[12%] h-[28rem] w-[28rem] -translate-x-1/2 rounded-full bg-primary/10 blur-3xl" />
+        <div className="absolute left-[15%] top-[55%] h-72 w-72 rounded-full bg-secondary/10 blur-3xl" />
+        <div className="absolute right-[10%] top-[65%] h-72 w-72 rounded-full bg-chart-3/10 blur-3xl" />
+      </div>
+
       <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col items-center justify-center gap-10 px-4 py-10 text-center sm:px-6 lg:px-8">
         {/* Hero */}
         <div className="flex flex-col items-center gap-4">

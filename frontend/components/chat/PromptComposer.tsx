@@ -155,8 +155,10 @@ export function PromptComposer({
                 size="icon"
                 aria-label="Send message"
                 className={cn(
-                  "h-9 w-9 rounded-full bg-primary text-primary-foreground shadow-sm shadow-primary/30 transition-all hover:bg-primary/90",
-                  sendDisabled && "cursor-not-allowed opacity-70",
+                  "h-9 w-9 rounded-full transition-all",
+                  trimmed && !isSubmitting
+                    ? "bg-primary text-primary-foreground shadow-sm shadow-primary/30 hover:bg-primary/90"
+                    : "cursor-not-allowed bg-muted text-muted-foreground/60",
                 )}
               >
                 {isSubmitting ? (

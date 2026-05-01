@@ -1,17 +1,21 @@
 "use client";
 
 import * as React from "react";
-import { ArrowUp, Loader2, Square, type LucideIcon } from "lucide-react";
+import {
+  ArrowUp,
+  Atom,
+  ChevronDown,
+  Image as ImageIcon,
+  Loader2,
+  Paperclip,
+  Square,
+  Telescope,
+  type LucideIcon,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
-
-export interface PromptComposerMode {
-  id: string;
-  label: string;
-  icon: LucideIcon;
-}
 
 interface PromptComposerProps {
   value: string;
@@ -22,44 +26,49 @@ interface PromptComposerProps {
   isStreaming?: boolean;
   isSubmitting?: boolean;
   disabled?: boolean;
-  modes?: PromptComposerMode[];
-  selectedModeId?: string;
-  onSelectMode?: (id: string) => void;
-  /** Show the soft animated aurora glow behind the card. */
-  showAura?: boolean;
   className?: string;
   textareaClassName?: string;
   rows?: number;
   autoFocus?: boolean;
 }
 
+interface ChipDefinition {
+  id: string;
+  label: string;
+  icon: LucideIcon;
+}
+
+const chips: ChipDefinition[] = [
+  { id: "reasoning", label: "Reasoning", icon: Atom },
+  { id: "deep-research", label: "Deep research", icon: Telescope },
+  { id: "image", label: "Image generation", icon: ImageIcon },
+];
+
 /**
  * Shared composer used on the empty `/new` page and inside an active chat.
- * Includes an animated aurora glow, an action chip row, and a prominent
- * send / stop button.
+ * Two-row layout: a textarea on top and an action bar below containing
+ * an attachment button, capability chips, a model selector, and a circular
+ * send/stop button.
+ *
+ * The chips and model selector are visual placeholders for now.
  */
 export function PromptComposer({
   value,
   onChange,
   onSubmit,
   onStop,
-  placeholder = "Ask BacPrep AI anything…",
+  placeholder = "What can I do for you?",
   isStreaming = false,
   isSubmitting = false,
   disabled = false,
-  modes,
-  selectedModeId,
-  onSelectMode,
-  showAura = true,
   className,
   textareaClassName,
-  rows = 1,
+  rows = 2,
   autoFocus = false,
 }: PromptComposerProps) {
   const trimmed = value.trim();
   const sendDisabled = !trimmed || isSubmitting || disabled;
   const showStop = isStreaming && typeof onStop === "function";
-  const isSelectable = typeof onSelectMode === "function";
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -76,30 +85,14 @@ export function PromptComposer({
 
   return (
     <div className={cn("relative w-full", className)}>
-      {showAura && (
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -inset-4 -z-10 rounded-[28px] opacity-70 blur-2xl"
-        >
-          <div className="absolute inset-x-10 top-0 h-24 rounded-full bg-primary/30 blur-3xl" />
-          <div className="absolute -bottom-2 left-1/4 h-24 w-1/2 rounded-full bg-secondary/25 blur-3xl" />
-          <div className="absolute -bottom-3 right-6 h-20 w-1/3 rounded-full bg-chart-3/20 blur-3xl" />
-        </div>
-      )}
-
       <div
         className={cn(
-          "group relative flex flex-col overflow-hidden rounded-2xl border border-border/70 bg-card/80 backdrop-blur",
-          "shadow-[0_18px_55px_-25px_rgba(0,0,0,0.45)] transition-all duration-300",
-          "focus-within:border-primary/50 focus-within:shadow-[0_25px_65px_-25px_rgba(0,0,0,0.55)]",
-          "focus-within:ring-1 focus-within:ring-primary/30",
+          "group relative flex flex-col overflow-hidden rounded-3xl border border-border/70 bg-card/95",
+          "shadow-[0_2px_0_0_rgba(0,0,0,0.02),0_8px_24px_-18px_rgba(0,0,0,0.25)]",
+          "transition-colors duration-200",
+          "focus-within:border-border focus-within:shadow-[0_2px_0_0_rgba(0,0,0,0.03),0_12px_32px_-18px_rgba(0,0,0,0.3)]",
         )}
       >
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/60 to-transparent opacity-60 transition-opacity group-focus-within:opacity-100"
-        />
-
         <Textarea
           value={value}
           onChange={(event) => onChange(event.target.value)}
@@ -109,66 +102,64 @@ export function PromptComposer({
           autoFocus={autoFocus}
           disabled={disabled || isSubmitting}
           className={cn(
-            "!min-h-14 w-full resize-none border-0 bg-transparent px-5 pb-2 pt-4 text-[15px] leading-relaxed shadow-none",
-            "placeholder:text-muted-foreground/60 focus-visible:ring-0 focus-visible:outline-none",
+            "!min-h-[60px] w-full resize-none border-0 bg-transparent px-5 pb-2 pt-5 text-[15px] leading-relaxed shadow-none",
+            "placeholder:text-muted-foreground/70 focus-visible:ring-0 focus-visible:outline-none",
             textareaClassName,
           )}
         />
 
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 bg-muted/30 px-3 py-2.5 sm:px-4">
+        <div className="flex flex-wrap items-center gap-2 px-3 pb-3 pt-2 sm:px-4">
+          <button
+            type="button"
+            aria-label="Attach file"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
+          >
+            <Paperclip className="h-4 w-4" />
+          </button>
+
           <div className="flex flex-wrap items-center gap-1.5">
-            {modes?.map((mode) => {
-              const Icon = mode.icon;
-              const isActive = selectedModeId === mode.id;
-              const baseClass =
-                "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition-all";
-
-              if (!isSelectable) {
-                return (
-                  <span
-                    key={mode.id}
-                    className={cn(
-                      baseClass,
-                      "border-border/70 bg-background/60 text-muted-foreground",
-                    )}
-                  >
-                    <Icon className="h-3.5 w-3.5" />
-                    {mode.label}
-                  </span>
-                );
-              }
-
+            {chips.map((chip) => {
+              const Icon = chip.icon;
               return (
                 <button
-                  key={mode.id}
+                  key={chip.id}
                   type="button"
-                  onClick={() => onSelectMode?.(mode.id)}
-                  aria-pressed={isActive}
                   className={cn(
-                    baseClass,
-                    "cursor-pointer hover:-translate-y-px active:translate-y-0",
-                    isActive
-                      ? "border-primary/40 bg-primary/15 text-primary shadow-sm shadow-primary/10"
-                      : "border-border/70 bg-background/70 text-muted-foreground hover:border-primary/30 hover:bg-primary/10 hover:text-primary",
+                    "inline-flex items-center gap-1.5 rounded-full border border-border/70 bg-background/80 px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors",
+                    "hover:border-border hover:bg-muted/70 hover:text-foreground",
                   )}
                 >
                   <Icon className="h-3.5 w-3.5" />
-                  {mode.label}
+                  {chip.label}
                 </button>
               );
             })}
           </div>
 
-          <div className="flex items-center gap-1.5">
+          <div className="ml-auto flex items-center gap-2">
+            <button
+              type="button"
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors",
+                "hover:bg-muted/70 hover:text-foreground",
+              )}
+            >
+              <span className="flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500/15">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+              </span>
+              <span>Lemma 1.0</span>
+              <ChevronDown className="h-3.5 w-3.5" />
+            </button>
+
             {showStop ? (
               <Button
                 type="button"
                 onClick={onStop}
                 size="icon"
                 aria-label="Stop generating"
-                className="h-10 w-10 rounded-full bg-primary text-primary-foreground shadow-md shadow-primary/30 hover:bg-primary/90"
+                className="h-9 w-9 rounded-full bg-foreground text-background shadow-sm hover:bg-foreground/90"
               >
-                <Square className="h-3.5 w-3.5 fill-current" />
+                <Square className="h-3 w-3 fill-current" />
               </Button>
             ) : (
               <Button
@@ -178,10 +169,10 @@ export function PromptComposer({
                 size="icon"
                 aria-label="Send message"
                 className={cn(
-                  "h-10 w-10 rounded-full transition-all",
+                  "h-9 w-9 rounded-full transition-all",
                   trimmed && !isSubmitting
-                    ? "bg-gradient-to-br from-primary to-chart-3 text-primary-foreground shadow-md shadow-primary/30 hover:scale-[1.04] hover:shadow-primary/40"
-                    : "cursor-not-allowed bg-muted text-muted-foreground/50",
+                    ? "bg-primary text-primary-foreground shadow-sm shadow-primary/20 hover:bg-primary/90"
+                    : "cursor-not-allowed bg-muted text-muted-foreground/50 shadow-none",
                 )}
               >
                 {isSubmitting ? (

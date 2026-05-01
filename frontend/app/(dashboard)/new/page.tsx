@@ -3,35 +3,23 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Sparkles,
-  BookOpen,
-  FileText,
   Calculator,
+  ChevronRight,
   FlaskConical,
   Globe,
-  History,
-  ArrowUpRight,
+  Languages,
+  TimerReset,
   type LucideIcon,
 } from "lucide-react";
 import { createThread, extractTitleFromMessage } from "@/lib/api/threads";
 import { useUser } from "@/context/user-context";
-import { PromptComposer, type PromptComposerMode } from "@/components/chat/PromptComposer";
+import { PromptComposer } from "@/components/chat/PromptComposer";
 import { cn } from "@/lib/utils";
-
-const capabilities: PromptComposerMode[] = [
-  { id: "reasoning", label: "Reasoning", icon: Sparkles },
-  { id: "exam", label: "Exam Prep", icon: BookOpen },
-  { id: "summaries", label: "Summaries", icon: FileText },
-];
 
 interface SuggestionTopic {
   icon: LucideIcon;
   title: string;
   description: string;
-  /** Tailwind classes applied to the icon tile background. */
-  iconClass: string;
-  /** Tailwind classes for the icon glyph. */
-  iconColor: string;
 }
 
 const suggestions: SuggestionTopic[] = [
@@ -39,31 +27,37 @@ const suggestions: SuggestionTopic[] = [
     icon: Calculator,
     title: "Mathematics",
     description: "Solve equations, understand theorems, and practice calculus problems.",
-    iconClass: "bg-gradient-to-br from-primary/25 to-primary/5",
-    iconColor: "text-primary",
   },
   {
     icon: FlaskConical,
     title: "Sciences",
     description: "Explore physics, chemistry, and biology concepts with clear explanations.",
-    iconClass: "bg-gradient-to-br from-secondary/30 to-secondary/5",
-    iconColor: "text-secondary",
   },
   {
     icon: Globe,
     title: "History & Geography",
     description: "Review key events, analyze movements, and prepare for essay questions.",
-    iconClass: "bg-gradient-to-br from-chart-3/25 to-chart-3/5",
-    iconColor: "text-chart-3",
-  },
-  {
-    icon: History,
-    title: "Philosophy",
-    description: "Understand thinkers, build arguments, and structure your dissertation.",
-    iconClass: "bg-gradient-to-br from-chart-5/25 to-chart-5/5",
-    iconColor: "text-chart-5",
   },
 ];
+
+function HeroOrb() {
+  return (
+    <div
+      aria-hidden
+      className="relative h-28 w-28 sm:h-32 sm:w-32"
+    >
+      <div className="absolute -inset-4 rounded-full bg-gradient-to-br from-pink-200/40 via-cyan-200/30 to-violet-200/40 blur-2xl dark:from-pink-400/20 dark:via-cyan-400/20 dark:to-violet-400/20" />
+      <div className="relative h-full w-full overflow-hidden rounded-full shadow-[0_10px_40px_-10px_rgba(120,80,180,0.45)]">
+        <div className="absolute inset-0 bg-gradient-to-br from-pink-200 via-violet-200 to-cyan-200 dark:from-pink-300 dark:via-violet-300 dark:to-cyan-300" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_30%,rgba(255,255,255,0.85),transparent_45%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_60%,rgba(103,232,249,0.7),transparent_50%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_75%,rgba(244,114,182,0.55),transparent_55%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_75%_25%,rgba(196,181,253,0.5),transparent_50%)]" />
+        <div className="absolute inset-x-0 top-2 mx-auto h-6 w-12 rounded-full bg-white/60 blur-md" />
+      </div>
+    </div>
+  );
+}
 
 export default function NewChatPage() {
   const router = useRouter();
@@ -98,41 +92,39 @@ export default function NewChatPage() {
 
   return (
     <div className="relative flex h-full flex-1 flex-col overflow-y-auto">
-      {/* Ambient backdrop */}
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-0 -z-10 overflow-hidden"
-      >
-        <div className="absolute left-1/2 top-[12%] h-[28rem] w-[28rem] -translate-x-1/2 rounded-full bg-primary/10 blur-3xl" />
-        <div className="absolute left-[15%] top-[55%] h-72 w-72 rounded-full bg-secondary/10 blur-3xl" />
-        <div className="absolute right-[10%] top-[65%] h-72 w-72 rounded-full bg-chart-3/10 blur-3xl" />
+      {/* Top toolbar */}
+      <div className="absolute right-4 top-4 z-10 flex items-center gap-2 sm:right-6 sm:top-5">
+        <button
+          type="button"
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary transition-colors",
+            "hover:bg-primary/15",
+          )}
+        >
+          <TimerReset className="h-3.5 w-3.5" />
+          temporary chat
+        </button>
+        <button
+          type="button"
+          aria-label="Change language"
+          className="flex h-8 w-8 items-center justify-center rounded-full border border-border/70 bg-card/80 text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
+        >
+          <Languages className="h-4 w-4" />
+        </button>
       </div>
 
-      <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col items-center justify-center gap-10 px-4 py-10 text-center sm:px-6 lg:px-8">
+      <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-10 px-4 pb-12 pt-16 sm:px-6 sm:pt-20 lg:px-8">
         {/* Hero */}
-        <div className="flex flex-col items-center gap-4">
-          <span className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-card/70 px-3 py-1 text-xs font-medium text-muted-foreground shadow-sm backdrop-blur">
-            <span className="relative flex h-2 w-2">
-              <span className="absolute inset-0 animate-ping rounded-full bg-primary/60" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
-            </span>
-            <span className="font-semibold uppercase tracking-wide text-primary">
-              AI Tutor
-            </span>
-            <span className="h-3 w-px bg-border/70" aria-hidden />
-            <span>Ready for today&apos;s Bac session</span>
-          </span>
-
-          <h1 className="max-w-3xl text-balance text-3xl font-semibold leading-tight tracking-tight text-foreground sm:text-4xl lg:text-[2.875rem]">
-            Hello{" "}
-            <span className="bg-gradient-to-br from-primary via-chart-3 to-secondary bg-clip-text text-transparent">
-              {firstName}
-            </span>
-            , what should we master today?
-          </h1>
-          <p className="max-w-2xl text-pretty text-sm leading-6 text-muted-foreground sm:text-base">
-            Ask for explanations, past-paper practice, summaries, or a study plan tuned to your section.
-          </p>
+        <div className="flex flex-col items-center gap-5 text-center">
+          <HeroOrb />
+          <div className="space-y-2">
+            <h1 className="text-3xl font-semibold tracking-tight text-cyan-600 dark:text-cyan-400 sm:text-4xl">
+              Hello {firstName}
+            </h1>
+            <p className="text-2xl font-semibold text-foreground sm:text-3xl">
+              How can I assist you today?
+            </p>
+          </div>
         </div>
 
         {/* Composer */}
@@ -141,9 +133,8 @@ export default function NewChatPage() {
             value={message}
             onChange={setMessage}
             onSubmit={handleSendMessage}
-            placeholder="Example: Explain derivatives from the Bac Math section…"
+            placeholder="What can I do for you?"
             isSubmitting={isLoading}
-            modes={capabilities}
             autoFocus
           />
 
@@ -154,17 +145,21 @@ export default function NewChatPage() {
           )}
         </div>
 
-        {/* Topic Suggestions */}
+        {/* Topic suggestions */}
         <div className="w-full">
-          <div className="mb-3 flex items-center justify-between">
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              Explore topics
-            </p>
-            <p className="text-xs text-muted-foreground/80">
-              Click a card to start
-            </p>
+          <div className="mb-4 flex items-end justify-between">
+            <h2 className="text-base font-semibold text-foreground">
+              Explore new ideas
+            </h2>
+            <button
+              type="button"
+              className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+            >
+              Show all
+              <ChevronRight className="h-3.5 w-3.5" />
+            </button>
           </div>
-          <div className="grid grid-cols-1 gap-3 text-left sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 text-left sm:grid-cols-3">
             {suggestions.map((item) => {
               const Icon = item.icon;
               return (
@@ -173,34 +168,22 @@ export default function NewChatPage() {
                   onClick={() => handleSuggestionClick(item.title)}
                   disabled={isLoading}
                   className={cn(
-                    "group relative flex items-start gap-4 overflow-hidden rounded-2xl border border-border/70 bg-card/80 p-4 backdrop-blur transition-all duration-300",
-                    "shadow-[0_10px_30px_-25px_rgba(0,0,0,0.45)]",
-                    "hover:-translate-y-0.5 hover:border-primary/40 hover:bg-card hover:shadow-[0_18px_40px_-25px_rgba(0,0,0,0.55)]",
-                    "disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0",
+                    "group flex flex-col gap-3 rounded-2xl border border-border/70 bg-card/70 p-4 transition-colors",
+                    "hover:border-border hover:bg-card",
+                    "disabled:cursor-not-allowed disabled:opacity-60",
                   )}
                 >
-                  <div
-                    className={cn(
-                      "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border/60 transition-transform group-hover:scale-105",
-                      item.iconClass,
-                    )}
-                  >
-                    <Icon className={cn("h-5 w-5", item.iconColor)} />
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-border/70 bg-background/80 text-muted-foreground transition-colors group-hover:text-primary">
+                    <Icon className="h-4 w-4" />
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="mb-1 text-sm font-semibold text-foreground">
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold text-foreground">
                       {item.title}
                     </p>
                     <p className="text-xs leading-relaxed text-muted-foreground">
                       {item.description}
                     </p>
                   </div>
-                  <ArrowUpRight
-                    className={cn(
-                      "h-4 w-4 shrink-0 -translate-x-1 translate-y-0 text-muted-foreground/60 opacity-0 transition-all",
-                      "group-hover:translate-x-0 group-hover:opacity-100 group-hover:text-primary",
-                    )}
-                  />
                 </button>
               );
             })}

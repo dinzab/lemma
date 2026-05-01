@@ -11,6 +11,8 @@ import {
   Globe,
   History,
   ArrowUpRight,
+  Languages,
+  TimerReset,
   type LucideIcon,
 } from "lucide-react";
 import { createThread, extractTitleFromMessage } from "@/lib/api/threads";
@@ -98,6 +100,27 @@ export default function NewChatPage() {
 
   return (
     <div className="relative flex h-full flex-1 flex-col overflow-y-auto">
+      {/* Top toolbar */}
+      <div className="absolute right-4 top-4 z-10 flex items-center gap-2 sm:right-6 sm:top-5">
+        <button
+          type="button"
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary transition-colors",
+            "hover:bg-primary/15",
+          )}
+        >
+          <TimerReset className="h-3.5 w-3.5" />
+          temporary chat
+        </button>
+        <button
+          type="button"
+          aria-label="Change language"
+          className="flex h-8 w-8 items-center justify-center rounded-full border border-border/70 text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+        >
+          <Languages className="h-4 w-4" />
+        </button>
+      </div>
+
       {/* Ambient backdrop */}
       <div
         aria-hidden
@@ -111,7 +134,7 @@ export default function NewChatPage() {
       <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col items-center justify-center gap-10 px-4 py-10 text-center sm:px-6 lg:px-8">
         {/* Hero */}
         <div className="flex flex-col items-center gap-4">
-          <span className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-card/70 px-3 py-1 text-xs font-medium text-muted-foreground shadow-sm backdrop-blur">
+          <span className="inline-flex items-center gap-2 rounded-full border border-border/60 px-3 py-1 text-xs font-medium text-muted-foreground">
             <span className="relative flex h-2 w-2">
               <span className="absolute inset-0 animate-ping rounded-full bg-primary/60" />
               <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
@@ -173,10 +196,9 @@ export default function NewChatPage() {
                   onClick={() => handleSuggestionClick(item.title)}
                   disabled={isLoading}
                   className={cn(
-                    "group relative flex items-start gap-4 overflow-hidden rounded-2xl border border-border/70 bg-card/80 p-4 backdrop-blur transition-all duration-300",
-                    "shadow-[0_10px_30px_-25px_rgba(0,0,0,0.45)]",
-                    "hover:-translate-y-0.5 hover:border-primary/40 hover:bg-card hover:shadow-[0_18px_40px_-25px_rgba(0,0,0,0.55)]",
-                    "disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0",
+                    "group relative flex items-start gap-4 overflow-hidden rounded-2xl border border-border/70 bg-transparent p-4 transition-colors duration-200",
+                    "hover:border-primary/40",
+                    "disabled:cursor-not-allowed disabled:opacity-60",
                   )}
                 >
                   <div

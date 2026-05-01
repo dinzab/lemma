@@ -2,18 +2,12 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useState, useRef, useEffect } from "react";
-import { Sparkles, BookOpen, FileText } from "lucide-react";
+import { Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useLemmaChat } from "@/hooks/useChat";
 import { CustomUserMessage, CustomAssistantMessage } from "@/components/chat/CustomMessages";
 import { getThread } from "@/lib/api/threads";
-import { PromptComposer, type PromptComposerMode } from "@/components/chat/PromptComposer";
-
-const modes: PromptComposerMode[] = [
-  { id: 'general', label: 'General', icon: Sparkles },
-  { id: 'exam', label: 'Exam Prep', icon: BookOpen },
-  { id: 'summary', label: 'Summary', icon: FileText },
-];
+import { PromptComposer } from "@/components/chat/PromptComposer";
 
 export default function ChatThreadPage() {
   const params = useParams();
@@ -21,7 +15,6 @@ export default function ChatThreadPage() {
   const threadId = params.id as string;
   
   const [input, setInput] = useState("");
-  const [selectedModeId, setSelectedModeId] = useState(modes[0].id);
   const [isValidating, setIsValidating] = useState(true);
   const [hasValidated, setHasValidated] = useState(false);
   const initialMessageSentRef = useRef(false);
@@ -93,8 +86,6 @@ export default function ChatThreadPage() {
   const handleStop = () => {
     stopGeneration();
   };
-
-  const selectedMode = modes.find((mode) => mode.id === selectedModeId) ?? modes[0];
 
   if (isValidating) {
     return (
@@ -185,11 +176,7 @@ export default function ChatThreadPage() {
               onSubmit={handleSend}
               onStop={handleStop}
               isStreaming={isLoading}
-              placeholder={`Ask anything in ${selectedMode.label} mode…`}
-              modes={modes}
-              selectedModeId={selectedModeId}
-              onSelectMode={setSelectedModeId}
-              showAura={false}
+              placeholder="Ask anything…"
             />
           </div>
         </div>

@@ -25,8 +25,6 @@ interface PromptComposerProps {
   modes?: PromptComposerMode[];
   selectedModeId?: string;
   onSelectMode?: (id: string) => void;
-  /** Show the soft animated aurora glow behind the card. */
-  showAura?: boolean;
   className?: string;
   textareaClassName?: string;
   rows?: number;
@@ -35,8 +33,8 @@ interface PromptComposerProps {
 
 /**
  * Shared composer used on the empty `/new` page and inside an active chat.
- * Includes an animated aurora glow, an action chip row, and a prominent
- * send / stop button.
+ * The card is transparent — it inherits the page background and shows just
+ * a soft border outline. Inside: textarea, optional mode chips, send/stop.
  */
 export function PromptComposer({
   value,
@@ -50,10 +48,9 @@ export function PromptComposer({
   modes,
   selectedModeId,
   onSelectMode,
-  showAura = true,
   className,
   textareaClassName,
-  rows = 1,
+  rows = 3,
   autoFocus = false,
 }: PromptComposerProps) {
   const trimmed = value.trim();
@@ -76,30 +73,13 @@ export function PromptComposer({
 
   return (
     <div className={cn("relative w-full", className)}>
-      {showAura && (
-        <div
-          aria-hidden
-          className="pointer-events-none absolute -inset-4 -z-10 rounded-[28px] opacity-70 blur-2xl"
-        >
-          <div className="absolute inset-x-10 top-0 h-24 rounded-full bg-primary/30 blur-3xl" />
-          <div className="absolute -bottom-2 left-1/4 h-24 w-1/2 rounded-full bg-secondary/25 blur-3xl" />
-          <div className="absolute -bottom-3 right-6 h-20 w-1/3 rounded-full bg-chart-3/20 blur-3xl" />
-        </div>
-      )}
-
       <div
         className={cn(
-          "group relative flex flex-col overflow-hidden rounded-2xl border border-border/70 bg-card/80 backdrop-blur",
-          "shadow-[0_18px_55px_-25px_rgba(0,0,0,0.45)] transition-all duration-300",
-          "focus-within:border-primary/50 focus-within:shadow-[0_25px_65px_-25px_rgba(0,0,0,0.55)]",
-          "focus-within:ring-1 focus-within:ring-primary/30",
+          "group relative flex flex-col overflow-hidden rounded-2xl border border-border/60 bg-transparent",
+          "transition-colors duration-200",
+          "focus-within:border-primary/40",
         )}
       >
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/60 to-transparent opacity-60 transition-opacity group-focus-within:opacity-100"
-        />
-
         <Textarea
           value={value}
           onChange={(event) => onChange(event.target.value)}
@@ -109,30 +89,27 @@ export function PromptComposer({
           autoFocus={autoFocus}
           disabled={disabled || isSubmitting}
           className={cn(
-            "!min-h-14 w-full resize-none border-0 bg-transparent px-5 pb-2 pt-4 text-[15px] leading-relaxed shadow-none",
+            "!min-h-[104px] w-full resize-none border-0 bg-transparent px-5 pb-2 pt-5 text-[15px] leading-relaxed shadow-none",
             "placeholder:text-muted-foreground/60 focus-visible:ring-0 focus-visible:outline-none",
             textareaClassName,
           )}
         />
 
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border/60 bg-muted/30 px-3 py-2.5 sm:px-4">
-          <div className="flex flex-wrap items-center gap-1.5">
+        <div className="flex flex-wrap items-center justify-between gap-3 px-3 pb-3 pt-1 sm:px-4">
+          <div className="flex flex-wrap items-center gap-1">
             {modes?.map((mode) => {
               const Icon = mode.icon;
               const isActive = selectedModeId === mode.id;
               const baseClass =
-                "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition-all";
+                "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[13px] font-medium transition-colors";
 
               if (!isSelectable) {
                 return (
                   <span
                     key={mode.id}
-                    className={cn(
-                      baseClass,
-                      "border-border/70 bg-background/60 text-muted-foreground",
-                    )}
+                    className={cn(baseClass, "text-muted-foreground")}
                   >
-                    <Icon className="h-3.5 w-3.5" />
+                    <Icon className="h-[15px] w-[15px]" />
                     {mode.label}
                   </span>
                 );
@@ -146,13 +123,13 @@ export function PromptComposer({
                   aria-pressed={isActive}
                   className={cn(
                     baseClass,
-                    "cursor-pointer hover:-translate-y-px active:translate-y-0",
+                    "cursor-pointer",
                     isActive
-                      ? "border-primary/40 bg-primary/15 text-primary shadow-sm shadow-primary/10"
-                      : "border-border/70 bg-background/70 text-muted-foreground hover:border-primary/30 hover:bg-primary/10 hover:text-primary",
+                      ? "text-primary"
+                      : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
                   )}
                 >
-                  <Icon className="h-3.5 w-3.5" />
+                  <Icon className="h-[15px] w-[15px]" />
                   {mode.label}
                 </button>
               );
@@ -166,9 +143,9 @@ export function PromptComposer({
                 onClick={onStop}
                 size="icon"
                 aria-label="Stop generating"
-                className="h-10 w-10 rounded-full bg-primary text-primary-foreground shadow-md shadow-primary/30 hover:bg-primary/90"
+                className="h-9 w-9 rounded-full bg-primary text-primary-foreground shadow-sm shadow-primary/30 hover:bg-primary/90"
               >
-                <Square className="h-3.5 w-3.5 fill-current" />
+                <Square className="h-3 w-3 fill-current" />
               </Button>
             ) : (
               <Button
@@ -178,10 +155,10 @@ export function PromptComposer({
                 size="icon"
                 aria-label="Send message"
                 className={cn(
-                  "h-10 w-10 rounded-full transition-all",
+                  "h-9 w-9 rounded-full transition-all",
                   trimmed && !isSubmitting
-                    ? "bg-gradient-to-br from-primary to-chart-3 text-primary-foreground shadow-md shadow-primary/30 hover:scale-[1.04] hover:shadow-primary/40"
-                    : "cursor-not-allowed bg-muted text-muted-foreground/50",
+                    ? "bg-primary text-primary-foreground shadow-sm shadow-primary/30 hover:bg-primary/90"
+                    : "cursor-not-allowed bg-muted text-muted-foreground/60",
                 )}
               >
                 {isSubmitting ? (

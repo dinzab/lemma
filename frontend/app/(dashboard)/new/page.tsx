@@ -4,7 +4,6 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   Calculator,
-  ChevronRight,
   FlaskConical,
   Globe,
   Languages,
@@ -19,43 +18,29 @@ import { cn } from "@/lib/utils";
 interface SuggestionTopic {
   icon: LucideIcon;
   title: string;
-  description: string;
 }
 
 const suggestions: SuggestionTopic[] = [
-  {
-    icon: Calculator,
-    title: "Mathematics",
-    description: "Solve equations, understand theorems, and practice calculus problems.",
-  },
-  {
-    icon: FlaskConical,
-    title: "Sciences",
-    description: "Explore physics, chemistry, and biology concepts with clear explanations.",
-  },
-  {
-    icon: Globe,
-    title: "History & Geography",
-    description: "Review key events, analyze movements, and prepare for essay questions.",
-  },
+  { icon: Calculator, title: "Mathematics" },
+  { icon: FlaskConical, title: "Sciences" },
+  { icon: Globe, title: "History & Geography" },
 ];
 
-function HeroOrb() {
+function HeroBurst({ className }: { className?: string }) {
   return (
-    <div
+    <svg
+      viewBox="0 0 100 100"
+      fill="currentColor"
       aria-hidden
-      className="relative h-28 w-28 sm:h-32 sm:w-32"
+      className={cn("text-primary", className)}
     >
-      <div className="absolute -inset-4 rounded-full bg-gradient-to-br from-pink-200/40 via-cyan-200/30 to-violet-200/40 blur-2xl dark:from-pink-400/20 dark:via-cyan-400/20 dark:to-violet-400/20" />
-      <div className="relative h-full w-full overflow-hidden rounded-full shadow-[0_10px_40px_-10px_rgba(120,80,180,0.45)]">
-        <div className="absolute inset-0 bg-gradient-to-br from-pink-200 via-violet-200 to-cyan-200 dark:from-pink-300 dark:via-violet-300 dark:to-cyan-300" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_30%,rgba(255,255,255,0.85),transparent_45%)]" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_60%,rgba(103,232,249,0.7),transparent_50%)]" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_75%,rgba(244,114,182,0.55),transparent_55%)]" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_75%_25%,rgba(196,181,253,0.5),transparent_50%)]" />
-        <div className="absolute inset-x-0 top-2 mx-auto h-6 w-12 rounded-full bg-white/60 blur-md" />
-      </div>
-    </div>
+      <polygon points="50,2 53,50 50,98 47,50" />
+      <polygon points="2,50 50,47 98,50 50,53" />
+      <g transform="rotate(45 50 50)">
+        <polygon points="50,18 51.5,50 50,82 48.5,50" />
+        <polygon points="18,50 50,48.5 82,50 50,51.5" />
+      </g>
+    </svg>
   );
 }
 
@@ -115,16 +100,14 @@ export default function NewChatPage() {
 
       <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-10 px-4 pb-12 pt-16 sm:px-6 sm:pt-20 lg:px-8">
         {/* Hero */}
-        <div className="flex flex-col items-center gap-5 text-center">
-          <HeroOrb />
-          <div className="space-y-2">
-            <h1 className="text-3xl font-semibold tracking-tight text-cyan-600 dark:text-cyan-400 sm:text-4xl">
-              Hello {firstName}
-            </h1>
-            <p className="text-2xl font-semibold text-foreground sm:text-3xl">
-              How can I assist you today?
-            </p>
-          </div>
+        <div className="flex flex-col items-center gap-2 text-center">
+          <h1 className="flex items-center gap-3 text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
+            <HeroBurst className="h-9 w-9 sm:h-10 sm:w-10" />
+            <span>
+              Hello,{" "}
+              <span className="text-cyan-600 dark:text-cyan-400">{firstName}</span>
+            </span>
+          </h1>
         </div>
 
         {/* Composer */}
@@ -145,49 +128,27 @@ export default function NewChatPage() {
           )}
         </div>
 
-        {/* Topic suggestions */}
-        <div className="w-full">
-          <div className="mb-4 flex items-end justify-between">
-            <h2 className="text-base font-semibold text-foreground">
-              Explore new ideas
-            </h2>
-            <button
-              type="button"
-              className="inline-flex items-center gap-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
-            >
-              Show all
-              <ChevronRight className="h-3.5 w-3.5" />
-            </button>
-          </div>
-          <div className="grid grid-cols-1 gap-3 text-left sm:grid-cols-3">
-            {suggestions.map((item) => {
-              const Icon = item.icon;
-              return (
-                <button
-                  key={item.title}
-                  onClick={() => handleSuggestionClick(item.title)}
-                  disabled={isLoading}
-                  className={cn(
-                    "group flex flex-col gap-3 rounded-2xl border border-border/70 bg-card/70 p-4 transition-colors",
-                    "hover:border-border hover:bg-card",
-                    "disabled:cursor-not-allowed disabled:opacity-60",
-                  )}
-                >
-                  <div className="flex h-9 w-9 items-center justify-center rounded-lg border border-border/70 bg-background/80 text-muted-foreground transition-colors group-hover:text-primary">
-                    <Icon className="h-4 w-4" />
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-sm font-semibold text-foreground">
-                      {item.title}
-                    </p>
-                    <p className="text-xs leading-relaxed text-muted-foreground">
-                      {item.description}
-                    </p>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
+        {/* Suggestion chips (below composer, like claude.ai) */}
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          {suggestions.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button
+                key={item.title}
+                type="button"
+                onClick={() => handleSuggestionClick(item.title)}
+                disabled={isLoading}
+                className={cn(
+                  "inline-flex items-center gap-2 rounded-full border border-border/70 bg-card/60 px-3.5 py-1.5 text-[13px] font-medium text-foreground/80 transition-colors",
+                  "hover:border-border hover:bg-card hover:text-foreground",
+                  "disabled:cursor-not-allowed disabled:opacity-60",
+                )}
+              >
+                <Icon className="h-[15px] w-[15px] text-muted-foreground" />
+                {item.title}
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>

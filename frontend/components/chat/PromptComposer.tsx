@@ -4,13 +4,9 @@ import * as React from "react";
 import {
   ArrowUp,
   ChevronDown,
-  Compass,
-  Image as ImageIcon,
   Loader2,
-  Paperclip,
+  Plus,
   Square,
-  Telescope,
-  type LucideIcon,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -32,32 +28,17 @@ interface PromptComposerProps {
   autoFocus?: boolean;
 }
 
-interface ChipDefinition {
-  id: string;
-  label: string;
-  icon: LucideIcon;
-}
-
-const chips: ChipDefinition[] = [
-  { id: "reasoning", label: "Reasoning", icon: Compass },
-  { id: "deep-research", label: "Deep research", icon: Telescope },
-  { id: "image", label: "Image generation", icon: ImageIcon },
-];
-
 /**
- * Shared composer used on the empty `/new` page and inside an active chat.
- * Two-row layout: a textarea on top and an action bar below containing
- * an attachment button, capability chips, a model selector, and a circular
- * send/stop button.
- *
- * The chips and model selector are visual placeholders for now.
+ * Single integrated composer card. Inside: textarea, a + (attach) icon,
+ * a model selector, and a circular send/stop button. No internal chips
+ * or per-button backgrounds — everything reads as one card.
  */
 export function PromptComposer({
   value,
   onChange,
   onSubmit,
   onStop,
-  placeholder = "What can I do for you?",
+  placeholder = "How can I help you today?",
   isStreaming = false,
   isSubmitting = false,
   disabled = false,
@@ -87,7 +68,7 @@ export function PromptComposer({
     <div className={cn("relative w-full", className)}>
       <div
         className={cn(
-          "group relative flex flex-col overflow-hidden rounded-3xl border border-border/70 bg-card",
+          "group relative flex flex-col overflow-hidden rounded-3xl border border-border/60 bg-card",
           "shadow-[0_2px_0_0_rgba(0,0,0,0.02),0_8px_24px_-18px_rgba(0,0,0,0.25)]",
           "transition-colors duration-200",
           "focus-within:border-border focus-within:shadow-[0_2px_0_0_rgba(0,0,0,0.03),0_12px_32px_-18px_rgba(0,0,0,0.3)]",
@@ -102,39 +83,20 @@ export function PromptComposer({
           autoFocus={autoFocus}
           disabled={disabled || isSubmitting}
           className={cn(
-            "!min-h-[96px] w-full resize-none border-0 bg-transparent px-6 pb-2 pt-6 text-[15px] leading-relaxed shadow-none",
+            "!min-h-[88px] w-full resize-none border-0 bg-transparent px-5 pb-2 pt-5 text-[15px] leading-relaxed shadow-none",
             "placeholder:text-muted-foreground/70 focus-visible:ring-0 focus-visible:outline-none",
             textareaClassName,
           )}
         />
 
-        <div className="flex flex-wrap items-center gap-1.5 px-3 pb-3 pt-1 sm:px-4">
+        <div className="flex items-center gap-1 px-3 pb-3 pt-1 sm:px-4">
           <button
             type="button"
-            aria-label="Attach file"
+            aria-label="Attach"
             className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground/80 transition-colors hover:bg-muted/70 hover:text-foreground"
           >
-            <Paperclip className="h-[18px] w-[18px]" />
+            <Plus className="h-[18px] w-[18px]" />
           </button>
-
-          <div className="flex flex-wrap items-center gap-1">
-            {chips.map((chip) => {
-              const Icon = chip.icon;
-              return (
-                <button
-                  key={chip.id}
-                  type="button"
-                  className={cn(
-                    "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[13px] font-medium text-muted-foreground transition-colors",
-                    "hover:bg-muted/70 hover:text-foreground",
-                  )}
-                >
-                  <Icon className="h-[15px] w-[15px]" />
-                  {chip.label}
-                </button>
-              );
-            })}
-          </div>
 
           <div className="ml-auto flex items-center gap-1">
             <button
@@ -145,6 +107,7 @@ export function PromptComposer({
               )}
             >
               <span>Lemma 1.0</span>
+              <span className="text-muted-foreground/70">Adaptive</span>
               <ChevronDown className="h-3.5 w-3.5" />
             </button>
 

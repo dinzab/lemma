@@ -70,7 +70,10 @@ export class ChatService {
           for await (const event of this.agent.streamRun(threadId, message)) {
             if (event.mode === 'messages') {
               // Tuple of [chunk, metadata] from streamMode=messages.
-              const tuple = event.payload as [AIMessageChunk | unknown, unknown];
+              const tuple = event.payload as [
+                AIMessageChunk | unknown,
+                unknown,
+              ];
               const chunk = tuple[0];
               if (chunk instanceof AIMessageChunk) {
                 const delta = chunkToText(chunk);

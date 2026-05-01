@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { ChevronRight, BrainCircuit, Loader2 } from "lucide-react";
 
 interface ThinkingRendererProps {
@@ -10,19 +10,23 @@ interface ThinkingRendererProps {
 }
 
 export function ThinkingRenderer({ content, isComplete = true, isLoading = false }: ThinkingRendererProps) {
-  const [isOpen, setIsOpen] = useState(!isComplete);
+  const [isManuallyClosed, setIsManuallyClosed] = useState(isComplete);
   const [elapsed, setElapsed] = useState(0);
+  const elapsedRef = useRef(0);
+  const isOpen = !isManuallyClosed;
 
-  // Auto-expand when thinking starts
   useEffect(() => {
-    if (!isComplete && isLoading) {
-      setIsOpen(true);
-      const start = Date.now() - (elapsed * 1000); // Resume from current elapsed
-      const timer = setInterval(() => {
-        setElapsed(Math.floor((Date.now() - start) / 1000));
-      }, 1000);
-      return () => clearInterval(timer);
-    }
+    elapsedRef.current = elapsed;
+  }, [elapsed]);
+
+  useEffect(() => {
+    if (isComplete || !isLoading) return;
+
+    const start = Date.now() - elapsedRef.current * 1000;
+    const timer = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - start) / 1000));
+    }, 1000);
+    return () => clearInterval(timer);
   }, [isComplete, isLoading]);
 
   if (!content && isComplete) return null;
@@ -30,7 +34,7 @@ export function ThinkingRenderer({ content, isComplete = true, isLoading = false
   return (
     <div className="mb-4 rounded-lg border border-border/40 bg-muted/20 overflow-hidden">
       <button
-        onClick={() => setIsOpen(!isOpen)}
+        onClick={() => setIsManuallyClosed(isOpen)}
         className="flex items-center gap-2 w-full p-2.5 text-xs font-medium text-muted-foreground hover:bg-muted/40 hover:text-foreground transition-all duration-200"
       >
         <div className={`transition-transform duration-200 ${isOpen ? "rotate-90" : ""}`}>

@@ -182,9 +182,7 @@ export class AgentToolsService {
           section: z
             .string()
             .optional()
-            .describe(
-              'Section (math, sciences, technique, informatique)',
-            ),
+            .describe('Section (math, sciences, technique, informatique)'),
           subject: z.string().optional(),
           topic: z.string().optional(),
           limit: z.number().int().optional(),

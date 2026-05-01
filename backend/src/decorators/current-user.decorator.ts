@@ -3,10 +3,10 @@ import { AuthenticatedRequest, SupabaseJwtPayload } from '../auth';
 
 /**
  * @CurrentUser() Parameter Decorator
- * 
+ *
  * Extracts the authenticated user from the request object.
  * Use this in controller methods to get the current user's information.
- * 
+ *
  * @example
  * ```typescript
  * @Get('profile')
@@ -15,7 +15,7 @@ import { AuthenticatedRequest, SupabaseJwtPayload } from '../auth';
  *   return { userId: user.sub, email: user.email };
  * }
  * ```
- * 
+ *
  * You can also extract specific properties:
  * @example
  * ```typescript
@@ -27,16 +27,16 @@ import { AuthenticatedRequest, SupabaseJwtPayload } from '../auth';
  * ```
  */
 export const CurrentUser = createParamDecorator(
-    (data: keyof SupabaseJwtPayload | undefined, ctx: ExecutionContext) => {
-        const request = ctx.switchToHttp().getRequest<AuthenticatedRequest>();
-        const user = request.user;
+  (data: keyof SupabaseJwtPayload | undefined, ctx: ExecutionContext) => {
+    const request = ctx.switchToHttp().getRequest<AuthenticatedRequest>();
+    const user = request.user;
 
-        // If a specific property is requested, return only that property
-        if (data) {
-            return user?.[data];
-        }
+    // If a specific property is requested, return only that property
+    if (data) {
+      return user?.[data];
+    }
 
-        // Otherwise, return the entire user object
-        return user;
-    },
+    // Otherwise, return the entire user object
+    return user;
+  },
 );

@@ -91,3 +91,45 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
         );
     }
 }
+
+/**
+ * PATCH /api/threads/[id] - Rename a thread
+ * Proxies to backend: PATCH /threads/:id
+ */
+export async function PATCH(request: NextRequest, { params }: RouteParams) {
+    try {
+        const { id: threadId } = await params;
+
+        const auth = await getAuthenticatedUser();
+        if (!auth.ok) {
+            return NextResponse.json(
+                { error: 'Unauthorized', message: auth.message },
+                { status: 401 },
+            );
+        }
+
+        const body = await request.json();
+        const response = await fetch(`${BACKEND_URL}/threads/${threadId}`, {
+            method: 'PATCH',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${auth.accessToken}`,
+            },
+            body: JSON.stringify(body),
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            return NextResponse.json(data, { status: response.status });
+        }
+
+        return NextResponse.json(data);
+    } catch (error) {
+        console.error('Error renaming thread:', error);
+        return NextResponse.json(
+            { error: 'Internal Server Error', message: 'Failed to rename thread' },
+            { status: 500 }
+        );
+    }
+}

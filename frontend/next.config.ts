@@ -5,7 +5,7 @@ const nextConfig: NextConfig = {
   output: 'standalone',
 
   // Fix hot reload in Docker on Windows - webpack polling with proper configuration
-  webpack: (config, { dev }) => {
+  webpack: (config) => {
     config.watchOptions = {
       poll: 500, // Check for changes every 500ms
       aggregateTimeout: 300, // Delay before rebuilding

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Search, Database, FileText, Loader2, CheckCircle2, ChevronDown, ChevronRight, XCircle, AlertCircle } from "lucide-react";
+import { Search, Database, FileText, Loader2, ChevronDown, AlertCircle } from "lucide-react";
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
 
 /**
@@ -13,21 +13,42 @@ import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
 
 interface ToolCallProps {
   toolName: string;
-  args: Record<string, any>;
+  args: Record<string, unknown>;
   status: "pending" | "executing" | "complete" | "error";
   result?: string;
 }
+
+type ToolArgs = Record<string, unknown>;
+
+type ToolResultItem = {
+  doc_id?: string;
+  exercise_id?: string;
+  id?: string;
+  text?: string;
+  topic?: string;
+  subject?: string;
+  section?: string;
+  session?: string;
+  year?: string | number;
+  score?: number;
+};
+
+const getString = (value: unknown, fallback = "") =>
+  typeof value === "string" ? value : fallback;
+
+const getStringList = (value: unknown) =>
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 
 const TOOL_CONFIG = {
   search_vectors: {
     icon: Search,
     label: "Searching Knowledge Base",
-    description: (args: any) => `Finding content related to: "${args.query}"`,
+    description: (args: ToolArgs) => `Finding content related to: "${getString(args.query, "your question")}"`,
   },
   query_exam_graph: {
     icon: Database,
     label: "Querying Exam Database",
-    description: (args: any) => {
+    description: (args: ToolArgs) => {
       const filters = [];
       if (args.year) filters.push(`Year: ${args.year}`);
       if (args.section) filters.push(`Section: ${args.section}`);
@@ -39,8 +60,8 @@ const TOOL_CONFIG = {
   get_content_by_id: {
     icon: FileText,
     label: "Retrieving Exercise Content",
-    description: (args: any) => {
-      const ids = args.doc_ids ||[];
+    description: (args: ToolArgs) => {
+      const ids = getStringList(args.doc_ids);
       return `Fetching ${ids.length} document${ids.length !== 1 ? "s" : ""}`;
     },
   },
@@ -84,11 +105,11 @@ export function ToolCallRenderer({ toolName, args, status, result }: ToolCallPro
   );
 
   // Parse result if available
-  let parsedResult: any = null;
+  let parsedResult: unknown = null;
   if (result && status === "complete") {
     try {
       parsedResult = JSON.parse(result);
-    } catch (e) {
+    } catch {
       parsedResult = result;
     }
   }
@@ -113,7 +134,7 @@ export function ToolCallRenderer({ toolName, args, status, result }: ToolCallPro
     let parsedResult;
     try {
       parsedResult = JSON.parse(result);
-    } catch (e) {
+    } catch {
       return <p className="text-sm text-muted-foreground">Failed to parse result</p>;
     }
 
@@ -140,7 +161,7 @@ export function ToolCallRenderer({ toolName, args, status, result }: ToolCallPro
 
       return (
         <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-border scrollbar-track-transparent min-h-[180px]">
-          {parsedResult.map((item: any, idx: number) => (
+          {parsedResult.map((item: ToolResultItem, idx: number) => (
             <div 
               key={idx} 
               className="flex-shrink-0 w-72 bg-card rounded-lg border border-border/50 shadow-sm hover:border-primary/30 hover:shadow-md transition-all cursor-pointer animate-in slide-in-from-left-4 fade-in"
@@ -167,7 +188,7 @@ export function ToolCallRenderer({ toolName, args, status, result }: ToolCallPro
 
                 <div className="mt-auto pt-2 border-t border-border/30 flex justify-between items-center">
                   <span className="text-[10px] font-mono text-muted-foreground truncate max-w-[150px]" title={item.exercise_id}>
-                    {formatExerciseId(item.exercise_id)}
+                    {formatExerciseId(item.exercise_id ?? item.id ?? "")}
                   </span>
                 </div>
               </div>
@@ -191,7 +212,7 @@ export function ToolCallRenderer({ toolName, args, status, result }: ToolCallPro
 
       return (
         <div className="space-y-3 min-h-[150px]">
-          {parsedResult.map((item: any, idx: number) => (
+          {parsedResult.map((item: ToolResultItem, idx: number) => (
             <div 
               key={idx} 
               className="bg-card rounded-lg border border-border/50 overflow-hidden shadow-sm hover:border-primary/20 transition-colors animate-in fade-in slide-in-from-bottom-2"
@@ -199,7 +220,7 @@ export function ToolCallRenderer({ toolName, args, status, result }: ToolCallPro
             >
               <div className="bg-muted/30 px-3 py-2 border-b border-border/30 flex justify-between items-center">
                 <span className="text-xs font-medium text-foreground/80">
-                  {formatExerciseId(item.doc_id)}
+                  {formatExerciseId(item.doc_id ?? item.id ?? "")}
                 </span>
                 {item.score && (
                   <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-background border border-border/50 text-muted-foreground">
@@ -208,7 +229,7 @@ export function ToolCallRenderer({ toolName, args, status, result }: ToolCallPro
                 )}
               </div>
               <div className="p-3 text-sm text-foreground/90 max-h-60 overflow-y-auto custom-scrollbar">
-                <MarkdownRenderer content={item.text || ""} />
+                <MarkdownRenderer content={item.text ?? ""} />
               </div>
             </div>
           ))}
@@ -228,7 +249,7 @@ export function ToolCallRenderer({ toolName, args, status, result }: ToolCallPro
 
       return (
         <div className="space-y-4 min-h-[150px]">
-          {parsedResult.map((item: any, idx: number) => (
+          {parsedResult.map((item: ToolResultItem, idx: number) => (
             <div 
               key={idx} 
               className="bg-card rounded-lg border border-border/50 shadow-sm animate-in fade-in slide-in-from-bottom-2"
@@ -237,7 +258,7 @@ export function ToolCallRenderer({ toolName, args, status, result }: ToolCallPro
               <div className="bg-primary/5 px-4 py-3 border-b border-border/30">
                 <h4 className="text-sm font-semibold text-foreground flex items-center gap-2">
                   <FileText className="h-4 w-4 text-primary" />
-                  {formatExerciseId(item.doc_id)}
+                  {formatExerciseId(item.doc_id ?? item.id ?? "")}
                 </h4>
                 <div className="flex gap-2 mt-1 text-xs text-muted-foreground">
                   <span className="bg-background/50 px-1.5 py-0.5 rounded border border-border/20">{item.year}</span>
@@ -246,7 +267,7 @@ export function ToolCallRenderer({ toolName, args, status, result }: ToolCallPro
                 </div>
               </div>
               <div className="p-4 text-sm text-foreground/90">
-                <MarkdownRenderer content={item.text || ""} />
+                <MarkdownRenderer content={item.text ?? ""} />
               </div>
             </div>
           ))}

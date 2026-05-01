@@ -9,7 +9,7 @@ export type ActionState = {
     success?: boolean
     message?: string
     errors?: { [key: string]: string[] } | null
-    inputs?: any
+    inputs?: Record<string, FormDataEntryValue>
 }
 
 export async function login(prevState: ActionState | null, formData: FormData): Promise<ActionState> {

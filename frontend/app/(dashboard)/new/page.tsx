@@ -10,10 +10,9 @@ import {
   FlaskConical,
   Globe,
   History,
-  Paperclip,
-  Mic,
   ArrowUp,
   Loader2,
+  ArrowUpRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -89,38 +88,44 @@ export default function NewChatPage() {
 
   return (
     <>
-      <div className="flex-1 flex flex-col items-center justify-center p-4 md:p-6 lg:p-8 overflow-y-auto">
-        <div className="flex flex-col items-center gap-8 text-center max-w-2xl w-full">
+      <div className="flex-1 overflow-y-auto px-4 py-8 md:px-6 lg:px-8">
+        <div className="mx-auto flex min-h-full w-full max-w-5xl flex-col items-center justify-center gap-8 text-center">
           {/* Greeting */}
-          <div className="flex flex-col items-center gap-3">
-            <h1 className="text-3xl md:text-4xl font-bold text-foreground tracking-tight">
-              Hello {firstName}
+          <div className="flex flex-col items-center gap-4">
+            <div className="relative inline-flex items-center gap-2 rounded-full border bg-muted px-3 py-1 text-sm text-muted-foreground shadow-sm">
+              <span className="flex h-5 items-center rounded-full bg-primary px-2 text-xs font-semibold text-primary-foreground">
+                AI Tutor
+              </span>
+              Ready for today&apos;s Bac session
+            </div>
+            <h1 className="max-w-3xl text-4xl font-semibold leading-tight tracking-tight md:text-5xl">
+              Hello {firstName}, what should we master today?
             </h1>
-            <p className="text-lg text-muted-foreground">
-              How can I assist you today?
+            <p className="max-w-2xl text-lg text-muted-foreground">
+              Ask for explanations, past-paper practice, summaries, or a study plan tuned to your section.
             </p>
           </div>
 
           {/* Input Area */}
-          <div className="w-full max-w-xl">
-            <div className="relative flex flex-col bg-card rounded-xl border border-border shadow-sm focus-within:shadow-md transition-all overflow-hidden">
+          <div className="w-full max-w-2xl">
+            <div className="relative flex flex-col overflow-hidden rounded-2xl border bg-card/85 shadow-xl shadow-primary/5 backdrop-blur focus-within:shadow-2xl focus-within:shadow-primary/10 transition-all">
               <Textarea
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
                 onKeyDown={handleKeyDown}
-                className="w-full bg-transparent border-0 focus-visible:ring-0 shadow-none resize-none min-h-[56px] max-h-[160px] px-4 pt-4 pb-2 text-sm placeholder:text-muted-foreground/50 leading-relaxed scrollbar-none"
-                placeholder="What can I do for you?"
+                className="w-full resize-none border-0 bg-transparent px-5 pb-2 pt-5 text-base leading-relaxed shadow-none scrollbar-none placeholder:text-muted-foreground/50 focus-visible:ring-0"
+                placeholder="Example: Explain derivatives from the Bac Math section..."
                 rows={1}
                 disabled={isLoading}
               />
-              <div className="flex items-center justify-between px-3 pb-3">
-                <div className="flex items-center gap-1">
+              <div className="flex flex-col gap-3 px-4 pb-4 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-wrap items-center gap-1.5">
                   {capabilities.map((cap) => {
                     const Icon = cap.icon;
                     return (
                       <span
                         key={cap.label}
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium text-muted-foreground bg-muted/50"
+                        className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground"
                       >
                         <Icon className="h-3 w-3" />
                         {cap.label}
@@ -128,28 +133,12 @@ export default function NewChatPage() {
                     );
                   })}
                 </div>
-                <div className="flex items-center gap-1">
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 rounded-full text-muted-foreground/60 hover:text-foreground"
-                    disabled={isLoading}
-                  >
-                    <Paperclip className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 rounded-full text-muted-foreground/60 hover:text-foreground"
-                    disabled={isLoading}
-                  >
-                    <Mic className="h-4 w-4" />
-                  </Button>
+                <div className="flex items-center justify-end">
                   <Button
                     onClick={handleSendMessage}
                     disabled={!message.trim() || isLoading}
                     size="icon"
-                    className={`h-8 w-8 rounded-full transition-all ${
+                    className={`h-10 w-10 rounded-full transition-all ${
                       message.trim()
                         ? "bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm"
                         : "bg-muted/50 text-muted-foreground/40 cursor-not-allowed"
@@ -172,12 +161,11 @@ export default function NewChatPage() {
             )}
           </div>
 
-          {/* Explore Topics */}
-          <div className="w-full max-w-xl pt-4">
-            <div className="flex items-center justify-between mb-4">
+          <div className="w-full max-w-4xl pt-2">
+            <div className="mb-4 flex items-center justify-between">
               <p className="text-sm font-semibold text-foreground">Explore topics</p>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {suggestions.map((item) => {
                 const Icon = item.icon;
                 return (
@@ -185,15 +173,16 @@ export default function NewChatPage() {
                     key={item.title}
                     onClick={() => handleSuggestionClick(item.title)}
                     disabled={isLoading}
-                    className="flex gap-3 p-4 rounded-xl border border-border bg-card text-left hover:shadow-md transition-all group disabled:opacity-50"
+                    className="group flex gap-4 rounded-2xl border bg-card/70 p-5 text-left shadow-sm backdrop-blur transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md disabled:opacity-50"
                   >
-                    <div className="shrink-0 h-9 w-9 rounded-lg bg-accent flex items-center justify-center group-hover:bg-accent/80 transition-colors">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent transition-colors group-hover:bg-primary/10">
                       <Icon className="h-4 w-4 text-primary" />
                     </div>
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <p className="text-sm font-semibold text-foreground mb-0.5">{item.title}</p>
                       <p className="text-xs text-muted-foreground leading-relaxed">{item.description}</p>
                     </div>
+                    <ArrowUpRight className="h-4 w-4 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
                   </button>
                 );
               })}

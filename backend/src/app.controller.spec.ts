@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
+import { SupabaseAuthGuard } from './auth';
 
 describe('AppController', () => {
   let appController: AppController;
@@ -9,7 +10,10 @@ describe('AppController', () => {
     const app: TestingModule = await Test.createTestingModule({
       controllers: [AppController],
       providers: [AppService],
-    }).compile();
+    })
+      .overrideGuard(SupabaseAuthGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
 
     appController = app.get<AppController>(AppController);
   });

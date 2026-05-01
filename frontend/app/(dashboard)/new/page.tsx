@@ -3,46 +3,69 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
+  Sparkles,
+  BookOpen,
+  FileText,
   Calculator,
   FlaskConical,
   Globe,
+  History,
+  ArrowUpRight,
   Languages,
   TimerReset,
   type LucideIcon,
 } from "lucide-react";
 import { createThread, extractTitleFromMessage } from "@/lib/api/threads";
 import { useUser } from "@/context/user-context";
-import { PromptComposer } from "@/components/chat/PromptComposer";
+import { PromptComposer, type PromptComposerMode } from "@/components/chat/PromptComposer";
 import { cn } from "@/lib/utils";
+
+const capabilities: PromptComposerMode[] = [
+  { id: "reasoning", label: "Reasoning", icon: Sparkles },
+  { id: "exam", label: "Exam Prep", icon: BookOpen },
+  { id: "summaries", label: "Summaries", icon: FileText },
+];
 
 interface SuggestionTopic {
   icon: LucideIcon;
   title: string;
+  description: string;
+  /** Tailwind classes applied to the icon tile background. */
+  iconClass: string;
+  /** Tailwind classes for the icon glyph. */
+  iconColor: string;
 }
 
 const suggestions: SuggestionTopic[] = [
-  { icon: Calculator, title: "Mathematics" },
-  { icon: FlaskConical, title: "Sciences" },
-  { icon: Globe, title: "History & Geography" },
+  {
+    icon: Calculator,
+    title: "Mathematics",
+    description: "Solve equations, understand theorems, and practice calculus problems.",
+    iconClass: "bg-gradient-to-br from-primary/25 to-primary/5",
+    iconColor: "text-primary",
+  },
+  {
+    icon: FlaskConical,
+    title: "Sciences",
+    description: "Explore physics, chemistry, and biology concepts with clear explanations.",
+    iconClass: "bg-gradient-to-br from-secondary/30 to-secondary/5",
+    iconColor: "text-secondary",
+  },
+  {
+    icon: Globe,
+    title: "History & Geography",
+    description: "Review key events, analyze movements, and prepare for essay questions.",
+    iconClass: "bg-gradient-to-br from-chart-3/25 to-chart-3/5",
+    iconColor: "text-chart-3",
+  },
+  {
+    icon: History,
+    title: "Philosophy",
+    description: "Understand thinkers, build arguments, and structure your dissertation.",
+    iconClass: "bg-gradient-to-br from-chart-5/25 to-chart-5/5",
+    iconColor: "text-chart-5",
+  },
 ];
-
-function HeroBurst({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 100 100"
-      fill="currentColor"
-      aria-hidden
-      className={cn("text-primary", className)}
-    >
-      <polygon points="50,2 53,50 50,98 47,50" />
-      <polygon points="2,50 50,47 98,50 50,53" />
-      <g transform="rotate(45 50 50)">
-        <polygon points="50,18 51.5,50 50,82 48.5,50" />
-        <polygon points="18,50 50,48.5 82,50 50,51.5" />
-      </g>
-    </svg>
-  );
-}
 
 export default function NewChatPage() {
   const router = useRouter();
@@ -92,22 +115,47 @@ export default function NewChatPage() {
         <button
           type="button"
           aria-label="Change language"
-          className="flex h-8 w-8 items-center justify-center rounded-full border border-border/70 bg-card/80 text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
+          className="flex h-8 w-8 items-center justify-center rounded-full border border-border/70 text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
         >
           <Languages className="h-4 w-4" />
         </button>
       </div>
 
-      <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-10 px-4 pb-12 pt-16 sm:px-6 sm:pt-20 lg:px-8">
+      {/* Ambient backdrop */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 -z-10 overflow-hidden"
+      >
+        <div className="absolute left-1/2 top-[12%] h-[28rem] w-[28rem] -translate-x-1/2 rounded-full bg-primary/10 blur-3xl" />
+        <div className="absolute left-[15%] top-[55%] h-72 w-72 rounded-full bg-secondary/10 blur-3xl" />
+        <div className="absolute right-[10%] top-[65%] h-72 w-72 rounded-full bg-chart-3/10 blur-3xl" />
+      </div>
+
+      <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col items-center justify-center gap-10 px-4 py-10 text-center sm:px-6 lg:px-8">
         {/* Hero */}
-        <div className="flex flex-col items-center gap-2 text-center">
-          <h1 className="flex items-center gap-3 text-3xl font-semibold tracking-tight text-foreground sm:text-4xl">
-            <HeroBurst className="h-9 w-9 sm:h-10 sm:w-10" />
-            <span>
-              Hello,{" "}
-              <span className="text-cyan-600 dark:text-cyan-400">{firstName}</span>
+        <div className="flex flex-col items-center gap-4">
+          <span className="inline-flex items-center gap-2 rounded-full border border-border/60 px-3 py-1 text-xs font-medium text-muted-foreground">
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inset-0 animate-ping rounded-full bg-primary/60" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
             </span>
+            <span className="font-semibold uppercase tracking-wide text-primary">
+              AI Tutor
+            </span>
+            <span className="h-3 w-px bg-border/70" aria-hidden />
+            <span>Ready for today&apos;s Bac session</span>
+          </span>
+
+          <h1 className="max-w-3xl text-balance text-3xl font-semibold leading-tight tracking-tight text-foreground sm:text-4xl lg:text-[2.875rem]">
+            Hello{" "}
+            <span className="bg-gradient-to-br from-primary via-chart-3 to-secondary bg-clip-text text-transparent">
+              {firstName}
+            </span>
+            , what should we master today?
           </h1>
+          <p className="max-w-2xl text-pretty text-sm leading-6 text-muted-foreground sm:text-base">
+            Ask for explanations, past-paper practice, summaries, or a study plan tuned to your section.
+          </p>
         </div>
 
         {/* Composer */}
@@ -116,8 +164,9 @@ export default function NewChatPage() {
             value={message}
             onChange={setMessage}
             onSubmit={handleSendMessage}
-            placeholder="What can I do for you?"
+            placeholder="Example: Explain derivatives from the Bac Math section…"
             isSubmitting={isLoading}
+            modes={capabilities}
             autoFocus
           />
 
@@ -128,27 +177,56 @@ export default function NewChatPage() {
           )}
         </div>
 
-        {/* Suggestion chips (below composer, like claude.ai) */}
-        <div className="flex flex-wrap items-center justify-center gap-2">
-          {suggestions.map((item) => {
-            const Icon = item.icon;
-            return (
-              <button
-                key={item.title}
-                type="button"
-                onClick={() => handleSuggestionClick(item.title)}
-                disabled={isLoading}
-                className={cn(
-                  "inline-flex items-center gap-2 rounded-full border border-border/70 bg-card/60 px-3.5 py-1.5 text-[13px] font-medium text-foreground/80 transition-colors",
-                  "hover:border-border hover:bg-card hover:text-foreground",
-                  "disabled:cursor-not-allowed disabled:opacity-60",
-                )}
-              >
-                <Icon className="h-[15px] w-[15px] text-muted-foreground" />
-                {item.title}
-              </button>
-            );
-          })}
+        {/* Topic Suggestions */}
+        <div className="w-full">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Explore topics
+            </p>
+            <p className="text-xs text-muted-foreground/80">
+              Click a card to start
+            </p>
+          </div>
+          <div className="grid grid-cols-1 gap-3 text-left sm:grid-cols-2">
+            {suggestions.map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  key={item.title}
+                  onClick={() => handleSuggestionClick(item.title)}
+                  disabled={isLoading}
+                  className={cn(
+                    "group relative flex items-start gap-4 overflow-hidden rounded-2xl border border-border/70 bg-transparent p-4 transition-colors duration-200",
+                    "hover:border-primary/40",
+                    "disabled:cursor-not-allowed disabled:opacity-60",
+                  )}
+                >
+                  <div
+                    className={cn(
+                      "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border/60 transition-transform group-hover:scale-105",
+                      item.iconClass,
+                    )}
+                  >
+                    <Icon className={cn("h-5 w-5", item.iconColor)} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="mb-1 text-sm font-semibold text-foreground">
+                      {item.title}
+                    </p>
+                    <p className="text-xs leading-relaxed text-muted-foreground">
+                      {item.description}
+                    </p>
+                  </div>
+                  <ArrowUpRight
+                    className={cn(
+                      "h-4 w-4 shrink-0 -translate-x-1 translate-y-0 text-muted-foreground/60 opacity-0 transition-all",
+                      "group-hover:translate-x-0 group-hover:opacity-100 group-hover:text-primary",
+                    )}
+                  />
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
     </div>

@@ -1,17 +1,17 @@
 "use client";
 
 import * as React from "react";
-import {
-  ArrowUp,
-  ChevronDown,
-  Loader2,
-  Plus,
-  Square,
-} from "lucide-react";
+import { ArrowUp, Loader2, Square, type LucideIcon } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+
+export interface PromptComposerMode {
+  id: string;
+  label: string;
+  icon: LucideIcon;
+}
 
 interface PromptComposerProps {
   value: string;
@@ -22,6 +22,9 @@ interface PromptComposerProps {
   isStreaming?: boolean;
   isSubmitting?: boolean;
   disabled?: boolean;
+  modes?: PromptComposerMode[];
+  selectedModeId?: string;
+  onSelectMode?: (id: string) => void;
   className?: string;
   textareaClassName?: string;
   rows?: number;
@@ -29,27 +32,31 @@ interface PromptComposerProps {
 }
 
 /**
- * Single integrated composer card. Inside: textarea, a + (attach) icon,
- * a model selector, and a circular send/stop button. No internal chips
- * or per-button backgrounds — everything reads as one card.
+ * Shared composer used on the empty `/new` page and inside an active chat.
+ * The card is transparent — it inherits the page background and shows just
+ * a soft border outline. Inside: textarea, optional mode chips, send/stop.
  */
 export function PromptComposer({
   value,
   onChange,
   onSubmit,
   onStop,
-  placeholder = "How can I help you today?",
+  placeholder = "Ask BacPrep AI anything…",
   isStreaming = false,
   isSubmitting = false,
   disabled = false,
+  modes,
+  selectedModeId,
+  onSelectMode,
   className,
   textareaClassName,
-  rows = 3,
+  rows = 1,
   autoFocus = false,
 }: PromptComposerProps) {
   const trimmed = value.trim();
   const sendDisabled = !trimmed || isSubmitting || disabled;
   const showStop = isStreaming && typeof onStop === "function";
+  const isSelectable = typeof onSelectMode === "function";
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === "Enter" && !event.shiftKey) {
@@ -68,10 +75,9 @@ export function PromptComposer({
     <div className={cn("relative w-full", className)}>
       <div
         className={cn(
-          "group relative flex flex-col overflow-hidden rounded-3xl border border-border/60 bg-card",
-          "shadow-[0_2px_0_0_rgba(0,0,0,0.02),0_8px_24px_-18px_rgba(0,0,0,0.25)]",
+          "group relative flex flex-col overflow-hidden rounded-2xl border border-border/60 bg-transparent",
           "transition-colors duration-200",
-          "focus-within:border-border focus-within:shadow-[0_2px_0_0_rgba(0,0,0,0.03),0_12px_32px_-18px_rgba(0,0,0,0.3)]",
+          "focus-within:border-primary/40",
         )}
       >
         <Textarea
@@ -83,41 +89,64 @@ export function PromptComposer({
           autoFocus={autoFocus}
           disabled={disabled || isSubmitting}
           className={cn(
-            "!min-h-[88px] w-full resize-none border-0 bg-transparent px-5 pb-2 pt-5 text-[15px] leading-relaxed shadow-none",
-            "placeholder:text-muted-foreground/70 focus-visible:ring-0 focus-visible:outline-none",
+            "!min-h-14 w-full resize-none border-0 bg-transparent px-5 pb-2 pt-4 text-[15px] leading-relaxed shadow-none",
+            "placeholder:text-muted-foreground/60 focus-visible:ring-0 focus-visible:outline-none",
             textareaClassName,
           )}
         />
 
-        <div className="flex items-center gap-1 px-3 pb-3 pt-1 sm:px-4">
-          <button
-            type="button"
-            aria-label="Attach"
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground/80 transition-colors hover:bg-muted/70 hover:text-foreground"
-          >
-            <Plus className="h-[18px] w-[18px]" />
-          </button>
+        <div className="flex flex-wrap items-center justify-between gap-3 px-3 pb-3 pt-1 sm:px-4">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {modes?.map((mode) => {
+              const Icon = mode.icon;
+              const isActive = selectedModeId === mode.id;
+              const baseClass =
+                "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition-colors";
 
-          <div className="ml-auto flex items-center gap-1">
-            <button
-              type="button"
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[13px] font-medium text-muted-foreground transition-colors",
-                "hover:bg-muted/70 hover:text-foreground",
-              )}
-            >
-              <span>Lemma 1.0</span>
-              <span className="text-muted-foreground/70">Adaptive</span>
-              <ChevronDown className="h-3.5 w-3.5" />
-            </button>
+              if (!isSelectable) {
+                return (
+                  <span
+                    key={mode.id}
+                    className={cn(
+                      baseClass,
+                      "border-border/60 bg-transparent text-muted-foreground",
+                    )}
+                  >
+                    <Icon className="h-3.5 w-3.5" />
+                    {mode.label}
+                  </span>
+                );
+              }
 
+              return (
+                <button
+                  key={mode.id}
+                  type="button"
+                  onClick={() => onSelectMode?.(mode.id)}
+                  aria-pressed={isActive}
+                  className={cn(
+                    baseClass,
+                    "cursor-pointer",
+                    isActive
+                      ? "border-primary/40 bg-primary/15 text-primary"
+                      : "border-border/60 bg-transparent text-muted-foreground hover:border-primary/30 hover:text-primary",
+                  )}
+                >
+                  <Icon className="h-3.5 w-3.5" />
+                  {mode.label}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="flex items-center gap-1.5">
             {showStop ? (
               <Button
                 type="button"
                 onClick={onStop}
                 size="icon"
                 aria-label="Stop generating"
-                className="h-9 w-9 rounded-full bg-foreground text-background shadow-sm hover:bg-foreground/90"
+                className="h-9 w-9 rounded-full bg-primary text-primary-foreground shadow-sm shadow-primary/30 hover:bg-primary/90"
               >
                 <Square className="h-3 w-3 fill-current" />
               </Button>
@@ -129,10 +158,10 @@ export function PromptComposer({
                 size="icon"
                 aria-label="Send message"
                 className={cn(
-                  "h-9 w-9 rounded-full bg-primary text-primary-foreground shadow-sm shadow-primary/30 transition-all",
-                  sendDisabled
-                    ? "cursor-not-allowed opacity-90"
-                    : "hover:bg-primary/90",
+                  "h-9 w-9 rounded-full transition-all",
+                  trimmed && !isSubmitting
+                    ? "bg-primary text-primary-foreground shadow-sm shadow-primary/30 hover:bg-primary/90"
+                    : "cursor-not-allowed bg-muted text-muted-foreground/60",
                 )}
               >
                 {isSubmitting ? (

@@ -449,7 +449,7 @@ export default function DashboardLayout({
           {/* Desktop Sidebar */}
           <aside
             className={cn(
-              "relative z-10 hidden flex-col overflow-hidden border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-all duration-300 ease-in-out md:flex",
+              "relative z-10 hidden flex-col overflow-hidden border-r border-border/60 bg-transparent text-sidebar-foreground transition-all duration-300 ease-in-out md:flex",
               isSidebarOpen ? "w-[272px]" : "w-0 border-r-0",
             )}
           >
@@ -474,7 +474,7 @@ export default function DashboardLayout({
                     <Menu className="h-5 w-5" />
                   </Button>
                 </SheetTrigger>
-                <SheetContent side="left" className="w-[272px] border-r border-sidebar-border bg-sidebar p-3 text-sidebar-foreground">
+                <SheetContent side="left" className="w-[272px] border-r border-border/60 bg-background p-3 text-sidebar-foreground">
                   <SheetHeader className="sr-only">
                     <SheetTitle>Navigation Menu</SheetTitle>
                   </SheetHeader>

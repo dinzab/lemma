@@ -44,16 +44,14 @@ function HeroOrb() {
   return (
     <div
       aria-hidden
-      className="relative h-28 w-28 sm:h-32 sm:w-32"
+      className="relative h-20 w-20 sm:h-24 sm:w-24"
     >
-      <div className="absolute -inset-4 rounded-full bg-gradient-to-br from-pink-200/40 via-cyan-200/30 to-violet-200/40 blur-2xl dark:from-pink-400/20 dark:via-cyan-400/20 dark:to-violet-400/20" />
-      <div className="relative h-full w-full overflow-hidden rounded-full shadow-[0_10px_40px_-10px_rgba(120,80,180,0.45)]">
-        <div className="absolute inset-0 bg-gradient-to-br from-pink-200 via-violet-200 to-cyan-200 dark:from-pink-300 dark:via-violet-300 dark:to-cyan-300" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_30%,rgba(255,255,255,0.85),transparent_45%)]" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_70%_60%,rgba(103,232,249,0.7),transparent_50%)]" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_75%,rgba(244,114,182,0.55),transparent_55%)]" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_75%_25%,rgba(196,181,253,0.5),transparent_50%)]" />
-        <div className="absolute inset-x-0 top-2 mx-auto h-6 w-12 rounded-full bg-white/60 blur-md" />
+      <div className="absolute -inset-3 rounded-full bg-gradient-to-br from-primary/15 via-amber-200/20 to-rose-200/20 blur-2xl dark:from-primary/25 dark:via-amber-400/10 dark:to-rose-400/10" />
+      <div className="relative h-full w-full overflow-hidden rounded-full shadow-[0_8px_32px_-12px_rgba(204,120,92,0.35)]">
+        <div className="absolute inset-0 bg-gradient-to-br from-[#f5e2c8] via-[#ecc8a6] to-[#cc785c] dark:from-[#3a3429] dark:via-[#5a4a3a] dark:to-[#cc785c]" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_30%,rgba(255,255,255,0.85),transparent_45%)] dark:bg-[radial-gradient(circle_at_30%_30%,rgba(255,255,255,0.4),transparent_45%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_75%_70%,rgba(204,120,92,0.55),transparent_55%)]" />
+        <div className="absolute inset-x-0 top-2 mx-auto h-4 w-10 rounded-full bg-white/55 blur-md" />
       </div>
     </div>
   );
@@ -117,11 +115,11 @@ export default function NewChatPage() {
         {/* Hero */}
         <div className="flex flex-col items-center gap-5 text-center">
           <HeroOrb />
-          <div className="space-y-2">
-            <h1 className="text-3xl font-semibold tracking-tight text-cyan-600 dark:text-cyan-400 sm:text-4xl">
+          <div className="space-y-1">
+            <h1 className="font-display text-4xl font-medium tracking-tight text-foreground sm:text-5xl">
               Hello {firstName}
             </h1>
-            <p className="text-2xl font-semibold text-foreground sm:text-3xl">
+            <p className="font-display text-3xl font-normal text-foreground/70 sm:text-4xl">
               How can I assist you today?
             </p>
           </div>

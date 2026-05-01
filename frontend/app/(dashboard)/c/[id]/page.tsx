@@ -2,15 +2,14 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useState, useRef, useEffect } from "react";
-import { ArrowUp, Square, Sparkles, BookOpen, FileText } from "lucide-react";
+import { Sparkles, BookOpen, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { useLemmaChat } from "@/hooks/useChat";
 import { CustomUserMessage, CustomAssistantMessage } from "@/components/chat/CustomMessages";
 import { getThread } from "@/lib/api/threads";
-import { BorderBeam } from "@/components/landing/border-beam";
+import { PromptComposer, type PromptComposerMode } from "@/components/chat/PromptComposer";
 
-const modes = [
+const modes: PromptComposerMode[] = [
   { id: 'general', label: 'General', icon: Sparkles },
   { id: 'exam', label: 'Exam Prep', icon: BookOpen },
   { id: 'summary', label: 'Summary', icon: FileText },
@@ -22,7 +21,7 @@ export default function ChatThreadPage() {
   const threadId = params.id as string;
   
   const [input, setInput] = useState("");
-  const [selectedMode, setSelectedMode] = useState(modes[0]);
+  const [selectedModeId, setSelectedModeId] = useState(modes[0].id);
   const [isValidating, setIsValidating] = useState(true);
   const [hasValidated, setHasValidated] = useState(false);
   const initialMessageSentRef = useRef(false);
@@ -95,12 +94,7 @@ export default function ChatThreadPage() {
     stopGeneration();
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSend();
-    }
-  };
+  const selectedMode = modes.find((mode) => mode.id === selectedModeId) ?? modes[0];
 
   if (isValidating) {
     return (
@@ -112,8 +106,11 @@ export default function ChatThreadPage() {
   }
 
   return (
-    <div className="flex h-full flex-1 overflow-hidden px-4 sm:px-6 lg:px-8">
-      <div className="relative mx-auto flex h-full w-full max-w-7xl flex-col border-x">
+    <div className="relative flex h-full flex-1 flex-col overflow-hidden">
+      <div className="pointer-events-none absolute inset-0 -z-10 overflow-hidden">
+        <div className="absolute left-1/2 top-[5%] h-72 w-[26rem] -translate-x-1/2 rounded-full bg-primary/5 blur-3xl" />
+      </div>
+      <div className="flex h-full flex-1 flex-col">
         {/* Messages Area */}
         <div className="min-h-0 flex-1 overflow-y-auto scroll-smooth">
           <div className="mx-auto max-w-3xl space-y-1 px-4 py-5">
@@ -180,70 +177,20 @@ export default function ChatThreadPage() {
         </div>
 
         {/* Input Area */}
-        <div className="bg-gradient-to-t from-background via-background to-transparent px-4 pb-4 pt-2">
-          <div className="mx-auto max-w-3xl">
-            <div className="relative flex flex-col overflow-hidden rounded-xl border bg-card text-card-foreground shadow-xl shadow-primary/5 transition-all focus-within:border-primary/40 focus-within:shadow-primary/10">
-              <BorderBeam className="opacity-0 transition-opacity focus-within:opacity-70" />
-              <Textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={handleKeyDown}
-                placeholder={`Ask anything in ${selectedMode.label} mode...`}
-                className="!min-h-12 w-full resize-none border-0 bg-transparent px-5 pb-1 pt-4 text-sm leading-relaxed shadow-none placeholder:text-muted-foreground/60 focus-visible:ring-0"
-                disabled={isLoading}
-                rows={1}
-              />
-
-              <div className="flex items-center justify-between gap-3 border-t bg-muted/35 px-4 py-2.5">
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {modes.map((mode) => {
-                    const Icon = mode.icon;
-                    const isActive = selectedMode.id === mode.id;
-                    return (
-                      <button
-                        key={mode.id}
-                        onClick={() => setSelectedMode(mode)}
-                        className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold transition-all ${
-                          isActive
-                            ? "border-primary/20 bg-primary/10 text-primary"
-                            : "border-transparent bg-background/60 text-muted-foreground hover:bg-muted/80 hover:text-foreground"
-                        }`}
-                      >
-                        <Icon className="h-3 w-3" />
-                        {mode.label}
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <div className="flex items-center justify-end">
-                  <div className="pl-0.5">
-                    {isLoading ? (
-                      <Button
-                        onClick={handleStop}
-                        size="icon"
-                        className="h-9 w-9 rounded-full bg-primary text-primary-foreground shadow-sm hover:bg-primary/90"
-                      >
-                        <Square className="h-3 w-3 fill-current" />
-                      </Button>
-                    ) : (
-                      <Button
-                        onClick={handleSend}
-                        disabled={!input.trim()}
-                        size="icon"
-                        className={`h-9 w-9 rounded-full transition-all ${
-                          input.trim()
-                            ? "bg-primary text-primary-foreground shadow-sm hover:bg-primary/90"
-                            : "cursor-not-allowed bg-muted/70 text-muted-foreground/40"
-                        }`}
-                      >
-                        <ArrowUp className="h-4 w-4" />
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
+        <div className="bg-gradient-to-t from-background via-background to-transparent px-4 pb-4 pt-3 sm:px-6">
+          <div className="mx-auto w-full max-w-3xl">
+            <PromptComposer
+              value={input}
+              onChange={setInput}
+              onSubmit={handleSend}
+              onStop={handleStop}
+              isStreaming={isLoading}
+              placeholder={`Ask anything in ${selectedMode.label} mode…`}
+              modes={modes}
+              selectedModeId={selectedModeId}
+              onSelectMode={setSelectedModeId}
+              showAura={false}
+            />
           </div>
         </div>
       </div>

@@ -10,42 +10,58 @@ import {
   FlaskConical,
   Globe,
   History,
-  ArrowUp,
-  Loader2,
   ArrowUpRight,
+  type LucideIcon,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
 import { createThread, extractTitleFromMessage } from "@/lib/api/threads";
 import { useUser } from "@/context/user-context";
-import { BorderBeam } from "@/components/landing/border-beam";
+import { PromptComposer, type PromptComposerMode } from "@/components/chat/PromptComposer";
+import { cn } from "@/lib/utils";
 
-const capabilities = [
-  { icon: Sparkles, label: "Reasoning" },
-  { icon: BookOpen, label: "Exam Prep" },
-  { icon: FileText, label: "Summaries" },
+const capabilities: PromptComposerMode[] = [
+  { id: "reasoning", label: "Reasoning", icon: Sparkles },
+  { id: "exam", label: "Exam Prep", icon: BookOpen },
+  { id: "summaries", label: "Summaries", icon: FileText },
 ];
 
-const suggestions = [
+interface SuggestionTopic {
+  icon: LucideIcon;
+  title: string;
+  description: string;
+  /** Tailwind classes applied to the icon tile background. */
+  iconClass: string;
+  /** Tailwind classes for the icon glyph. */
+  iconColor: string;
+}
+
+const suggestions: SuggestionTopic[] = [
   {
     icon: Calculator,
     title: "Mathematics",
     description: "Solve equations, understand theorems, and practice calculus problems.",
+    iconClass: "bg-gradient-to-br from-primary/25 to-primary/5",
+    iconColor: "text-primary",
   },
   {
     icon: FlaskConical,
     title: "Sciences",
     description: "Explore physics, chemistry, and biology concepts with clear explanations.",
+    iconClass: "bg-gradient-to-br from-secondary/30 to-secondary/5",
+    iconColor: "text-secondary",
   },
   {
     icon: Globe,
     title: "History & Geography",
     description: "Review key events, analyze movements, and prepare for essay questions.",
+    iconClass: "bg-gradient-to-br from-chart-3/25 to-chart-3/5",
+    iconColor: "text-chart-3",
   },
   {
     icon: History,
     title: "Philosophy",
     description: "Understand thinkers, build arguments, and structure your dissertation.",
+    iconClass: "bg-gradient-to-br from-chart-5/25 to-chart-5/5",
+    iconColor: "text-chart-5",
   },
 ];
 
@@ -56,7 +72,7 @@ export default function NewChatPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const firstName = userDetails?.fullName?.split(' ')[0] || "there";
+  const firstName = userDetails?.fullName?.split(" ")[0] || "there";
 
   const handleSendMessage = async () => {
     if (!message.trim() || isLoading) return;
@@ -70,16 +86,9 @@ export default function NewChatPage() {
       sessionStorage.setItem(`thread_${thread.id}_initial_message`, message);
       router.push(`/c/${thread.id}`);
     } catch (err) {
-      console.error('Failed to create thread:', err);
-      setError(err instanceof Error ? err.message : 'Failed to create thread. Please try again.');
+      console.error("Failed to create thread:", err);
+      setError(err instanceof Error ? err.message : "Failed to create thread. Please try again.");
       setIsLoading(false);
-    }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      handleSendMessage();
     }
   };
 
@@ -88,104 +97,113 @@ export default function NewChatPage() {
   };
 
   return (
-    <div className="flex h-full flex-1 overflow-hidden px-4 sm:px-6 lg:px-8">
-      <div className="relative mx-auto flex h-full w-full max-w-7xl flex-col border-x">
-        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-5 overflow-y-auto px-4 py-4 text-center sm:px-6 lg:px-8 xl:overflow-hidden">
-          <div className="flex flex-col items-center gap-3">
-            <div className="relative inline-flex items-center gap-2 overflow-hidden rounded-full border bg-muted px-3 py-1 text-sm text-muted-foreground shadow-sm">
-              <span className="flex h-5 items-center rounded-full bg-primary px-2 text-xs font-semibold text-primary-foreground">
-                AI Tutor
-              </span>
-              Ready for today&apos;s Bac session
-              <BorderBeam className="opacity-70" />
+    <div className="relative flex h-full flex-1 flex-col overflow-y-auto">
+      {/* Ambient backdrop */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 -z-10 overflow-hidden"
+      >
+        <div className="absolute left-1/2 top-[12%] h-[28rem] w-[28rem] -translate-x-1/2 rounded-full bg-primary/10 blur-3xl" />
+        <div className="absolute left-[15%] top-[55%] h-72 w-72 rounded-full bg-secondary/10 blur-3xl" />
+        <div className="absolute right-[10%] top-[65%] h-72 w-72 rounded-full bg-chart-3/10 blur-3xl" />
+      </div>
+
+      <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col items-center justify-center gap-10 px-4 py-10 text-center sm:px-6 lg:px-8">
+        {/* Hero */}
+        <div className="flex flex-col items-center gap-4">
+          <span className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-card/70 px-3 py-1 text-xs font-medium text-muted-foreground shadow-sm backdrop-blur">
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inset-0 animate-ping rounded-full bg-primary/60" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
+            </span>
+            <span className="font-semibold uppercase tracking-wide text-primary">
+              AI Tutor
+            </span>
+            <span className="h-3 w-px bg-border/70" aria-hidden />
+            <span>Ready for today&apos;s Bac session</span>
+          </span>
+
+          <h1 className="max-w-3xl text-balance text-3xl font-semibold leading-tight tracking-tight text-foreground sm:text-4xl lg:text-[2.875rem]">
+            Hello{" "}
+            <span className="bg-gradient-to-br from-primary via-chart-3 to-secondary bg-clip-text text-transparent">
+              {firstName}
+            </span>
+            , what should we master today?
+          </h1>
+          <p className="max-w-2xl text-pretty text-sm leading-6 text-muted-foreground sm:text-base">
+            Ask for explanations, past-paper practice, summaries, or a study plan tuned to your section.
+          </p>
+        </div>
+
+        {/* Composer */}
+        <div className="w-full">
+          <PromptComposer
+            value={message}
+            onChange={setMessage}
+            onSubmit={handleSendMessage}
+            placeholder="Example: Explain derivatives from the Bac Math section…"
+            isSubmitting={isLoading}
+            modes={capabilities}
+            autoFocus
+          />
+
+          {error && (
+            <div className="mt-3 rounded-xl border border-destructive/30 bg-destructive/10 p-3 text-left text-sm text-destructive">
+              {error}
             </div>
-            <h1 className="max-w-3xl text-3xl font-semibold leading-tight tracking-tight text-foreground sm:text-4xl lg:text-5xl">
-              Hello {firstName}, what should we master today?
-            </h1>
-            <p className="max-w-2xl text-sm leading-6 text-muted-foreground sm:text-base">
-              Ask for explanations, past-paper practice, summaries, or a study plan tuned to your section.
+          )}
+        </div>
+
+        {/* Topic Suggestions */}
+        <div className="w-full">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Explore topics
+            </p>
+            <p className="text-xs text-muted-foreground/80">
+              Click a card to start
             </p>
           </div>
-
-          <div className="w-full max-w-2xl">
-            <div className="relative flex flex-col overflow-hidden rounded-xl border bg-card text-card-foreground shadow-xl shadow-primary/5 transition-all focus-within:border-primary/40 focus-within:shadow-primary/10">
-              <BorderBeam className="opacity-0 transition-opacity focus-within:opacity-70" />
-              <Textarea
-                value={message}
-                onChange={(e) => setMessage(e.target.value)}
-                onKeyDown={handleKeyDown}
-                className="!min-h-12 w-full resize-none border-0 bg-transparent px-5 pb-1 pt-4 text-base leading-relaxed shadow-none placeholder:text-muted-foreground/60 focus-visible:ring-0"
-                placeholder="Example: Explain derivatives from the Bac Math section..."
-                rows={1}
-                disabled={isLoading}
-              />
-              <div className="flex items-center justify-between gap-3 border-t bg-muted/35 px-4 py-2.5">
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {capabilities.map((cap) => {
-                    const Icon = cap.icon;
-                    return (
-                      <span
-                        key={cap.label}
-                        className="inline-flex items-center gap-1.5 rounded-full border bg-background/60 px-2.5 py-1 text-xs font-medium text-muted-foreground"
-                      >
-                        <Icon className="h-3 w-3" />
-                        {cap.label}
-                      </span>
-                    );
-                  })}
-                </div>
-                <Button
-                  onClick={handleSendMessage}
-                  disabled={!message.trim() || isLoading}
-                  size="icon"
-                  className={`h-9 w-9 shrink-0 rounded-full transition-all ${
-                    message.trim()
-                      ? "bg-primary text-primary-foreground shadow-sm hover:bg-primary/90"
-                      : "cursor-not-allowed bg-muted/70 text-muted-foreground/40"
-                  }`}
-                >
-                  {isLoading ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <ArrowUp className="h-4 w-4" />
+          <div className="grid grid-cols-1 gap-3 text-left sm:grid-cols-2">
+            {suggestions.map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  key={item.title}
+                  onClick={() => handleSuggestionClick(item.title)}
+                  disabled={isLoading}
+                  className={cn(
+                    "group relative flex items-start gap-4 overflow-hidden rounded-2xl border border-border/70 bg-card/80 p-4 backdrop-blur transition-all duration-300",
+                    "shadow-[0_10px_30px_-25px_rgba(0,0,0,0.45)]",
+                    "hover:-translate-y-0.5 hover:border-primary/40 hover:bg-card hover:shadow-[0_18px_40px_-25px_rgba(0,0,0,0.55)]",
+                    "disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:translate-y-0",
                   )}
-                </Button>
-              </div>
-            </div>
-
-            {error && (
-              <div className="mt-3 p-3 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive text-sm">
-                {error}
-              </div>
-            )}
-          </div>
-
-          <div className="w-full max-w-4xl">
-            <div className="mb-3 flex items-center justify-between">
-              <p className="text-sm font-semibold text-foreground">Explore topics</p>
-            </div>
-            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-              {suggestions.map((item) => {
-                const Icon = item.icon;
-                return (
-                  <button
-                    key={item.title}
-                    onClick={() => handleSuggestionClick(item.title)}
-                    disabled={isLoading}
-                    className="group relative flex gap-4 overflow-hidden rounded-xl border bg-card p-4 text-left shadow-xl shadow-primary/5 transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:bg-muted/30 disabled:opacity-50"
+                >
+                  <div
+                    className={cn(
+                      "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border/60 transition-transform group-hover:scale-105",
+                      item.iconClass,
+                    )}
                   >
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border bg-muted/50 transition-colors group-hover:bg-primary/10">
-                      <Icon className="h-4 w-4 text-primary" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-semibold text-foreground mb-0.5">{item.title}</p>
-                      <p className="text-xs text-muted-foreground leading-relaxed">{item.description}</p>
-                    </div>
-                    <ArrowUpRight className="h-4 w-4 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
-                  </button>
-                );
-              })}
-            </div>
+                    <Icon className={cn("h-5 w-5", item.iconColor)} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="mb-1 text-sm font-semibold text-foreground">
+                      {item.title}
+                    </p>
+                    <p className="text-xs leading-relaxed text-muted-foreground">
+                      {item.description}
+                    </p>
+                  </div>
+                  <ArrowUpRight
+                    className={cn(
+                      "h-4 w-4 shrink-0 -translate-x-1 translate-y-0 text-muted-foreground/60 opacity-0 transition-all",
+                      "group-hover:translate-x-0 group-hover:opacity-100 group-hover:text-primary",
+                    )}
+                  />
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>

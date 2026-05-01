@@ -89,7 +89,7 @@ export function PromptComposer({
           autoFocus={autoFocus}
           disabled={disabled || isSubmitting}
           className={cn(
-            "!min-h-[104px] w-full resize-none border-0 bg-transparent px-5 pb-2 pt-5 text-[15px] leading-relaxed shadow-none",
+            "!min-h-[104px] w-full resize-none border-0 bg-transparent dark:bg-transparent px-5 pb-2 pt-5 text-[15px] leading-relaxed shadow-none",
             "placeholder:text-muted-foreground/60 focus-visible:ring-0 focus-visible:outline-none",
             textareaClassName,
           )}

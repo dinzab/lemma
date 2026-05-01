@@ -108,16 +108,16 @@ export function PromptComposer({
           )}
         />
 
-        <div className="flex flex-wrap items-center gap-2 px-4 pb-4 pt-2 sm:px-5">
+        <div className="flex flex-wrap items-center gap-1.5 px-3 pb-3 pt-1 sm:px-4">
           <button
             type="button"
             aria-label="Attach file"
-            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border/70 bg-background/60 text-muted-foreground transition-colors hover:border-border hover:bg-muted/60 hover:text-foreground"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-muted-foreground/80 transition-colors hover:bg-muted/70 hover:text-foreground"
           >
-            <Paperclip className="h-4 w-4" />
+            <Paperclip className="h-[18px] w-[18px]" />
           </button>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-1">
             {chips.map((chip) => {
               const Icon = chip.icon;
               return (
@@ -125,33 +125,27 @@ export function PromptComposer({
                   key={chip.id}
                   type="button"
                   className={cn(
-                    "inline-flex items-center gap-2 rounded-full border border-border/70 bg-background/60 px-3.5 py-1.5 text-[13px] font-medium text-foreground/80 transition-colors",
-                    "hover:border-border hover:bg-muted/60 hover:text-foreground",
+                    "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[13px] font-medium text-muted-foreground transition-colors",
+                    "hover:bg-muted/70 hover:text-foreground",
                   )}
                 >
-                  <Icon className="h-4 w-4 text-muted-foreground" />
+                  <Icon className="h-[15px] w-[15px]" />
                   {chip.label}
                 </button>
               );
             })}
           </div>
 
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex items-center gap-1">
             <button
               type="button"
               className={cn(
-                "inline-flex items-center gap-2 rounded-full px-2 py-1.5 text-[13px] font-medium text-foreground/80 transition-colors",
-                "hover:bg-muted/60 hover:text-foreground",
+                "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[13px] font-medium text-muted-foreground transition-colors",
+                "hover:bg-muted/70 hover:text-foreground",
               )}
             >
-              <span
-                className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500 text-white"
-                aria-hidden
-              >
-                <span className="h-2 w-2 rounded-full bg-white" />
-              </span>
               <span>Lemma 1.0</span>
-              <ChevronDown className="h-4 w-4 text-muted-foreground" />
+              <ChevronDown className="h-3.5 w-3.5" />
             </button>
 
             {showStop ? (

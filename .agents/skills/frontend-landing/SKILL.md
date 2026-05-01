@@ -26,6 +26,34 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoiY
 
 For anything that hits Supabase (auth, dashboard, threads), use real credentials. Do not commit `.env.local`.
 
+## Devin Secrets Needed
+
+For landing-only testing, no real secrets are required if placeholder Supabase values are used.
+
+For authenticated dashboard/chat/sidebar testing, request these as temporary or saved Devin secrets; never commit them:
+
+- `LEMMA_SUPABASE_URL`
+- `LEMMA_SUPABASE_ANON_KEY`
+- `LEMMA_SUPABASE_SERVICE_ROLE_KEY`
+- `LEMMA_NVIDIA_API_KEY`
+
+Use the service-role key only for test-user setup/cleanup through Supabase Admin APIs. If the service-role key returns `401 Invalid API key`, ask for the current key from Supabase Dashboard → Project Settings → API or a confirmed dev test account.
+
+## Authenticated dashboard/chat smoke test
+
+Use this flow when testing logged-in pages, sidebar threads, and basic non-RAG chat:
+
+1. Create ignored local env files:
+   - `frontend/.env.local`: `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `NEXT_PUBLIC_SITE_URL=http://localhost:3000`, `BACKEND_URL=http://localhost:5000`
+   - `backend/.env.local`: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `MODEL_PROVIDER=nvidia`, `NVIDIA_API_KEY`, `NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1`, `NVIDIA_MODEL_NAME`, `PORT=5000`, `FRONTEND_URL=http://localhost:3000`
+2. Start backend from `backend/` with `npm run start:dev`.
+3. Start frontend from `frontend/` with `npm run dev`.
+4. Create a temporary confirmed Supabase test user via `supabase.auth.admin.createUser({ email_confirm: true })`, then sign in through `/login` in the browser.
+5. Test `/new` → submit a prompt → `/c/:id`; verify the sidebar row appears and is active, assistant text streams, rename updates the exact row title, and delete redirects back to `/new`.
+6. Clean up by deleting the temporary Supabase user and removing ignored `.env.local` files.
+
+`POSTGRES_URI` may be omitted for a short local smoke test; the backend falls back to `MemorySaver`, so thread state will not persist across backend restarts. RAG can remain unset for non-RAG prompts; missing `QDRANT_*`/`NEO4J_*` may log warnings but should not block the basic chat flow.
+
 ## Lint, typecheck, build
 
 - Type-check: `cd frontend && npx tsc --noEmit` — must be clean before pushing.
@@ -120,4 +148,4 @@ Every layout in `WorkflowAnimation` includes a `md:hidden` block that stacks the
 
 ## PR workflow
 
-The repo has no CI configured at the moment (no GitHub Actions, no required checks). Always run the typecheck and the file-scoped lint locally before pushing — there is no automated safety net.
+CI now runs frontend/backend checks for PRs. Still run focused local checks for touched areas before pushing, then verify GitHub Actions on the PR.

@@ -50,7 +50,7 @@ export function PromptComposer({
   onSelectMode,
   className,
   textareaClassName,
-  rows = 1,
+  rows = 3,
   autoFocus = false,
 }: PromptComposerProps) {
   const trimmed = value.trim();
@@ -89,30 +89,27 @@ export function PromptComposer({
           autoFocus={autoFocus}
           disabled={disabled || isSubmitting}
           className={cn(
-            "!min-h-14 w-full resize-none border-0 bg-transparent px-5 pb-2 pt-4 text-[15px] leading-relaxed shadow-none",
+            "!min-h-[104px] w-full resize-none border-0 bg-transparent px-5 pb-2 pt-5 text-[15px] leading-relaxed shadow-none",
             "placeholder:text-muted-foreground/60 focus-visible:ring-0 focus-visible:outline-none",
             textareaClassName,
           )}
         />
 
         <div className="flex flex-wrap items-center justify-between gap-3 px-3 pb-3 pt-1 sm:px-4">
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-1">
             {modes?.map((mode) => {
               const Icon = mode.icon;
               const isActive = selectedModeId === mode.id;
               const baseClass =
-                "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition-colors";
+                "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[13px] font-medium transition-colors";
 
               if (!isSelectable) {
                 return (
                   <span
                     key={mode.id}
-                    className={cn(
-                      baseClass,
-                      "border-border/60 bg-transparent text-muted-foreground",
-                    )}
+                    className={cn(baseClass, "text-muted-foreground")}
                   >
-                    <Icon className="h-3.5 w-3.5" />
+                    <Icon className="h-[15px] w-[15px]" />
                     {mode.label}
                   </span>
                 );
@@ -128,11 +125,11 @@ export function PromptComposer({
                     baseClass,
                     "cursor-pointer",
                     isActive
-                      ? "border-primary/40 bg-primary/15 text-primary"
-                      : "border-border/60 bg-transparent text-muted-foreground hover:border-primary/30 hover:text-primary",
+                      ? "text-primary"
+                      : "text-muted-foreground hover:bg-muted/50 hover:text-foreground",
                   )}
                 >
-                  <Icon className="h-3.5 w-3.5" />
+                  <Icon className="h-[15px] w-[15px]" />
                   {mode.label}
                 </button>
               );

@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { signup } from "../actions";
 import { toast } from "sonner";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { signupSchema, type SignupInput } from "@/lib/validations/auth";
 import { AuthShell } from "@/components/auth/auth-shell";
@@ -21,8 +21,8 @@ export default function SignupPage() {
 
     const {
         register,
+        control,
         handleSubmit,
-        watch,
         formState: { errors, isValid },
     } = useForm<SignupInput>({
         resolver: zodResolver(signupSchema),
@@ -35,7 +35,7 @@ export default function SignupPage() {
         },
     });
 
-    const passwordValue = watch("password") ?? "";
+    const passwordValue = useWatch({ control, name: "password" }) ?? "";
 
     const onSubmit = (data: SignupInput) => {
         startTransition(async () => {

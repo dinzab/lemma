@@ -2,7 +2,7 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useState, useRef, useEffect } from "react";
-import { Paperclip, Mic, ArrowUp, Square, Sparkles, BookOpen, FileText } from "lucide-react";
+import { ArrowUp, Square, Sparkles, BookOpen, FileText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useLemmaChat } from "@/hooks/useChat";
@@ -24,7 +24,7 @@ export default function ChatThreadPage() {
   const [selectedMode, setSelectedMode] = useState(modes[0]);
   const [isValidating, setIsValidating] = useState(true);
   const [hasValidated, setHasValidated] = useState(false);
-  const [initialMessageSent, setInitialMessageSent] = useState(false);
+  const initialMessageSentRef = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const {
@@ -67,17 +67,17 @@ export default function ChatThreadPage() {
   }, [threadId, router]);
 
   useEffect(() => {
-    if (!hasValidated || !isInitialized || initialMessageSent || messages.length > 0) return;
+    if (!hasValidated || !isInitialized || initialMessageSentRef.current || messages.length > 0) return;
 
     const storageKey = `thread_${threadId}_initial_message`;
     const initialMessage = sessionStorage.getItem(storageKey);
 
     if (initialMessage) {
+      initialMessageSentRef.current = true;
       sessionStorage.removeItem(storageKey);
-      setInitialMessageSent(true);
       sendMessage(initialMessage);
     }
-  }, [hasValidated, isInitialized, threadId, initialMessageSent, messages.length, sendMessage]);
+  }, [hasValidated, isInitialized, threadId, messages.length, sendMessage]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -114,7 +114,7 @@ export default function ChatThreadPage() {
     <div className="flex-1 flex flex-col h-full overflow-hidden">
       {/* Messages Area */}
       <div className="flex-1 overflow-y-auto scroll-smooth">
-        <div className="max-w-3xl mx-auto px-4 py-6 space-y-1">
+        <div className="mx-auto max-w-3xl space-y-1 px-4 py-6">
           {!isInitialized && (
             <div className="text-center text-muted-foreground py-12">
               <div className="h-8 w-8 rounded-full border-2 border-primary/30 border-t-primary animate-spin mx-auto mb-4" />
@@ -128,7 +128,7 @@ export default function ChatThreadPage() {
                 variant="ghost"
                 size="sm"
                 onClick={() => loadOlder()}
-                className="text-xs text-muted-foreground hover:text-foreground rounded-full px-4"
+                className="rounded-full border bg-card/70 px-4 text-xs text-muted-foreground hover:text-foreground"
               >
                 Load older messages
               </Button>
@@ -136,8 +136,8 @@ export default function ChatThreadPage() {
           )}
 
           {isInitialized && messages.length === 0 && !isLoading && (
-            <div className="text-center text-muted-foreground py-16">
-              <div className="h-12 w-12 rounded-xl bg-accent flex items-center justify-center mx-auto mb-4">
+            <div className="py-16 text-center text-muted-foreground">
+              <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-accent shadow-sm">
                 <Sparkles className="h-6 w-6 text-primary" />
               </div>
               <p className="text-lg font-semibold text-foreground">Start a conversation</p>
@@ -178,22 +178,22 @@ export default function ChatThreadPage() {
       </div>
 
       {/* Input Area */}
-      <div className="px-4 pb-4 pt-2 bg-gradient-to-t from-background via-background to-transparent">
+      <div className="bg-gradient-to-t from-background via-background to-transparent px-4 pb-5 pt-2">
         <div className="max-w-3xl mx-auto">
-          <div className="flex flex-col bg-card rounded-xl border border-border shadow-sm focus-within:shadow-md transition-all overflow-hidden">
+          <div className="flex flex-col overflow-hidden rounded-2xl border bg-card/85 shadow-xl shadow-primary/5 backdrop-blur transition-all focus-within:shadow-2xl focus-within:shadow-primary/10">
             <Textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               placeholder={`Ask anything in ${selectedMode.label} mode...`}
-              className="w-full bg-transparent border-0 focus-visible:ring-0 shadow-none resize-none min-h-[52px] max-h-[160px] px-4 pt-3.5 pb-1 text-sm placeholder:text-muted-foreground/50 leading-relaxed scrollbar-none"
+              className="w-full resize-none border-0 bg-transparent px-5 pb-2 pt-4 text-sm leading-relaxed shadow-none scrollbar-none placeholder:text-muted-foreground/50 focus-visible:ring-0"
               disabled={isLoading}
               rows={1}
             />
 
-            <div className="flex justify-between items-center px-3 pb-2.5">
+            <div className="flex flex-col gap-3 px-4 pb-4 sm:flex-row sm:items-center sm:justify-between">
               {/* Mode Selection */}
-              <div className="flex items-center gap-1">
+              <div className="flex flex-wrap items-center gap-1.5">
                 {modes.map((mode) => {
                   const Icon = mode.icon;
                   const isActive = selectedMode.id === mode.id;
@@ -201,10 +201,10 @@ export default function ChatThreadPage() {
                     <button
                       key={mode.id}
                       onClick={() => setSelectedMode(mode)}
-                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-all ${
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold transition-all ${
                         isActive 
                           ? "bg-primary/10 text-primary" 
-                          : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
+                          : "bg-muted text-muted-foreground hover:text-foreground hover:bg-muted/80"
                       }`}
                     >
                       <Icon className="h-3 w-3" />
@@ -214,28 +214,13 @@ export default function ChatThreadPage() {
                 })}
               </div>
 
-              {/* Actions */}
-              <div className="flex items-center gap-1">
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 rounded-full text-muted-foreground/60 hover:text-foreground"
-                >
-                  <Paperclip className="h-4 w-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 rounded-full text-muted-foreground/60 hover:text-foreground"
-                >
-                  <Mic className="h-4 w-4" />
-                </Button>
+              <div className="flex items-center justify-end">
                 <div className="pl-0.5">
                   {isLoading ? (
                     <Button
                       onClick={handleStop}
                       size="icon"
-                      className="h-8 w-8 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm"
+                      className="h-10 w-10 rounded-full bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm"
                     >
                       <Square className="h-3 w-3 fill-current" />
                     </Button>
@@ -244,7 +229,7 @@ export default function ChatThreadPage() {
                       onClick={handleSend}
                       disabled={!input.trim()}
                       size="icon"
-                      className={`h-8 w-8 rounded-full transition-all ${
+                      className={`h-10 w-10 rounded-full transition-all ${
                         input.trim() 
                           ? "bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm" 
                           : "bg-muted/50 text-muted-foreground/40 cursor-not-allowed"

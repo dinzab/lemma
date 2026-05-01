@@ -180,3 +180,34 @@ export async function deleteThread(threadId: string): Promise<void> {
         throw new Error('Failed to delete thread');
     }
 }
+
+/**
+ * Renames a thread via Next.js API route
+ *
+ * @param threadId - The thread ID to rename
+ * @param title - The new thread title
+ */
+export async function renameThread(threadId: string, title: string): Promise<Thread> {
+    const response = await fetch(`/api/threads/${threadId}`, {
+        method: 'PATCH',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ title: sanitizeTitle(title) }),
+    });
+
+    if (!response.ok) {
+        const error: ApiError = await response.json().catch(() => ({
+            error: 'Unknown Error',
+            message: 'Failed to rename thread',
+        }));
+
+        const message = Array.isArray(error.message)
+            ? error.message.join(', ')
+            : error.message;
+
+        throw new Error(message);
+    }
+
+    return response.json();
+}

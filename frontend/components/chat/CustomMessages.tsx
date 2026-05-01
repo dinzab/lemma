@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { MarkdownRenderer } from "@/components/ui/markdown-renderer";
-import { Sparkles, RefreshCw, User, ChevronRight } from "lucide-react";
+import { Sparkles, RefreshCw, ChevronRight } from "lucide-react";
 import { ThinkingRenderer, parseThinkingContent } from "@/components/chat/ThinkingRenderer";
 import { Button } from "@/components/ui/button";
 
@@ -19,21 +19,44 @@ export interface Message {
 export interface ToolCall {
   id: string;
   name: string;
-  args: any; // Can be partial JSON string during streaming or parsed object
-  result?: any;
+  args: unknown;
+  result?: unknown;
   status?: 'pending' | 'executing' | 'complete' | 'error';
 }
 
-// Helper function to extract text content from multimodal message content
-function extractTextContent(content: any): string {
+type ToolResultItem = {
+  doc_id?: string;
+  exercise_id?: string;
+  id?: string;
+  text?: string;
+  content?: string;
+  year?: string | number;
+  session?: string;
+  section?: string;
+  subject?: string;
+  topic?: string;
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function getString(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
+}
+
+function toToolResultItem(value: unknown): ToolResultItem {
+  return isRecord(value) ? value : {};
+}
+
+function extractTextContent(content: unknown): string {
   if (typeof content === 'string') {
     return content;
   }
   if (Array.isArray(content)) {
-    // Extract text from content array (multimodal messages)
     return content
-      .filter((part) => part?.type === 'text')
-      .map((part) => part.text)
+      .map((part) => (isRecord(part) && part.type === 'text' ? getString(part.text) : undefined))
+      .filter((text): text is string => Boolean(text))
       .join('\n');
   }
   return '';
@@ -96,7 +119,8 @@ const SingleToolCall = ({ call }: { call: ToolCall }) => {
   const formatArgs = () => {
     if (!call.args) return null;
     try {
-      const parsed = typeof call.args === 'object' ? call.args : JSON.parse(call.args);
+      const parsed = typeof call.args === 'string' ? JSON.parse(call.args) : call.args;
+      if (!isRecord(parsed)) return <span className="opacity-70">{String(call.args)}</span>;
       return Object.entries(parsed).map(([key, value]) => (
         <span key={key} className="inline-flex gap-1 mr-3">
           <span className="text-muted-foreground/50">{key}:</span>
@@ -121,9 +145,11 @@ const SingleToolCall = ({ call }: { call: ToolCall }) => {
         if (Array.isArray(parsed)) {
           return (
             <div className="space-y-3 mt-3">
-              {parsed.map((item: any, idx: number) => {
+              {parsed.map((rawItem: unknown, idx: number) => {
+                const item = toToolResultItem(rawItem);
                 const isItemExpanded = expandedItems.has(idx);
-                const hasLongText = item.text && item.text.length > 200;
+                const text = getString(item.text) ?? "";
+                const hasLongText = text.length > 200;
                 
                 return (
                   <div 
@@ -177,12 +203,12 @@ const SingleToolCall = ({ call }: { call: ToolCall }) => {
                     </div>
                     
                     {/* Content area with markdown */}
-                    {item.text && (
+                    {text && (
                       <div className="px-3 pb-3">
                         <div 
                           className={`text-sm text-foreground/80 leading-relaxed ${!isItemExpanded && hasLongText ? 'line-clamp-4' : ''}`}
                         >
-                          <MarkdownRenderer content={isItemExpanded ? item.text : item.text.slice(0, 400) + (hasLongText && !isItemExpanded ? '...' : '')} />
+                          <MarkdownRenderer content={isItemExpanded ? text : text.slice(0, 400) + (hasLongText && !isItemExpanded ? '...' : '')} />
                         </div>
                         
                         {/* Expand/Collapse button */}
@@ -246,7 +272,9 @@ const SingleToolCall = ({ call }: { call: ToolCall }) => {
       if (content.trim().startsWith('[')) {
         return JSON.parse(content).length;
       }
-    } catch {}
+    } catch {
+      return 0;
+    }
     return 0;
   })();
 
@@ -325,8 +353,11 @@ export const CustomToolMessage = ({ message }: { message: Message }) => {
       if (Array.isArray(parsed)) {
         resultCount = parsed.length;
         // Show a summary instead of raw JSON
-        formattedResult = parsed.map((item: any, idx: number) => 
-          `${idx + 1}. ${item.doc_id || item.id || 'Result'}: ${(item.text || item.content || JSON.stringify(item)).slice(0, 100)}...`
+        formattedResult = parsed.map((rawItem: unknown, idx: number) => {
+          const item = toToolResultItem(rawItem);
+          const preview = item.text ?? item.content ?? JSON.stringify(rawItem);
+          return `${idx + 1}. ${item.doc_id || item.id || 'Result'}: ${preview.slice(0, 100)}...`;
+        }
         ).join('\n');
       }
     } catch {

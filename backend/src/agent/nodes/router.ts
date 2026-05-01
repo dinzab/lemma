@@ -10,7 +10,11 @@ export function routeToToolNode(state: {
   messages: BaseMessage[];
 }): 'tool_node' | typeof END {
   const last = state.messages[state.messages.length - 1];
-  if (last instanceof AIMessage && last.tool_calls && last.tool_calls.length > 0) {
+  if (
+    last instanceof AIMessage &&
+    last.tool_calls &&
+    last.tool_calls.length > 0
+  ) {
     return 'tool_node';
   }
   return END;

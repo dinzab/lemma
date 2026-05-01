@@ -1,23 +1,24 @@
 "use client";
 
 import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 import { useTheme } from "next-themes";
 import {
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
   MessageSquare,
-  Search,
-  Archive,
   ChevronDown,
   Menu,
-  User,
-  Settings,
   LogOut,
   Sun,
   Moon,
   GraduationCap,
   Home,
+  MoreHorizontal,
+  Pencil,
+  Trash2,
+  Loader2,
 } from "lucide-react";
 import { logout } from "../(auth)/actions";
 import { Button } from "@/components/ui/button";
@@ -27,13 +28,14 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { useState, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { UserProvider, useUser } from "@/context/user-context";
+import { deleteThread, getUserThreads, renameThread, type Thread } from "@/lib/api/threads";
+import { toast } from "sonner";
 
 interface SidebarContentProps {
   setIsSidebarOpen: (open: boolean) => void;
@@ -41,12 +43,28 @@ interface SidebarContentProps {
 
 const SidebarContent = ({ setIsSidebarOpen }: SidebarContentProps) => {
   const { setTheme, theme } = useTheme();
-  const [mounted, setMounted] = useState(false);
   const { userDetails, loading } = useUser();
+  const pathname = usePathname();
+  const router = useRouter();
+  const [threads, setThreads] = useState<Thread[]>([]);
+  const [isLoadingThreads, setIsLoadingThreads] = useState(true);
+  const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
+
+  const refreshThreads = useCallback(async () => {
+    try {
+      setIsLoadingThreads(true);
+      const page = await getUserThreads(1, 30);
+      setThreads(page.threads);
+    } catch {
+      toast.error("Could not load recent chats");
+    } finally {
+      setIsLoadingThreads(false);
+    }
+  }, []);
 
   useEffect(() => {
-    setMounted(true);
-  }, []);
+    refreshThreads();
+  }, [refreshThreads, pathname]);
 
   const getInitials = (name: string) => {
     if (!name) return "U";
@@ -61,6 +79,38 @@ const SidebarContent = ({ setIsSidebarOpen }: SidebarContentProps) => {
   };
 
   const fullName = userDetails?.fullName || "User";
+  const activeThreadId = pathname?.startsWith("/c/") ? pathname.split("/")[2] : null;
+  const currentTheme = theme === "dark" ? "dark" : "light";
+
+  const handleRenameThread = async (thread: Thread) => {
+    const nextTitle = window.prompt("Rename chat", thread.title);
+    if (!nextTitle || nextTitle.trim() === thread.title) return;
+
+    try {
+      const updated = await renameThread(thread.id, nextTitle.trim());
+      setThreads((current) =>
+        current.map((item) => (item.id === updated.id ? updated : item)),
+      );
+      toast.success("Chat renamed");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to rename chat");
+    }
+  };
+
+  const handleDeleteThread = async (thread: Thread) => {
+    if (!window.confirm(`Delete "${thread.title}"?`)) return;
+
+    try {
+      await deleteThread(thread.id);
+      setThreads((current) => current.filter((item) => item.id !== thread.id));
+      toast.success("Chat deleted");
+      if (activeThreadId === thread.id) {
+        router.push("/new");
+      }
+    } catch {
+      toast.error("Failed to delete chat");
+    }
+  };
 
   return (
     <div className="flex h-full flex-col">
@@ -83,32 +133,25 @@ const SidebarContent = ({ setIsSidebarOpen }: SidebarContentProps) => {
       </div>
 
       {/* Primary Navigation */}
-      <nav className="flex flex-col gap-0.5 px-2">
+      <nav className="flex flex-col gap-1 px-2">
         <Link
           href="/new"
-          className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium hover:bg-sidebar-accent transition-colors"
+          className={cn(
+            "flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-semibold transition-colors",
+            pathname === "/new"
+              ? "bg-primary/10 text-primary shadow-sm"
+              : "text-sidebar-foreground hover:bg-sidebar-accent"
+          )}
         >
           <Home className="h-4 w-4" />
-          <span>Home</span>
+          <span>Study home</span>
         </Link>
-        <button
-          className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium hover:bg-sidebar-accent transition-colors text-left"
-        >
-          <Search className="h-4 w-4" />
-          <span>Search</span>
-        </button>
-        <button
-          className="flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium hover:bg-sidebar-accent transition-colors text-left"
-        >
-          <Archive className="h-4 w-4" />
-          <span>Archived</span>
-        </button>
       </nav>
 
       {/* New Chat Button */}
       <div className="px-2 pt-5">
         <Link href="/new">
-          <Button className="w-full justify-center gap-2 rounded-lg h-9 text-sm font-semibold bg-secondary text-secondary-foreground hover:bg-secondary/90 shadow-sm">
+          <Button className="w-full justify-center gap-2 rounded-xl h-10 text-sm font-bold bg-secondary text-secondary-foreground hover:bg-secondary/90 shadow-sm shadow-secondary/20">
             <Plus className="h-4 w-4" />
             New Chat
           </Button>
@@ -123,27 +166,70 @@ const SidebarContent = ({ setIsSidebarOpen }: SidebarContentProps) => {
           </p>
         </div>
         <ScrollArea className="flex-1 px-2">
-          <div className="flex flex-col gap-0.5">
-            {[
-              { title: "The causes of World War I", active: true },
-              { title: "Solving quadratic equations", active: false },
-              { title: "Basics of cellular respiration", active: false },
-              { title: "French Revolution key figures", active: false },
-            ].map((chat, i) => (
-              <Link
-                key={i}
-                href="#"
-                className={cn(
-                  "flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors",
-                  chat.active
-                    ? "bg-sidebar-accent text-sidebar-accent-foreground font-medium"
-                    : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-                )}
-              >
-                <MessageSquare className="h-4 w-4 shrink-0" />
-                <span className="truncate">{chat.title}</span>
-              </Link>
-            ))}
+          <div className="flex flex-col gap-1">
+            {isLoadingThreads && (
+              <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Loading chats
+              </div>
+            )}
+
+            {!isLoadingThreads && threads.length === 0 && (
+              <p className="px-3 py-3 text-xs leading-relaxed text-muted-foreground">
+                Your conversations will appear here after the first message.
+              </p>
+            )}
+
+            {threads.map((chat) => {
+              const isActive = activeThreadId === chat.id;
+              return (
+                <div
+                  key={chat.id}
+                  className={cn(
+                    "group relative flex items-center rounded-xl text-sm transition-colors",
+                    isActive
+                      ? "bg-sidebar-accent text-sidebar-accent-foreground shadow-sm"
+                      : "text-muted-foreground hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground"
+                  )}
+                >
+                  <Link
+                    href={`/c/${chat.id}`}
+                    className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5"
+                  >
+                    <MessageSquare className={cn("h-4 w-4 shrink-0", isActive && "text-primary")} />
+                    <span className={cn("truncate", isActive && "font-semibold")}>{chat.title}</span>
+                  </Link>
+
+                  <DropdownMenu
+                    open={activeMenuId === chat.id}
+                    onOpenChange={(open) => setActiveMenuId(open ? chat.id : null)}
+                  >
+                    <DropdownMenuTrigger asChild>
+                      <button className="mr-1 flex h-7 w-7 items-center justify-center rounded-lg opacity-0 transition-opacity hover:bg-background/50 group-hover:opacity-100 data-[state=open]:opacity-100">
+                        <MoreHorizontal className="h-4 w-4" />
+                        <span className="sr-only">Chat actions</span>
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-40">
+                      <DropdownMenuItem
+                        className="cursor-pointer gap-2"
+                        onClick={() => handleRenameThread(chat)}
+                      >
+                        <Pencil className="h-4 w-4" />
+                        Rename
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        className="cursor-pointer gap-2 text-destructive"
+                        onClick={() => handleDeleteThread(chat)}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                        Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
+              );
+            })}
           </div>
         </ScrollArea>
       </div>
@@ -153,24 +239,23 @@ const SidebarContent = ({ setIsSidebarOpen }: SidebarContentProps) => {
         {/* Theme Toggle */}
         <div className="flex items-center justify-between px-3 py-1">
           <span className="text-xs font-medium text-muted-foreground">Theme</span>
-          {mounted && (
-            <button
-              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-            >
-              {theme === "dark" ? (
-                <>
-                  <Sun className="h-3.5 w-3.5" />
-                  <span>Light</span>
-                </>
-              ) : (
-                <>
-                  <Moon className="h-3.5 w-3.5" />
-                  <span>Dark</span>
-                </>
-              )}
-            </button>
-          )}
+          <button
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+            onClick={() => setTheme(currentTheme === "dark" ? "light" : "dark")}
+            suppressHydrationWarning
+          >
+            {currentTheme === "dark" ? (
+              <>
+                <Sun className="h-3.5 w-3.5" />
+                <span>Light</span>
+              </>
+            ) : (
+              <>
+                <Moon className="h-3.5 w-3.5" />
+                <span>Dark</span>
+              </>
+            )}
+          </button>
         </div>
 
         {/* User Profile */}
@@ -179,6 +264,7 @@ const SidebarContent = ({ setIsSidebarOpen }: SidebarContentProps) => {
             <button className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg hover:bg-sidebar-accent transition-colors text-left">
               <div className="size-8 min-w-8 rounded-full bg-primary/15 flex items-center justify-center overflow-hidden">
                 {userDetails?.avatarUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element
                   <img src={userDetails.avatarUrl} alt={fullName} className="h-full w-full object-cover" />
                 ) : (
                   <span className="font-semibold text-xs text-primary">{getInitials(fullName)}</span>
@@ -196,15 +282,6 @@ const SidebarContent = ({ setIsSidebarOpen }: SidebarContentProps) => {
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" className="w-56" side="top">
-            <DropdownMenuItem className="cursor-pointer gap-2">
-              <User className="h-4 w-4" />
-              Profile
-            </DropdownMenuItem>
-            <DropdownMenuItem className="cursor-pointer gap-2">
-              <Settings className="h-4 w-4" />
-              Settings
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
             <DropdownMenuItem className="cursor-pointer gap-2 text-destructive" onClick={() => logout()}>
               <LogOut className="h-4 w-4" />
               Sign out
@@ -226,11 +303,13 @@ export default function DashboardLayout({
   return (
     <UserProvider>
       <TooltipProvider>
-        <div className="flex h-screen w-full bg-background text-foreground">
+        <div className="relative flex h-screen w-full overflow-hidden bg-background text-foreground">
+          <div className="pointer-events-none absolute -left-24 top-0 h-72 w-72 rounded-full bg-primary/15 blur-3xl" />
+          <div className="pointer-events-none absolute -right-24 bottom-0 h-80 w-80 rounded-full bg-secondary/20 blur-3xl" />
           {/* Desktop Sidebar */}
           <aside 
             className={cn(
-              "hidden md:flex flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground transition-all duration-300 ease-in-out overflow-hidden",
+              "relative z-10 hidden md:flex flex-col border-r border-sidebar-border bg-sidebar/85 text-sidebar-foreground backdrop-blur-xl transition-all duration-300 ease-in-out overflow-hidden",
               isSidebarOpen ? "w-[260px]" : "w-0 border-r-0"
             )}
           >
@@ -240,9 +319,9 @@ export default function DashboardLayout({
           </aside>
 
           {/* Main Content */}
-          <main className="flex flex-1 flex-col h-screen overflow-hidden relative">
+          <main className="relative z-10 flex flex-1 flex-col h-screen overflow-hidden">
             {/* Mobile Header */}
-            <header className="flex md:hidden items-center justify-between px-4 py-3 border-b border-border bg-background">
+            <header className="flex md:hidden items-center justify-between px-4 py-3 border-b border-border bg-background/80 backdrop-blur-xl">
               <Link href="/new" className="flex items-center gap-2.5">
                 <div className="bg-primary rounded-lg p-1.5">
                   <GraduationCap className="text-primary-foreground h-5 w-5" />
@@ -283,7 +362,9 @@ export default function DashboardLayout({
               </div>
             )}
 
-            {children}
+            <div className="relative flex min-h-0 flex-1 flex-col">
+              {children}
+            </div>
           </main>
         </div>
       </TooltipProvider>

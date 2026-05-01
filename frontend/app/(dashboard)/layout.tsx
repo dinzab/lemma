@@ -115,9 +115,9 @@ const SidebarContent = ({ setIsSidebarOpen }: SidebarContentProps) => {
   return (
     <div className="flex h-full flex-col">
       {/* Header */}
-      <div className="flex items-center justify-between px-2 pb-6">
+      <div className="flex items-center justify-between px-2 pb-5">
         <Link href="/new" className="flex items-center gap-2.5">
-          <div className="bg-primary rounded-lg p-1.5">
+          <div className="rounded-lg bg-primary p-1.5 shadow-sm shadow-primary/20">
             <GraduationCap className="text-primary-foreground h-5 w-5" />
           </div>
           <span className="text-base font-bold text-sidebar-foreground">BacPrep AI</span>
@@ -137,10 +137,10 @@ const SidebarContent = ({ setIsSidebarOpen }: SidebarContentProps) => {
         <Link
           href="/new"
           className={cn(
-            "flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-semibold transition-colors",
+            "flex items-center gap-3 rounded-lg border px-3 py-2 text-sm font-semibold transition-colors",
             pathname === "/new"
-              ? "bg-primary/10 text-primary shadow-sm"
-              : "text-sidebar-foreground hover:bg-sidebar-accent"
+              ? "border-primary/20 bg-primary/10 text-primary shadow-sm"
+              : "border-transparent text-sidebar-foreground hover:border-sidebar-border hover:bg-sidebar-accent/70"
           )}
         >
           <Home className="h-4 w-4" />
@@ -151,7 +151,7 @@ const SidebarContent = ({ setIsSidebarOpen }: SidebarContentProps) => {
       {/* New Chat Button */}
       <div className="px-2 pt-5">
         <Link href="/new">
-          <Button className="w-full justify-center gap-2 rounded-xl h-10 text-sm font-bold bg-secondary text-secondary-foreground hover:bg-secondary/90 shadow-sm shadow-secondary/20">
+          <Button className="h-10 w-full justify-center gap-2 rounded-lg bg-secondary text-sm font-bold text-secondary-foreground shadow-sm shadow-secondary/20 hover:bg-secondary/90">
             <Plus className="h-4 w-4" />
             New Chat
           </Button>
@@ -159,7 +159,7 @@ const SidebarContent = ({ setIsSidebarOpen }: SidebarContentProps) => {
       </div>
 
       {/* Recent Chats */}
-      <div className="flex-grow flex flex-col overflow-hidden mt-6">
+      <div className="mt-5 flex flex-grow flex-col overflow-hidden">
         <div className="flex items-center justify-between px-4 pb-2">
           <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
             Recent chats
@@ -186,15 +186,15 @@ const SidebarContent = ({ setIsSidebarOpen }: SidebarContentProps) => {
                 <div
                   key={chat.id}
                   className={cn(
-                    "group relative flex items-center rounded-xl text-sm transition-colors",
+                    "group relative flex items-center rounded-lg border text-sm transition-colors",
                     isActive
-                      ? "bg-sidebar-accent text-sidebar-accent-foreground shadow-sm"
-                      : "text-muted-foreground hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground"
+                      ? "border-primary/20 bg-sidebar-accent text-sidebar-accent-foreground shadow-sm"
+                      : "border-transparent text-muted-foreground hover:border-sidebar-border hover:bg-sidebar-accent/70 hover:text-sidebar-accent-foreground"
                   )}
                 >
                   <Link
                     href={`/c/${chat.id}`}
-                    className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2.5"
+                    className="flex min-w-0 flex-1 items-center gap-3 px-3 py-2"
                   >
                     <MessageSquare className={cn("h-4 w-4 shrink-0", isActive && "text-primary")} />
                     <span className={cn("truncate", isActive && "font-semibold")}>{chat.title}</span>
@@ -235,7 +235,7 @@ const SidebarContent = ({ setIsSidebarOpen }: SidebarContentProps) => {
       </div>
 
       {/* Footer */}
-      <div className="flex flex-col gap-2 border-t border-sidebar-border pt-4 px-2">
+      <div className="flex flex-col gap-2 border-t border-sidebar-border px-2 pt-4">
         {/* Theme Toggle */}
         <div className="flex items-center justify-between px-3 py-1">
           <span className="text-xs font-medium text-muted-foreground">Theme</span>
@@ -261,8 +261,8 @@ const SidebarContent = ({ setIsSidebarOpen }: SidebarContentProps) => {
         {/* User Profile */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg hover:bg-sidebar-accent transition-colors text-left">
-              <div className="size-8 min-w-8 rounded-full bg-primary/15 flex items-center justify-center overflow-hidden">
+            <button className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors hover:bg-sidebar-accent">
+              <div className="flex size-8 min-w-8 items-center justify-center overflow-hidden rounded-full border bg-primary/15">
                 {userDetails?.avatarUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img src={userDetails.avatarUrl} alt={fullName} className="h-full w-full object-cover" />
@@ -303,27 +303,26 @@ export default function DashboardLayout({
   return (
     <UserProvider>
       <TooltipProvider>
-        <div className="relative flex h-screen w-full overflow-hidden bg-background text-foreground">
-          <div className="pointer-events-none absolute -left-24 top-0 h-72 w-72 rounded-full bg-primary/15 blur-3xl" />
-          <div className="pointer-events-none absolute -right-24 bottom-0 h-80 w-80 rounded-full bg-secondary/20 blur-3xl" />
+        <div className="fixed inset-0 flex w-full overflow-hidden bg-background text-foreground">
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,var(--primary)/0.08,transparent_28rem),radial-gradient(circle_at_bottom_right,var(--secondary)/0.12,transparent_30rem)]" />
           {/* Desktop Sidebar */}
           <aside 
             className={cn(
-              "relative z-10 hidden md:flex flex-col border-r border-sidebar-border bg-sidebar/85 text-sidebar-foreground backdrop-blur-xl transition-all duration-300 ease-in-out overflow-hidden",
+              "relative z-10 hidden flex-col overflow-hidden border-r border-sidebar-border bg-sidebar/95 text-sidebar-foreground backdrop-blur-xl transition-all duration-300 ease-in-out md:flex",
               isSidebarOpen ? "w-[260px]" : "w-0 border-r-0"
             )}
           >
-            <div className="w-[260px] p-4 h-full">
+            <div className="h-full w-[260px] p-4">
               <SidebarContent setIsSidebarOpen={setIsSidebarOpen} />
             </div>
           </aside>
 
           {/* Main Content */}
-          <main className="relative z-10 flex flex-1 flex-col h-screen overflow-hidden">
+          <main className="relative z-10 flex h-full flex-1 flex-col overflow-hidden">
             {/* Mobile Header */}
-            <header className="flex md:hidden items-center justify-between px-4 py-3 border-b border-border bg-background/80 backdrop-blur-xl">
+            <header className="flex items-center justify-between border-b border-border bg-background/90 px-4 py-3 backdrop-blur-xl md:hidden">
               <Link href="/new" className="flex items-center gap-2.5">
-                <div className="bg-primary rounded-lg p-1.5">
+                <div className="rounded-lg bg-primary p-1.5">
                   <GraduationCap className="text-primary-foreground h-5 w-5" />
                 </div>
                 <span className="text-base font-bold">BacPrep AI</span>
@@ -334,7 +333,7 @@ export default function DashboardLayout({
                     <Menu className="h-5 w-5" />
                   </Button>
                 </SheetTrigger>
-                <SheetContent side="left" className="w-[260px] p-4 bg-sidebar text-sidebar-foreground border-r border-sidebar-border">
+                <SheetContent side="left" className="w-[260px] border-r border-sidebar-border bg-sidebar p-4 text-sidebar-foreground">
                   <SheetHeader className="sr-only">
                     <SheetTitle>Navigation Menu</SheetTitle>
                   </SheetHeader>
@@ -345,7 +344,7 @@ export default function DashboardLayout({
 
             {/* Desktop Sidebar Toggle (when closed) */}
             {!isSidebarOpen && (
-              <div className="hidden md:block absolute top-3 left-3 z-50">
+              <div className="absolute left-3 top-3 z-50 hidden md:block">
                 <Tooltip>
                   <TooltipTrigger asChild>
                     <Button 

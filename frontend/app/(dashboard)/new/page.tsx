@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { createThread, extractTitleFromMessage } from "@/lib/api/threads";
 import { useUser } from "@/context/user-context";
+import { BorderBeam } from "@/components/landing/border-beam";
 
 const capabilities = [
   { icon: Sparkles, label: "Reasoning" },
@@ -87,45 +88,45 @@ export default function NewChatPage() {
   };
 
   return (
-    <>
-      <div className="flex-1 overflow-y-auto px-4 py-8 md:px-6 lg:px-8">
-        <div className="mx-auto flex min-h-full w-full max-w-5xl flex-col items-center justify-center gap-8 text-center">
-          {/* Greeting */}
-          <div className="flex flex-col items-center gap-4">
-            <div className="relative inline-flex items-center gap-2 rounded-full border bg-muted px-3 py-1 text-sm text-muted-foreground shadow-sm">
+    <div className="flex h-full flex-1 overflow-hidden px-4 sm:px-6 lg:px-8">
+      <div className="relative mx-auto flex h-full w-full max-w-7xl flex-col border-x">
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-5 overflow-y-auto px-4 py-4 text-center sm:px-6 lg:px-8 xl:overflow-hidden">
+          <div className="flex flex-col items-center gap-3">
+            <div className="relative inline-flex items-center gap-2 overflow-hidden rounded-full border bg-muted px-3 py-1 text-sm text-muted-foreground shadow-sm">
               <span className="flex h-5 items-center rounded-full bg-primary px-2 text-xs font-semibold text-primary-foreground">
                 AI Tutor
               </span>
               Ready for today&apos;s Bac session
+              <BorderBeam className="opacity-70" />
             </div>
-            <h1 className="max-w-3xl text-4xl font-semibold leading-tight tracking-tight md:text-5xl">
+            <h1 className="max-w-3xl text-3xl font-semibold leading-tight tracking-tight text-foreground sm:text-4xl lg:text-5xl">
               Hello {firstName}, what should we master today?
             </h1>
-            <p className="max-w-2xl text-lg text-muted-foreground">
+            <p className="max-w-2xl text-sm leading-6 text-muted-foreground sm:text-base">
               Ask for explanations, past-paper practice, summaries, or a study plan tuned to your section.
             </p>
           </div>
 
-          {/* Input Area */}
           <div className="w-full max-w-2xl">
-            <div className="relative flex flex-col overflow-hidden rounded-2xl border bg-card/85 shadow-xl shadow-primary/5 backdrop-blur focus-within:shadow-2xl focus-within:shadow-primary/10 transition-all">
+            <div className="relative flex flex-col overflow-hidden rounded-xl border bg-card text-card-foreground shadow-xl shadow-primary/5 transition-all focus-within:border-primary/40 focus-within:shadow-primary/10">
+              <BorderBeam className="opacity-0 transition-opacity focus-within:opacity-70" />
               <Textarea
                 value={message}
                 onChange={(e) => setMessage(e.target.value)}
                 onKeyDown={handleKeyDown}
-                className="w-full resize-none border-0 bg-transparent px-5 pb-2 pt-5 text-base leading-relaxed shadow-none scrollbar-none placeholder:text-muted-foreground/50 focus-visible:ring-0"
+                className="!min-h-12 w-full resize-none border-0 bg-transparent px-5 pb-1 pt-4 text-base leading-relaxed shadow-none placeholder:text-muted-foreground/60 focus-visible:ring-0"
                 placeholder="Example: Explain derivatives from the Bac Math section..."
                 rows={1}
                 disabled={isLoading}
               />
-              <div className="flex flex-col gap-3 px-4 pb-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center justify-between gap-3 border-t bg-muted/35 px-4 py-2.5">
                 <div className="flex flex-wrap items-center gap-1.5">
                   {capabilities.map((cap) => {
                     const Icon = cap.icon;
                     return (
                       <span
                         key={cap.label}
-                        className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs font-medium text-muted-foreground"
+                        className="inline-flex items-center gap-1.5 rounded-full border bg-background/60 px-2.5 py-1 text-xs font-medium text-muted-foreground"
                       >
                         <Icon className="h-3 w-3" />
                         {cap.label}
@@ -133,24 +134,22 @@ export default function NewChatPage() {
                     );
                   })}
                 </div>
-                <div className="flex items-center justify-end">
-                  <Button
-                    onClick={handleSendMessage}
-                    disabled={!message.trim() || isLoading}
-                    size="icon"
-                    className={`h-10 w-10 rounded-full transition-all ${
-                      message.trim()
-                        ? "bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm"
-                        : "bg-muted/50 text-muted-foreground/40 cursor-not-allowed"
-                    }`}
-                  >
-                    {isLoading ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <ArrowUp className="h-4 w-4" />
-                    )}
-                  </Button>
-                </div>
+                <Button
+                  onClick={handleSendMessage}
+                  disabled={!message.trim() || isLoading}
+                  size="icon"
+                  className={`h-9 w-9 shrink-0 rounded-full transition-all ${
+                    message.trim()
+                      ? "bg-primary text-primary-foreground shadow-sm hover:bg-primary/90"
+                      : "cursor-not-allowed bg-muted/70 text-muted-foreground/40"
+                  }`}
+                >
+                  {isLoading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <ArrowUp className="h-4 w-4" />
+                  )}
+                </Button>
               </div>
             </div>
 
@@ -161,11 +160,11 @@ export default function NewChatPage() {
             )}
           </div>
 
-          <div className="w-full max-w-4xl pt-2">
-            <div className="mb-4 flex items-center justify-between">
+          <div className="w-full max-w-4xl">
+            <div className="mb-3 flex items-center justify-between">
               <p className="text-sm font-semibold text-foreground">Explore topics</p>
             </div>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
               {suggestions.map((item) => {
                 const Icon = item.icon;
                 return (
@@ -173,9 +172,9 @@ export default function NewChatPage() {
                     key={item.title}
                     onClick={() => handleSuggestionClick(item.title)}
                     disabled={isLoading}
-                    className="group flex gap-4 rounded-2xl border bg-card/70 p-5 text-left shadow-sm backdrop-blur transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md disabled:opacity-50"
+                    className="group relative flex gap-4 overflow-hidden rounded-xl border bg-card p-4 text-left shadow-xl shadow-primary/5 transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:bg-muted/30 disabled:opacity-50"
                   >
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-accent transition-colors group-hover:bg-primary/10">
+                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border bg-muted/50 transition-colors group-hover:bg-primary/10">
                       <Icon className="h-4 w-4 text-primary" />
                     </div>
                     <div className="min-w-0 flex-1">
@@ -190,6 +189,6 @@ export default function NewChatPage() {
           </div>
         </div>
       </div>
-    </>
+    </div>
   );
 }

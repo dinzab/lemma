@@ -77,8 +77,8 @@ export const CustomUserMessage = ({ message }: UserMessageProps) => {
   const textContent = extractTextContent(message.content);
   
   return (
-    <div className="flex justify-end mb-4">
-      <div className="bg-primary text-primary-foreground px-4 py-2.5 rounded-2xl rounded-tr-sm max-w-[85%] text-sm leading-relaxed font-medium">
+    <div className="mb-4 flex justify-end">
+      <div className="max-w-[85%] rounded-xl rounded-tr-sm bg-primary px-4 py-2.5 text-sm font-medium leading-relaxed text-primary-foreground shadow-sm shadow-primary/20">
         {textContent}
       </div>
     </div>
@@ -415,12 +415,12 @@ export const CustomAssistantMessage = ({
   const showPlaceholderThinking = isLoading && !thinking && !cleanContent;
 
   return (
-    <div className="flex gap-3 mb-6 group">
-      <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+    <div className="group mb-6 flex gap-3">
+      <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border bg-primary/10">
         <Sparkles className="h-4 w-4 text-primary" />
       </div>
       
-      <div className="flex-1 min-w-0 space-y-2">
+      <div className="min-w-0 flex-1 space-y-2">
         {/* Render Thinking Process */}
         {(thinking || showPlaceholderThinking) && (
           <div className="mb-2">
@@ -439,7 +439,7 @@ export const CustomAssistantMessage = ({
 
         {/* Render Main Content */}
         {(cleanContent || (isLoading && (!thinking || isComplete) && !showPlaceholderThinking)) && (
-          <div className="text-sm text-foreground/90 leading-relaxed">
+          <div className="rounded-xl border bg-card/75 px-4 py-3 text-sm leading-relaxed text-card-foreground shadow-sm">
             {cleanContent && <MarkdownRenderer content={cleanContent} />}
             {isLoading && !cleanContent && (
               <span className="inline-block w-2 h-4 bg-primary/50 animate-pulse rounded ml-1 align-middle" />

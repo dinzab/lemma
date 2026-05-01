@@ -3,8 +3,8 @@
 import * as React from "react";
 import {
   ArrowUp,
-  Atom,
   ChevronDown,
+  Compass,
   Image as ImageIcon,
   Loader2,
   Paperclip,
@@ -39,7 +39,7 @@ interface ChipDefinition {
 }
 
 const chips: ChipDefinition[] = [
-  { id: "reasoning", label: "Reasoning", icon: Atom },
+  { id: "reasoning", label: "Reasoning", icon: Compass },
   { id: "deep-research", label: "Deep research", icon: Telescope },
   { id: "image", label: "Image generation", icon: ImageIcon },
 ];
@@ -63,7 +63,7 @@ export function PromptComposer({
   disabled = false,
   className,
   textareaClassName,
-  rows = 2,
+  rows = 3,
   autoFocus = false,
 }: PromptComposerProps) {
   const trimmed = value.trim();
@@ -87,7 +87,7 @@ export function PromptComposer({
     <div className={cn("relative w-full", className)}>
       <div
         className={cn(
-          "group relative flex flex-col overflow-hidden rounded-3xl border border-border/70 bg-card/95",
+          "group relative flex flex-col overflow-hidden rounded-3xl border border-border/70 bg-card",
           "shadow-[0_2px_0_0_rgba(0,0,0,0.02),0_8px_24px_-18px_rgba(0,0,0,0.25)]",
           "transition-colors duration-200",
           "focus-within:border-border focus-within:shadow-[0_2px_0_0_rgba(0,0,0,0.03),0_12px_32px_-18px_rgba(0,0,0,0.3)]",
@@ -102,22 +102,22 @@ export function PromptComposer({
           autoFocus={autoFocus}
           disabled={disabled || isSubmitting}
           className={cn(
-            "!min-h-[60px] w-full resize-none border-0 bg-transparent px-5 pb-2 pt-5 text-[15px] leading-relaxed shadow-none",
+            "!min-h-[96px] w-full resize-none border-0 bg-transparent px-6 pb-2 pt-6 text-[15px] leading-relaxed shadow-none",
             "placeholder:text-muted-foreground/70 focus-visible:ring-0 focus-visible:outline-none",
             textareaClassName,
           )}
         />
 
-        <div className="flex flex-wrap items-center gap-2 px-3 pb-3 pt-2 sm:px-4">
+        <div className="flex flex-wrap items-center gap-2 px-4 pb-4 pt-2 sm:px-5">
           <button
             type="button"
             aria-label="Attach file"
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted/70 hover:text-foreground"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-border/70 bg-background/60 text-muted-foreground transition-colors hover:border-border hover:bg-muted/60 hover:text-foreground"
           >
             <Paperclip className="h-4 w-4" />
           </button>
 
-          <div className="flex flex-wrap items-center gap-1.5">
+          <div className="flex flex-wrap items-center gap-2">
             {chips.map((chip) => {
               const Icon = chip.icon;
               return (
@@ -125,11 +125,11 @@ export function PromptComposer({
                   key={chip.id}
                   type="button"
                   className={cn(
-                    "inline-flex items-center gap-1.5 rounded-full border border-border/70 bg-background/80 px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors",
-                    "hover:border-border hover:bg-muted/70 hover:text-foreground",
+                    "inline-flex items-center gap-2 rounded-full border border-border/70 bg-background/60 px-3.5 py-1.5 text-[13px] font-medium text-foreground/80 transition-colors",
+                    "hover:border-border hover:bg-muted/60 hover:text-foreground",
                   )}
                 >
-                  <Icon className="h-3.5 w-3.5" />
+                  <Icon className="h-4 w-4 text-muted-foreground" />
                   {chip.label}
                 </button>
               );
@@ -140,15 +140,18 @@ export function PromptComposer({
             <button
               type="button"
               className={cn(
-                "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors",
-                "hover:bg-muted/70 hover:text-foreground",
+                "inline-flex items-center gap-2 rounded-full px-2 py-1.5 text-[13px] font-medium text-foreground/80 transition-colors",
+                "hover:bg-muted/60 hover:text-foreground",
               )}
             >
-              <span className="flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500/15">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+              <span
+                className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500 text-white"
+                aria-hidden
+              >
+                <span className="h-2 w-2 rounded-full bg-white" />
               </span>
               <span>Lemma 1.0</span>
-              <ChevronDown className="h-3.5 w-3.5" />
+              <ChevronDown className="h-4 w-4 text-muted-foreground" />
             </button>
 
             {showStop ? (
@@ -169,10 +172,10 @@ export function PromptComposer({
                 size="icon"
                 aria-label="Send message"
                 className={cn(
-                  "h-9 w-9 rounded-full transition-all",
-                  trimmed && !isSubmitting
-                    ? "bg-primary text-primary-foreground shadow-sm shadow-primary/20 hover:bg-primary/90"
-                    : "cursor-not-allowed bg-muted text-muted-foreground/50 shadow-none",
+                  "h-9 w-9 rounded-full bg-primary text-primary-foreground shadow-sm shadow-primary/30 transition-all",
+                  sendDisabled
+                    ? "cursor-not-allowed opacity-90"
+                    : "hover:bg-primary/90",
                 )}
               >
                 {isSubmitting ? (

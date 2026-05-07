@@ -3,16 +3,21 @@ import { ChatController } from './chat.controller';
 import { ChatService } from './chat.service';
 import { AgentModule } from '../agent/agent.module';
 import { ThreadsModule } from '../threads/threads.module';
+import { AgentRunsModule } from '../agent-runs';
+import { MessagesModule } from '../messages';
 
 /**
  * ChatModule wires the streaming + paginated chat endpoints. It depends on:
- *   - AgentModule for the compiled LangGraph (AgentService) and the shared
- *     CheckpointerService used to read paginated history,
+ *   - AgentModule for the compiled LangGraph (AgentService),
  *   - ThreadsModule for ownership validation against the Supabase threads
- *     table before any stream byte goes out.
+ *     table before any stream byte goes out,
+ *   - AgentRunsModule for streaming-turn lifecycle bookkeeping and the
+ *     active-run lookup endpoint,
+ *   - MessagesModule for the flat conversation log that powers the
+ *     paginated history endpoint.
  */
 @Module({
-  imports: [AgentModule, ThreadsModule],
+  imports: [AgentModule, ThreadsModule, AgentRunsModule, MessagesModule],
   controllers: [ChatController],
   providers: [ChatService],
 })

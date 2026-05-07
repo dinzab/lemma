@@ -59,9 +59,14 @@ export function LemmaConversation({
   emptyTitle = "Start a conversation",
   emptyDescription = "Ask me anything about your Baccalaureate studies",
 }: LemmaConversationProps) {
-  const lastMessage = messages[messages.length - 1];
-  const lastIsUser = lastMessage?.role === "user";
-  const showAssistantTyping = isLoading && (lastIsUser || !lastMessage);
+  // Keep the typing indicator (avatar + bouncing dots) visible for the
+  // entire loading lifecycle — `submitted` AND `streaming` — instead of
+  // hiding it the moment the SDK creates the assistant placeholder.
+  // Without this the indicator vanished as soon as the first chunk
+  // arrived, leaving the user with a blank gap until enough text had
+  // streamed in to show — which the user reported as "loading dots and
+  // the assistant icon were removed when the agent starts streaming".
+  const showAssistantTyping = isLoading;
 
   if (messages.length === 0 && !isLoading) {
     return (
@@ -119,16 +124,19 @@ export function LemmaConversation({
             return null;
           }
 
+          // Assistant turns render full-width without the avatar chip
+          // — the typing indicator below is the only place the avatar
+          // shows, signalling "the tutor is currently speaking". Once
+          // the turn settles we want the answer text to read cleanly,
+          // not be flanked by a decorative icon column.
           return isAssistant ? (
-            <div
+            <Message
+              from="assistant"
               key={message.id}
-              className="flex w-full items-start gap-3"
+              className="w-full min-w-0"
             >
-              <AssistantAvatar className="mt-0.5" />
-              <Message from="assistant" className="flex-1 min-w-0">
-                <MessageContent>{renderedParts}</MessageContent>
-              </Message>
-            </div>
+              <MessageContent>{renderedParts}</MessageContent>
+            </Message>
           ) : (
             <Message from={message.role} key={message.id}>
               <MessageContent>{renderedParts}</MessageContent>

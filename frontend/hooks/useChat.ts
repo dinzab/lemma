@@ -114,7 +114,10 @@ export function useLemmaChat({
         }
         const page = (await res.json()) as MessagesPage;
         if (cancelled) return;
-        setMessages(toUiMessages(page.messages));
+        // Backend returns newest-first (cursor-paginated); the UI needs
+        // chronological order (oldest at top, newest at bottom) so the
+        // sticky-to-bottom transcript reads naturally.
+        setMessages(toUiMessages([...page.messages].reverse()));
         setSeededAt(threadId);
         setOlderCursor(page.nextCursor);
         setOlderTotal(page.total ?? page.messages.length);
@@ -164,7 +167,12 @@ export function useLemmaChat({
     const res = await fetch(url, { credentials: "include" });
     if (!res.ok) return;
     const page = (await res.json()) as MessagesPage;
-    setMessages((prev) => [...toUiMessages(page.messages), ...prev]);
+    // Newest-first → reverse to chronological so it can be prepended
+    // above the existing transcript without breaking ordering.
+    setMessages((prev) => [
+      ...toUiMessages([...page.messages].reverse()),
+      ...prev,
+    ]);
     setOlderCursor(page.nextCursor);
   }, [historyApi, olderCursor, setMessages, threadId]);
 

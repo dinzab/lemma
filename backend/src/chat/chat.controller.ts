@@ -14,10 +14,12 @@ import { ChatService } from './chat.service';
 import { GetMessagesQueryDto, MessagesPageDto, StreamChatDto } from './dto';
 import { SupabaseAuthGuard, type SupabaseJwtPayload } from '../auth';
 import { CurrentUser } from '../decorators';
+import { AgentRunsService, type ActiveRunDto } from '../agent-runs';
+import { ThreadsService } from '../threads/threads.service';
 
 /**
- * ChatController — owns the two endpoints that replace the standalone
- * FastAPI agent service:
+ * ChatController — owns the streaming + history endpoints that replace
+ * the standalone FastAPI agent service:
  *
  *   POST /chat/stream
  *     Body: { threadId, message }
@@ -26,11 +28,21 @@ import { CurrentUser } from '../decorators';
  *   GET /threads/:id/messages?limit=50&before=<msg_id>
  *     Cursor-paginated message read, newest-first. Powers the chat history
  *     virtualised list on the frontend.
+ *
+ *   GET /threads/:id/active-run
+ *     Returns { runId, status } for the most recent run on the thread, or
+ *     { runId: null, status: 'idle' } if none. Lets the client decide
+ *     whether to show "previous run failed, retry?" or to wait for an
+ *     in-flight run to finalize.
  */
 @Controller()
 @UseGuards(SupabaseAuthGuard)
 export class ChatController {
-  constructor(private readonly chat: ChatService) {}
+  constructor(
+    private readonly chat: ChatService,
+    private readonly threads: ThreadsService,
+    private readonly agentRuns: AgentRunsService,
+  ) {}
 
   @Post('chat/stream')
   async stream(
@@ -56,5 +68,16 @@ export class ChatController {
       limit: query.limit,
       before: query.before,
     });
+  }
+
+  @Get('threads/:id/active-run')
+  async activeRun(
+    @CurrentUser() user: SupabaseJwtPayload,
+    @Param('id', ParseUUIDPipe) threadId: string,
+  ): Promise<ActiveRunDto> {
+    // Resolve the thread first so a non-owner gets a flat 404 from
+    // ThreadsService (consistent with /messages and /chat/stream).
+    await this.threads.getThread(threadId, user.sub);
+    return this.agentRuns.getActiveRun(threadId, user.sub);
   }
 }

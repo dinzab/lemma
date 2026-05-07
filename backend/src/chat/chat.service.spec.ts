@@ -41,10 +41,7 @@ function makeMockResponse(): {
     flushHeaders: () => undefined,
     writeHead: (
       status: number,
-      statusOrHeaders?:
-        | string
-        | Record<string, string | number | string[]>
-        | undefined,
+      statusOrHeaders?: string | Record<string, string | number | string[]>,
       maybeHeaders?: Record<string, string | number | string[]>,
     ) => {
       response.statusCode = status;
@@ -314,24 +311,24 @@ describe('ChatService.streamRunToResponse', () => {
     expect(deps.agentRuns.cancelRun).not.toHaveBeenCalled();
   });
 
-  it('cancels the run when the client disconnects mid-stream', async () => {
+  it('keeps the run going after the client disconnects so resume can re-attach', async () => {
+    // Two-phase synthetic stream: first chunk lands, then the agent
+    // pauses until we explicitly let it through so we can disconnect
+    // mid-flight and observe that the loop carries on.
+    let resolveAgent: (() => void) | null = null;
+    const agentPaused = new Promise<void>((resolve) => {
+      resolveAgent = resolve;
+    });
     let aborted: AbortSignal | undefined;
     async function* synthetic(): AsyncGenerator<{
       mode: 'messages' | 'updates';
       payload: unknown;
     }> {
-      // Force the generator to wait until aborted so we can observe the
-      // cancel path. The agent.streamRun signature accepts a third
-      // `signal` arg; capture it via the mock below instead.
-      await new Promise<void>((resolve, reject) => {
-        const onAbort = () => reject(new DOMException('Aborted', 'AbortError'));
-        if (aborted?.aborted)
-          return reject(new DOMException('Aborted', 'AbortError'));
-        aborted?.addEventListener('abort', onAbort, { once: true });
-        // Safety net so the test can never hang.
-        setTimeout(resolve, 2000);
-      });
-      yield* messageEvent(new AIMessageChunk({ id: 'never', content: 'x' }));
+      yield* messageEvent(
+        new AIMessageChunk({ id: 'ai-1', content: 'partial ' }),
+      );
+      await agentPaused;
+      yield* messageEvent(new AIMessageChunk({ id: 'ai-1', content: 'done.' }));
     }
 
     const { service, deps } = buildService(synthetic());
@@ -350,18 +347,95 @@ describe('ChatService.streamRunToResponse', () => {
       response,
     });
 
-    // Let the stream open, then simulate the browser closing the tab.
-    await new Promise((r) => setImmediate(r));
+    // Let the stream open + the first chunk land, then simulate the
+    // browser closing the tab. The response side unwinds; the agent
+    // loop must keep running.
+    await new Promise((r) => setTimeout(r, 30));
     emitClose();
 
     await promise;
 
-    expect(deps.agentRuns.cancelRun).toHaveBeenCalledWith(
-      RUN_ID,
-      'Client disconnected.',
-    );
-    expect(deps.agentRuns.completeRun).not.toHaveBeenCalled();
+    // Disconnect alone must not cancel the run, must not abort the
+    // agent, and must not flip the lifecycle to a terminal state.
+    expect(aborted?.aborted ?? false).toBe(false);
+    expect(deps.agentRuns.cancelRun).not.toHaveBeenCalled();
     expect(deps.agentRuns.failRun).not.toHaveBeenCalled();
+    expect(deps.agentRuns.completeRun).not.toHaveBeenCalled();
+
+    // Now let the agent finish naturally — it should reach completion
+    // even though no client is listening.
+    resolveAgent?.();
+    const deadline = Date.now() + 1000;
+    while (
+      deps.agentRuns.completeRun.mock.calls.length === 0 &&
+      Date.now() < deadline
+    ) {
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    expect(deps.agentRuns.completeRun).toHaveBeenCalledWith(RUN_ID);
+    expect(deps.agentRuns.cancelRun).not.toHaveBeenCalled();
+    expect(deps.agentRuns.failRun).not.toHaveBeenCalled();
+  });
+
+  it('lets a resume subscriber re-attach to a still-running turn after disconnect', async () => {
+    // Mirrors the production reload flow: client disconnects mid-stream,
+    // the agent keeps running, and a fresh /chat/stream/resume request
+    // re-subscribes to the hub and receives the remaining chunks.
+    let resolveAgent: (() => void) | null = null;
+    const agentPaused = new Promise<void>((resolve) => {
+      resolveAgent = resolve;
+    });
+    async function* synthetic(): AsyncGenerator<{
+      mode: 'messages' | 'updates';
+      payload: unknown;
+    }> {
+      yield* messageEvent(
+        new AIMessageChunk({ id: 'ai-1', content: 'before-' }),
+      );
+      await agentPaused;
+      yield* messageEvent(
+        new AIMessageChunk({ id: 'ai-1', content: 'after.' }),
+      );
+    }
+
+    const { service } = buildService(synthetic());
+    const first = makeMockResponse();
+
+    const firstPromise = service.streamRunToResponse({
+      threadId: THREAD_ID,
+      userId: USER_ID,
+      message: 'hello',
+      response: first.response,
+    });
+
+    await new Promise((r) => setTimeout(r, 30));
+    first.emitClose();
+    await firstPromise;
+
+    // Re-attach via resume on a fresh response — and only NOW let the
+    // agent yield its remaining content. The resume subscriber must
+    // receive both the replayed pre-disconnect deltas AND the live
+    // post-disconnect deltas.
+    const second = makeMockResponse();
+    const resumePromise = service.resumeRunToResponse({
+      runId: RUN_ID,
+      response: second.response,
+    });
+    await new Promise((r) => setImmediate(r));
+    resolveAgent?.();
+    await resumePromise;
+
+    const types = (second.frames() as Array<{ type: string }>).map(
+      (c) => c.type,
+    );
+    expect(types[0]).toBe('start');
+    expect(types[types.length - 1]).toBe('finish');
+
+    const deltas = (second.frames() as Array<{ type: string; delta?: string }>)
+      .filter((c) => c.type === 'text-delta')
+      .map((c) => c.delta ?? '');
+    expect(deltas.join('')).toContain('before-');
+    expect(deltas.join('')).toContain('after.');
   });
 
   it('mirrors every wire chunk into RunStreamHub for resume', async () => {

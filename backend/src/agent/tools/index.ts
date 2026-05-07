@@ -13,6 +13,50 @@ import { EmbeddingsClient } from './embeddings.client';
 import { RerankerClient } from './reranker.client';
 
 /**
+ * Description for the write_todos planning tool. Mirrors the public
+ * description that ships with langchain's `TodoListMiddleware` (the
+ * upstream of deepagents' `write_todos`) so any given LLM that has been
+ * tuned against deepagents-style planning prompts will recognise it. We
+ * tailor the few examples to the Tunisian Bac tutoring domain.
+ */
+const WRITE_TODOS_TOOL_DESCRIPTION = `Use this tool to create and manage a structured task list for your current work session. This helps you track progress, organize complex tasks, and demonstrate thoroughness to the student.
+
+Only use this tool if you think it will help you stay organized. If the student's request is trivial and takes fewer than 3 steps, do NOT use this tool — just answer directly.
+
+## When to Use This Tool
+1. Complex multi-step tasks (3 or more distinct steps).
+2. Non-trivial tasks that require planning or multiple operations.
+3. The student explicitly asks for a study plan / roadmap.
+4. The student gives a list of things they want done.
+5. The plan may need revision as you discover what the corpus contains.
+
+## How to Use This Tool
+1. Mark a task in_progress BEFORE you start working on it.
+2. Mark a task completed IMMEDIATELY after finishing it — never batch completions.
+3. Revise the list as you learn — add new items, remove items that became irrelevant. Don't change items already marked completed.
+4. Each call REPLACES the entire todo list, so always re-include items that should remain.
+
+## When NOT to Use This Tool
+1. Single, straightforward tasks.
+2. Trivial requests where tracking adds no value.
+3. Anything completable in fewer than ~3 substantive steps.
+4. Conversational replies, greetings, or factual definitions.
+
+## Task States
+- pending: Not yet started.
+- in_progress: Currently working on. Always have at least one in_progress until everything is done.
+- completed: Fully finished. Never mark completed if the work is partial or blocked.
+
+## Task Quality
+- Items must be specific and actionable. Prefer "Find 3 hardest 2018 controle math problems on arithmétique" over "Search the corpus".
+- Break complex objectives into smaller steps you can actually verify.
+
+## Important Notes
+- Never call write_todos multiple times in parallel.
+- Don't be afraid to revise the list — new information may reveal new tasks or make old ones obsolete.
+`;
+
+/**
  * Domain-shaped tools the LLM binds against. Each verb mirrors how a
  * student / tutor talks about the Tunisian Baccalaureate corpus rather
  * than the underlying data store, so the agent can reason about
@@ -64,7 +108,61 @@ export class AgentToolsService {
       this.listChaptersTool(),
       this.listTopicsTool(),
       this.listExamsTool(),
+      this.writeTodosTool(),
     ];
+  }
+
+  // ---- write_todos ------------------------------------------------------
+
+  /**
+   * Planning capability — modeled after deepagents / langchain
+   * `TodoListMiddleware`. The LLM emits the full intended task list (each
+   * item carries a status: pending / in_progress / completed) and the UI
+   * renders it as a live "plan panel" above the chat transcript so the
+   * student can watch progress in real time.
+   *
+   * The tool itself is intentionally a no-op on the server side: the
+   * authoritative state is the latest `tool-input-available` event for
+   * `write_todos` on the wire, which the frontend reads off the message
+   * stream. We don't keep todos in LangGraph state because (a) we already
+   * stream every tool input/output through {@link ChatService}, and (b)
+   * persisting them as part of the dual-written `messages` table would
+   * couple the planning surface to the history schema for no benefit.
+   */
+  private writeTodosTool(): StructuredToolInterface {
+    return tool(
+      async ({ todos }) => {
+        return JSON.stringify({ ok: true, count: todos.length });
+      },
+      {
+        name: 'write_todos',
+        description: WRITE_TODOS_TOOL_DESCRIPTION,
+        schema: z.object({
+          todos: z
+            .array(
+              z.object({
+                content: z
+                  .string()
+                  .min(1)
+                  .describe(
+                    'Specific, actionable task description (one sentence).',
+                  ),
+                status: z
+                  .enum(['pending', 'in_progress', 'completed'])
+                  .describe(
+                    'Current status. Mark in_progress before starting and ' +
+                      'completed immediately after finishing — do not batch.',
+                  ),
+              }),
+            )
+            .describe(
+              'The full ordered todo list. Each call replaces the previous ' +
+                'list, so always include items already marked completed so ' +
+                'their status is preserved.',
+            ),
+        }),
+      },
+    );
   }
 
   // ---- search_questions -------------------------------------------------

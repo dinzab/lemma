@@ -82,6 +82,12 @@ export function LemmaConversation({
                     (typeof part.type === "string" &&
                       part.type.startsWith("tool-"))
                   ) {
+                    if (isWriteTodosPart(part)) {
+                      // Rendered as the live plan panel above the chat
+                      // (see <TodoPlanPanel />); inline duplication would
+                      // be noisy and reveal an internal tool name.
+                      return null;
+                    }
                     return (
                       <LemmaToolCall
                         key={key}
@@ -108,6 +114,13 @@ export function LemmaConversation({
       <ConversationScrollButton />
     </Conversation>
   );
+}
+
+function isWriteTodosPart(part: { type?: string; toolName?: string }): boolean {
+  if (part.type === "dynamic-tool" && part.toolName === "write_todos") {
+    return true;
+  }
+  return part.type === "tool-write_todos";
 }
 
 function TypingIndicator() {

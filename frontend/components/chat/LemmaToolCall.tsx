@@ -7,6 +7,7 @@ import {
   ToolContent,
   ToolHeader,
   ToolInput,
+  ToolOutput,
 } from "@/components/ai-elements/tool";
 
 export type LemmaToolUIPart = DynamicToolUIPart | ToolUIPart;
@@ -27,15 +28,14 @@ const TOOL_LABELS: Record<string, string> = {
 };
 
 /**
- * Minimal collapsible tool indicator using AI Elements.
+ * Collapsible tool indicator using AI Elements.
  *
- * Only the tool name, status, and a result-count badge are surfaced in
- * the header so the chat surface stays uncluttered. The collapsible
- * body shows the input parameters (e.g. which `matiere` / `chapter` /
- * `query` the agent dispatched) for transparency, but the raw tool
- * output is intentionally hidden — students don't need to see the
- * untransformed JSON, and exposing it makes prompt injection from the
- * corpus easier to notice.
+ * The header surfaces tool name, status, and a result-count chip so
+ * the chat surface stays uncluttered. Expanding the row reveals both
+ * the input parameters the agent dispatched AND the raw output it
+ * received — surfacing the output is important for transparency and
+ * makes the agent's behaviour debuggable, both for the student and
+ * for whoever is iterating on the prompt / tools.
  */
 export function LemmaToolCall({ part }: LemmaToolCallProps) {
   const isDynamic = part.type === "dynamic-tool";
@@ -50,9 +50,14 @@ export function LemmaToolCall({ part }: LemmaToolCallProps) {
       ? label
       : `${label} — ${formatCount(toolName, resultCount)}`;
 
+  // ToolOutput requires both `output` and `errorText` props even when
+  // the call hasn't returned yet — the component renders nothing if
+  // neither is present, so we wire them through unconditionally.
+  const errorText = "errorText" in part ? part.errorText : undefined;
+
   if (isDynamic) {
     return (
-      <Tool>
+      <Tool defaultOpen={part.state === "input-available"}>
         <ToolHeader
           type="dynamic-tool"
           state={part.state}
@@ -61,16 +66,18 @@ export function LemmaToolCall({ part }: LemmaToolCallProps) {
         />
         <ToolContent>
           <ToolInput input={part.input} />
+          <ToolOutput output={part.output} errorText={errorText} />
         </ToolContent>
       </Tool>
     );
   }
 
   return (
-    <Tool>
+    <Tool defaultOpen={part.state === "input-available"}>
       <ToolHeader type={part.type} state={part.state} title={title} />
       <ToolContent>
         <ToolInput input={part.input} />
+        <ToolOutput output={part.output} errorText={errorText} />
       </ToolContent>
     </Tool>
   );

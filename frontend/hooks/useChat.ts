@@ -31,13 +31,17 @@ interface PersistedMessage {
   id: string;
   role: "user" | "assistant" | "tool" | "system";
   content: string;
-  toolCalls?: Array<{
-    id: string;
-    name: string;
-    args: Record<string, unknown>;
-  }>;
+  /**
+   * Run id this message belongs to. Tool-role rows are rehydrated
+   * onto the assistant turn that owns them by matching `runId`.
+   */
+  runId?: string | null;
   toolCallId?: string;
   toolName?: string;
+  /** Tool call arguments — present on `role: 'tool'` rows. */
+  toolInput?: unknown;
+  /** Tool call return value — present on `role: 'tool'` rows. */
+  toolOutput?: unknown;
 }
 
 interface MessagesPage {
@@ -200,14 +204,20 @@ export function useLemmaChat({
 // ---------- conversion helpers ----------
 
 function toUiMessages(persisted: PersistedMessage[]): UIMessage[] {
-  // Build a tool result lookup so tool messages can be folded back into
-  // the assistant turn that owns them — the AI SDK's `UIMessage` model
-  // attaches tool I/O as `dynamic-tool` parts on the assistant message,
-  // not as separate `role: 'tool'` messages.
-  const toolResults = new Map<string, string>();
+  // Group `role: 'tool'` rows by the run they belong to so we can fold
+  // them back onto the assistant turn that owns them. The AI SDK's
+  // `UIMessage` model attaches tool I/O as `dynamic-tool` parts on the
+  // assistant message; the database stores them as separate rows
+  // (which is the right shape for audit + retrieval but the wrong
+  // shape for direct UI rendering).
+  const toolRowsByRun = new Map<string, PersistedMessage[]>();
   for (const m of persisted) {
-    if (m.role === "tool" && m.toolCallId) {
-      toolResults.set(m.toolCallId, m.content ?? "");
+    if (m.role !== "tool" || !m.runId) continue;
+    const bucket = toolRowsByRun.get(m.runId);
+    if (bucket) {
+      bucket.push(m);
+    } else {
+      toolRowsByRun.set(m.runId, [m]);
     }
   }
 
@@ -217,21 +227,26 @@ function toUiMessages(persisted: PersistedMessage[]): UIMessage[] {
     if (m.role === "system") continue;
 
     const parts: UIMessage["parts"] = [];
+    if (m.role === "assistant" && m.runId) {
+      const toolRows = toolRowsByRun.get(m.runId);
+      if (toolRows) {
+        for (const tool of toolRows) {
+          if (!tool.toolName || !tool.toolCallId) continue;
+          const hasOutput =
+            tool.toolOutput !== undefined && tool.toolOutput !== null;
+          parts.push({
+            type: "dynamic-tool",
+            toolName: tool.toolName,
+            toolCallId: tool.toolCallId,
+            state: hasOutput ? "output-available" : "input-available",
+            input: (tool.toolInput ?? {}) as Record<string, unknown>,
+            ...(hasOutput ? { output: tool.toolOutput } : {}),
+          } as UIMessage["parts"][number]);
+        }
+      }
+    }
     if (m.content) {
       parts.push({ type: "text", text: m.content, state: "done" });
-    }
-    if (m.role === "assistant" && m.toolCalls?.length) {
-      for (const tc of m.toolCalls) {
-        const result = toolResults.get(tc.id);
-        parts.push({
-          type: "dynamic-tool",
-          toolName: tc.name,
-          toolCallId: tc.id,
-          state: result ? "output-available" : "input-available",
-          input: tc.args ?? {},
-          ...(result ? { output: safeParse(result) } : {}),
-        } as UIMessage["parts"][number]);
-      }
     }
 
     out.push({
@@ -241,12 +256,4 @@ function toUiMessages(persisted: PersistedMessage[]): UIMessage[] {
     } as UIMessage);
   }
   return out;
-}
-
-function safeParse(raw: string): unknown {
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return raw;
-  }
 }

@@ -356,6 +356,7 @@ function toMessageDto(message: MessageRecord): MessageDto {
     id: message.id,
     role: message.role,
     content: message.content,
+    runId: message.runId,
     createdAt: message.createdAt.toISOString(),
   };
 
@@ -364,6 +365,8 @@ function toMessageDto(message: MessageRecord): MessageDto {
       ...base,
       toolCallId: message.toolCallId ?? undefined,
       toolName: message.toolName ?? undefined,
+      toolInput: message.toolInput ?? undefined,
+      toolOutput: message.toolOutput ?? undefined,
     };
   }
 

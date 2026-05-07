@@ -14,7 +14,7 @@ import {
 import { cn } from "@/lib/utils";
 import { cjk } from "@streamdown/cjk";
 import { code } from "@streamdown/code";
-import { math } from "@streamdown/math";
+import { createMathPlugin } from "@streamdown/math";
 import { mermaid } from "@streamdown/mermaid";
 import type { UIMessage } from "ai";
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
@@ -321,19 +321,60 @@ export const MessageBranchPage = ({
 
 export type MessageResponseProps = ComponentProps<typeof Streamdown>;
 
-const streamdownPlugins = { cjk, code, math, mermaid };
+// Configure the math plugin to recognise single `$...$` for inline math
+// in addition to the default `$$...$$` for display math. The default
+// `singleDollarTextMath: false` is too strict for typical LLM output —
+// most models emit a mix of `$x = 1$` and `$$\int f(x)dx$$`.
+const streamdownPlugins = {
+  cjk,
+  code,
+  math: createMathPlugin({ singleDollarTextMath: true }),
+  mermaid,
+};
+
+/**
+ * Convert LaTeX-native math delimiters to the `$...$` / `$$...$$`
+ * delimiters that `remark-math` understands.
+ *
+ * LLMs aimed at chat surfaces frequently emit `\(...\)` for inline math
+ * and `\[...\]` for display math (the official LaTeX syntax). Markdown
+ * happens to interpret `\(` and `\[` as escapes, so the visible result
+ * is `( ... )` / `[ ... ]` with the inner LaTeX unparsed — which is
+ * exactly what was leaking through to the chat surface.
+ *
+ * We rewrite those forms to dollar-delimited math BEFORE handing the
+ * text to Streamdown so `remark-math` picks them up. The regexes are
+ * deliberately conservative: they require the closing delimiter on the
+ * same logical block and use `[\s\S]` to allow newlines in display
+ * math while not crossing back into other markdown contexts.
+ */
+function normaliseMathDelimiters(input: string): string {
+  return (
+    input
+      // \[ ... \]  →  $$ ... $$
+      .replace(/\\\[([\s\S]+?)\\\]/g, (_, body: string) => `$$${body}$$`)
+      // \( ... \)  →  $ ... $
+      .replace(/\\\(([\s\S]+?)\\\)/g, (_, body: string) => `$${body}$`)
+  );
+}
 
 export const MessageResponse = memo(
-  ({ className, ...props }: MessageResponseProps) => (
-    <Streamdown
-      className={cn(
-        "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
-        className
-      )}
-      plugins={streamdownPlugins}
-      {...props}
-    />
-  ),
+  ({ className, children, ...props }: MessageResponseProps) => {
+    const normalised =
+      typeof children === "string" ? normaliseMathDelimiters(children) : children;
+    return (
+      <Streamdown
+        className={cn(
+          "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
+          className
+        )}
+        plugins={streamdownPlugins}
+        {...props}
+      >
+        {normalised}
+      </Streamdown>
+    );
+  },
   (prevProps, nextProps) =>
     prevProps.children === nextProps.children &&
     nextProps.isAnimating === prevProps.isAnimating

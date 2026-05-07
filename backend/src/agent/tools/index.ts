@@ -2,219 +2,739 @@ import { Injectable, Logger } from '@nestjs/common';
 import { tool } from '@langchain/core/tools';
 import type { StructuredToolInterface } from '@langchain/core/tools';
 import { z } from 'zod';
-import { QdrantClientProvider } from './qdrant.client';
+import {
+  QdrantClientProvider,
+  type QdrantCondition,
+  type QdrantFilter,
+  type QdrantPoint,
+} from './qdrant.client';
 import { Neo4jClientProvider } from './neo4j.client';
 import { EmbeddingsClient } from './embeddings.client';
+import { RerankerClient } from './reranker.client';
 
 /**
- * AgentToolsService — exposes the three RAG tools the chat node binds onto
- * the LLM. Same contracts as `agent/tools.py`:
+ * Domain-shaped tools the LLM binds against. Each verb mirrors how a
+ * student / tutor talks about the Tunisian Baccalaureate corpus rather
+ * than the underlying data store, so the agent can reason about
+ * "questions on a chapter" instead of "points in a Qdrant collection".
  *
- *   - search_vectors(query, limit=5)        → Qdrant semantic search
- *   - query_exam_graph(year?, session?, ...) → Neo4j metadata filter
- *   - get_content_by_id(doc_id)              → Qdrant scroll for full content
+ * Surface (7):
+ *   - search_questions       semantic retrieval + rerank, w/ filters
+ *   - get_question_pair      full Q/A pair by pair_id
+ *   - find_similar_questions vector neighbours of a known pair
+ *   - count_questions        aggregate over filters (no embedding cost)
+ *   - list_chapters          Neo4j catalogue, by matiere
+ *   - list_topics            Neo4j catalogue, by matiere/chapter
+ *   - list_exams             Neo4j exam metadata catalogue
  *
- * Each tool catches its own errors and returns a JSON / human string so a
- * misconfigured Qdrant or Neo4j only degrades the affected tool, not the
- * whole stream. The chat node's outer try/catch is the second line of
- * defence for everything else.
+ * Two non-negotiable filters are baked into every Qdrant read inside
+ * {@link QdrantClientProvider} (`critic_label='correct'`, `under_gate=false`),
+ * so the LLM cannot accidentally pull quarantined or unverified content.
+ *
+ * Each tool catches its own errors and returns a JSON-encoded string
+ * (success) or a plain-text error message — a misconfigured Qdrant /
+ * Neo4j only degrades the affected tool, not the whole stream.
  */
 @Injectable()
 export class AgentToolsService {
   private readonly logger = new Logger(AgentToolsService.name);
 
+  /** Qdrant recall fan-out used before reranking on `search_questions`. */
+  private static readonly RECALL_FANOUT = 20;
+  /** Default top-K returned by `search_questions` after rerank. */
+  private static readonly DEFAULT_LIMIT = 5;
+  /** Hard cap on `limit` so the agent can't blow up token budgets. */
+  private static readonly MAX_LIMIT = 25;
+  /** Truncate long French/LaTeX text in tool responses to keep prompts small. */
+  private static readonly TEXT_PREVIEW_CHARS = 600;
+
   constructor(
     private readonly qdrant: QdrantClientProvider,
     private readonly neo4j: Neo4jClientProvider,
     private readonly embeddings: EmbeddingsClient,
+    private readonly reranker: RerankerClient,
   ) {}
 
   getAll(): StructuredToolInterface[] {
     return [
-      this.searchVectorsTool(),
-      this.queryExamGraphTool(),
-      this.getContentByIdTool(),
+      this.searchQuestionsTool(),
+      this.getQuestionPairTool(),
+      this.findSimilarQuestionsTool(),
+      this.countQuestionsTool(),
+      this.listChaptersTool(),
+      this.listTopicsTool(),
+      this.listExamsTool(),
     ];
   }
 
-  private searchVectorsTool(): StructuredToolInterface {
+  // ---- search_questions -------------------------------------------------
+
+  private searchQuestionsTool(): StructuredToolInterface {
     return tool(
-      async ({ query, limit }) => {
+      async (args) => {
         try {
-          const vector = await this.embeddings.embed(query);
-          const points = await this.qdrant.query({
+          const filter = this.buildQdrantFilterFromArgs(args);
+          const limit = this.clampLimit(args.limit);
+          const vector = await this.embeddings.embed(args.query);
+
+          const candidates = await this.qdrant.searchDense({
             vector,
-            limit: limit ?? 5,
+            limit: AgentToolsService.RECALL_FANOUT,
+            filter,
           });
-          const formatted = points.map((p) => {
-            const payload = (p.payload ?? {}) as Record<string, unknown>;
-            const text = typeof payload.text === 'string' ? payload.text : '';
-            return {
-              doc_id: payload.doc_id ?? null,
-              text: text.slice(0, 500) + (text.length > 500 ? '...' : ''),
-              year: payload.year ?? null,
-              session: payload.session ?? null,
-              section: payload.section ?? null,
-              subject: payload.subject ?? null,
-              topic: payload.topic ?? null,
-              type: payload.type ?? null,
-              score: p.score,
-            };
+          if (candidates.length === 0) {
+            return JSON.stringify({ results: [] });
+          }
+
+          const reranked = await this.reranker.rerank({
+            query: args.query,
+            passages: candidates,
+            getText: (p) => formatRerankPassage(p),
+            topK: limit,
           });
-          return JSON.stringify(formatted);
+
+          return JSON.stringify({
+            results: reranked.map((p) => formatPairForLLM(p)),
+          });
         } catch (err) {
-          this.logger.warn(`search_vectors failed: ${String(err)}`);
-          return `Error searching vectors: ${(err as Error).message}`;
+          this.logger.warn(`search_questions failed: ${String(err)}`);
+          return `Error searching questions: ${(err as Error).message}`;
         }
       },
       {
-        name: 'search_vectors',
+        name: 'search_questions',
         description:
-          'Queries Qdrant for semantic matches to find exercises by concept ' +
-          'or description. Useful for finding relevant exercises based on a ' +
-          'natural language query.',
+          'Semantic search over the Tunisian Baccalaureate Q/A corpus. ' +
+          'Embeds the query, retrieves candidates from Qdrant with the ' +
+          'requested metadata filters, and reranks with a cross-encoder. ' +
+          'Returns past exam questions matching the query. Results always ' +
+          'have critic_label="correct" and are not under quality gate.',
         schema: z.object({
           query: z
             .string()
             .describe(
-              'Natural language query (e.g., "complex numbers problems involving modulus")',
+              'Natural-language query (FR or EN), e.g. "complex numbers ' +
+                'modulus problems" or "exercices sur les équations diophantiennes".',
+            ),
+          matiere: z
+            .enum([
+              'math',
+              'physique',
+              'svt',
+              'gestion',
+              'technique',
+              'bd',
+              'economie',
+              'info',
+              'algorithme',
+            ])
+            .optional()
+            .describe('Subject filter (Tunisian Bac matière names).'),
+          chapter: z
+            .string()
+            .optional()
+            .describe(
+              'Chapter name (exact match), e.g. "Arithmétique", "Nombres complexes".',
+            ),
+          topic: z
+            .string()
+            .optional()
+            .describe(
+              'Topic tag (exact match against the topics array), e.g. "PGCD".',
+            ),
+          year: z
+            .number()
+            .int()
+            .min(2000)
+            .max(2100)
+            .optional()
+            .describe('Exam year (e.g. 2017).'),
+          session: z
+            .enum(['principale', 'controle'])
+            .optional()
+            .describe(
+              'Exam session — principale (June) or controle (September retake).',
+            ),
+          track: z
+            .string()
+            .optional()
+            .describe(
+              'Bac track / section, e.g. "informatique", "math", "sciences".',
+            ),
+          exam: z
+            .string()
+            .optional()
+            .describe(
+              'Specific exam_id, e.g. "2017_controle_informatique_math".',
+            ),
+          difficulty_min: z
+            .number()
+            .int()
+            .optional()
+            .describe('Inclusive lower bound on difficulty (1=easy, 3=hard).'),
+          difficulty_max: z
+            .number()
+            .int()
+            .optional()
+            .describe('Inclusive upper bound on difficulty (1=easy, 3=hard).'),
+          bloom_level: z
+            .string()
+            .optional()
+            .describe(
+              "Bloom's taxonomy level: knowledge, comprehension, application, analysis, synthesis, evaluation.",
+            ),
+          answer_format: z
+            .string()
+            .optional()
+            .describe('Expected answer format, e.g. "list", "short", "long".'),
+          requires_figure: z
+            .boolean()
+            .optional()
+            .describe(
+              'If true, only return questions that require a figure/diagram.',
             ),
           limit: z
             .number()
             .int()
+            .min(1)
+            .max(AgentToolsService.MAX_LIMIT)
             .optional()
-            .describe('Maximum number of results to return (default: 5)'),
+            .describe(
+              `Top-K after rerank (default ${AgentToolsService.DEFAULT_LIMIT}, max ${AgentToolsService.MAX_LIMIT}).`,
+            ),
         }),
       },
     );
   }
 
-  private queryExamGraphTool(): StructuredToolInterface {
-    return tool(
-      async ({ year, session, section, subject, topic, limit }) => {
-        let neo4jSession;
-        try {
-          const driver = this.neo4j.require();
-          const conditions: string[] = [];
-          const params: Record<string, unknown> = { limit: limit ?? 10 };
+  // ---- get_question_pair ------------------------------------------------
 
+  private getQuestionPairTool(): StructuredToolInterface {
+    return tool(
+      async ({ pair_id }) => {
+        try {
+          const point = await this.qdrant.getByPairId(pair_id);
+          if (!point) {
+            return `No question pair found for pair_id="${pair_id}".`;
+          }
+          return JSON.stringify(formatPairForLLM(point, { full: true }));
+        } catch (err) {
+          this.logger.warn(`get_question_pair failed: ${String(err)}`);
+          return `Error fetching question pair: ${(err as Error).message}`;
+        }
+      },
+      {
+        name: 'get_question_pair',
+        description:
+          'Fetch the full content (question text, full corrigé/answer text, ' +
+          'and metadata) for a specific Bac Q/A pair by its pair_id. Use this ' +
+          'after search_questions or find_similar_questions to retrieve the ' +
+          'complete answer when the truncated preview is not enough.',
+        schema: z.object({
+          pair_id: z
+            .string()
+            .describe(
+              'The pair_id, e.g. "deepseek_v1__math__2017_controle_informatique_math__ex4__q1.c".',
+            ),
+        }),
+      },
+    );
+  }
+
+  // ---- find_similar_questions ------------------------------------------
+
+  private findSimilarQuestionsTool(): StructuredToolInterface {
+    return tool(
+      async ({ pair_id, limit, matiere }) => {
+        try {
+          const seed = await this.qdrant.getByPairId(pair_id);
+          if (!seed) {
+            return `Cannot find seed pair "${pair_id}" — has it been deleted or moved?`;
+          }
+          const k = this.clampLimit(limit);
+          const filter: QdrantFilter | undefined = matiere
+            ? { must: [{ key: 'matiere', match: { value: matiere } }] }
+            : undefined;
+          // Ask for k+1 because Qdrant returns the seed itself as result #1.
+          const points = await this.qdrant.findSimilarById({
+            pointId: seed.id,
+            limit: k + 1,
+            filter,
+          });
+          const results = points
+            .filter((p) => readStringPayload(p, 'pair_id') !== pair_id)
+            .slice(0, k)
+            .map((p) => formatPairForLLM(p));
+          return JSON.stringify({ seed: pair_id, results });
+        } catch (err) {
+          this.logger.warn(`find_similar_questions failed: ${String(err)}`);
+          return `Error finding similar questions: ${(err as Error).message}`;
+        }
+      },
+      {
+        name: 'find_similar_questions',
+        description:
+          'Given a known pair_id, return the K most similar Bac questions ' +
+          'by dense vector neighbourhood. Useful for "give me more like this" ' +
+          'or building a topic-coherent practice set.',
+        schema: z.object({
+          pair_id: z.string().describe('The seed pair_id.'),
+          limit: z
+            .number()
+            .int()
+            .min(1)
+            .max(AgentToolsService.MAX_LIMIT)
+            .optional()
+            .describe(
+              `Number of neighbours to return (default ${AgentToolsService.DEFAULT_LIMIT}, max ${AgentToolsService.MAX_LIMIT}).`,
+            ),
+          matiere: z
+            .enum([
+              'math',
+              'physique',
+              'svt',
+              'gestion',
+              'technique',
+              'bd',
+              'economie',
+              'info',
+              'algorithme',
+            ])
+            .optional()
+            .describe('Optional matière filter to keep neighbours on-subject.'),
+        }),
+      },
+    );
+  }
+
+  // ---- count_questions --------------------------------------------------
+
+  private countQuestionsTool(): StructuredToolInterface {
+    return tool(
+      async (args) => {
+        try {
+          const filter = this.buildQdrantFilterFromArgs(args);
+          const count = await this.qdrant.count(filter);
+          return JSON.stringify({ count });
+        } catch (err) {
+          this.logger.warn(`count_questions failed: ${String(err)}`);
+          return `Error counting questions: ${(err as Error).message}`;
+        }
+      },
+      {
+        name: 'count_questions',
+        description:
+          'Count corrected, gate-passing Bac questions matching the given ' +
+          'filters. Cheap (no embeddings, no reranker) — use this to answer ' +
+          'aggregate questions like "how many trigonometry problems do you have?" ' +
+          'before deciding whether to do an expensive search.',
+        schema: z.object({
+          matiere: z
+            .enum([
+              'math',
+              'physique',
+              'svt',
+              'gestion',
+              'technique',
+              'bd',
+              'economie',
+              'info',
+              'algorithme',
+            ])
+            .optional(),
+          chapter: z.string().optional(),
+          topic: z.string().optional(),
+          year: z.number().int().optional(),
+          session: z.enum(['principale', 'controle']).optional(),
+          track: z.string().optional(),
+          exam: z.string().optional(),
+          difficulty_min: z.number().int().optional(),
+          difficulty_max: z.number().int().optional(),
+          bloom_level: z.string().optional(),
+          answer_format: z.string().optional(),
+          requires_figure: z.boolean().optional(),
+        }),
+      },
+    );
+  }
+
+  // ---- list_chapters ----------------------------------------------------
+
+  private listChaptersTool(): StructuredToolInterface {
+    return tool(
+      async ({ matiere }) => {
+        let session: ReturnType<typeof this.neo4j.openSession> | undefined;
+        try {
+          session = this.neo4j.openSession();
+          const cypher = matiere
+            ? `
+                MATCH (p:Pair)-[:IN_CHAPTER]->(c:Chapter)
+                WHERE c.matiere = $matiere
+                  AND p.critic_label = 'correct'
+                  AND p.under_gate = false
+                RETURN c.name AS chapter, c.matiere AS matiere, count(p) AS pair_count
+                ORDER BY pair_count DESC, chapter ASC
+              `
+            : `
+                MATCH (p:Pair)-[:IN_CHAPTER]->(c:Chapter)
+                WHERE p.critic_label = 'correct' AND p.under_gate = false
+                RETURN c.name AS chapter, c.matiere AS matiere, count(p) AS pair_count
+                ORDER BY matiere ASC, pair_count DESC, chapter ASC
+              `;
+          const params: Record<string, unknown> = matiere ? { matiere } : {};
+          const result = await session.run(cypher, params);
+          return JSON.stringify({
+            chapters: result.records.map((r) => ({
+              chapter: r.get('chapter'),
+              matiere: r.get('matiere'),
+              pair_count: toNumber(r.get('pair_count')),
+            })),
+          });
+        } catch (err) {
+          this.logger.warn(`list_chapters failed: ${String(err)}`);
+          return `Error listing chapters: ${(err as Error).message}`;
+        } finally {
+          if (session) await session.close().catch(() => undefined);
+        }
+      },
+      {
+        name: 'list_chapters',
+        description:
+          'List all chapters in the Bac corpus, optionally filtered by ' +
+          'matière, with pair counts. Use this to discover the chapter ' +
+          'taxonomy for a subject before building a practice plan.',
+        schema: z.object({
+          matiere: z
+            .enum([
+              'math',
+              'physique',
+              'svt',
+              'gestion',
+              'technique',
+              'bd',
+              'economie',
+              'info',
+              'algorithme',
+            ])
+            .optional()
+            .describe('Optional matière filter; omit to list all chapters.'),
+        }),
+      },
+    );
+  }
+
+  // ---- list_topics ------------------------------------------------------
+
+  private listTopicsTool(): StructuredToolInterface {
+    return tool(
+      async ({ matiere, chapter, limit }) => {
+        let session: ReturnType<typeof this.neo4j.openSession> | undefined;
+        try {
+          session = this.neo4j.openSession();
+          const where: string[] = [
+            "p.critic_label = 'correct'",
+            'p.under_gate = false',
+          ];
+          const params: Record<string, unknown> = {
+            limit: this.clampLimit(limit, 50, 200),
+          };
+          let path = '(p:Pair)-[:HAS_TOPIC]->(t:Topic)';
+          if (chapter) {
+            path =
+              '(p:Pair)-[:IN_CHAPTER]->(c:Chapter), (p)-[:HAS_TOPIC]->(t:Topic)';
+            where.push('c.name = $chapter');
+            params.chapter = chapter;
+          }
+          if (matiere) {
+            where.push('t.matiere = $matiere');
+            params.matiere = matiere;
+          }
+          const cypher = `
+            MATCH ${path}
+            WHERE ${where.join(' AND ')}
+            RETURN t.name AS topic, t.matiere AS matiere, count(p) AS pair_count
+            ORDER BY pair_count DESC, topic ASC
+            LIMIT toInteger($limit)
+          `;
+          const result = await session.run(cypher, params);
+          return JSON.stringify({
+            topics: result.records.map((r) => ({
+              topic: r.get('topic'),
+              matiere: r.get('matiere'),
+              pair_count: toNumber(r.get('pair_count')),
+            })),
+          });
+        } catch (err) {
+          this.logger.warn(`list_topics failed: ${String(err)}`);
+          return `Error listing topics: ${(err as Error).message}`;
+        } finally {
+          if (session) await session.close().catch(() => undefined);
+        }
+      },
+      {
+        name: 'list_topics',
+        description:
+          'List topics covered by the Bac corpus, optionally scoped to a ' +
+          'matière and/or chapter, ordered by how many pairs reference each ' +
+          'topic. Useful for discovering exact topic names to feed into ' +
+          'search_questions(topic=...).',
+        schema: z.object({
+          matiere: z
+            .enum([
+              'math',
+              'physique',
+              'svt',
+              'gestion',
+              'technique',
+              'bd',
+              'economie',
+              'info',
+              'algorithme',
+            ])
+            .optional(),
+          chapter: z.string().optional(),
+          limit: z
+            .number()
+            .int()
+            .min(1)
+            .max(200)
+            .optional()
+            .describe('Max topics to return (default 50, max 200).'),
+        }),
+      },
+    );
+  }
+
+  // ---- list_exams -------------------------------------------------------
+
+  private listExamsTool(): StructuredToolInterface {
+    return tool(
+      async ({ matiere, year, session: examSession, track, limit }) => {
+        let session: ReturnType<typeof this.neo4j.openSession> | undefined;
+        try {
+          session = this.neo4j.openSession();
+          const where: string[] = [];
+          const params: Record<string, unknown> = {
+            limit: this.clampLimit(limit, 50, 200),
+          };
+          if (matiere) {
+            where.push('e.subject = $matiere');
+            params.matiere = matiere;
+          }
           if (year !== undefined && year !== null) {
-            conditions.push('exam.year = $year');
+            where.push('e.year = $year');
             params.year = year;
           }
-          if (session) {
-            conditions.push('exam.session = $session');
-            params.session = session;
+          if (examSession) {
+            where.push('e.session = $session');
+            params.session = examSession;
           }
-          if (section) {
-            conditions.push('exam.section = $section');
-            params.section = section;
+          if (track) {
+            where.push('e.track = $track');
+            params.track = track;
           }
-          if (subject) {
-            conditions.push('exam.subject = $subject');
-            params.subject = subject;
-          }
-
-          const where = conditions.length ? conditions.join(' AND ') : '1=1';
-
-          let cypher: string;
-          if (topic) {
-            cypher = `
-              MATCH (exam:Exam)-[:CONTAINS]->(exercise:Exercise)
-              WHERE ${where}
-              OPTIONAL MATCH (exercise)-[:COVERS_TOPIC]->(t:Topic)
-              WHERE t.name = $topic OR t.name CONTAINS $topic
-              WITH exam, exercise, t
-              WHERE t IS NOT NULL
-              RETURN
-                exercise.id AS exercise_id,
-                exercise.exercise_title AS exercise_title,
-                exam.year AS year,
-                exam.session AS session,
-                exam.section AS section,
-                exam.subject AS subject,
-                t.name AS topic
-              LIMIT toInteger($limit)
-            `;
-            params.topic = topic;
-          } else {
-            cypher = `
-              MATCH (exam:Exam)-[:CONTAINS]->(exercise:Exercise)
-              WHERE ${where}
-              OPTIONAL MATCH (exercise)-[:COVERS_TOPIC]->(t:Topic)
-              RETURN
-                exercise.id AS exercise_id,
-                exercise.exercise_title AS exercise_title,
-                exam.year AS year,
-                exam.session AS session,
-                exam.section AS section,
-                exam.subject AS subject,
-                t.name AS topic
-              LIMIT toInteger($limit)
-            `;
-          }
-
-          neo4jSession = driver.session();
-          const result = await neo4jSession.run(cypher, params);
-          const rows = result.records.map((r) => r.toObject());
-          return JSON.stringify(rows);
+          const whereClause = where.length
+            ? `WHERE ${where.join(' AND ')}`
+            : '';
+          const cypher = `
+            MATCH (e:Exam)
+            ${whereClause}
+            OPTIONAL MATCH (p:Pair)-[:FROM_EXAM]->(e)
+              WHERE p.critic_label = 'correct' AND p.under_gate = false
+            WITH e, count(p) AS pair_count
+            RETURN
+              e.exam_id AS exam_id,
+              e.year    AS year,
+              e.session AS session,
+              e.subject AS subject,
+              e.track   AS track,
+              pair_count
+            ORDER BY year DESC, subject ASC, session ASC
+            LIMIT toInteger($limit)
+          `;
+          const result = await session.run(cypher, params);
+          return JSON.stringify({
+            exams: result.records.map((r) => ({
+              exam_id: r.get('exam_id'),
+              year: toNumber(r.get('year')),
+              session: r.get('session'),
+              subject: r.get('subject'),
+              track: r.get('track'),
+              pair_count: toNumber(r.get('pair_count')),
+            })),
+          });
         } catch (err) {
-          this.logger.warn(`query_exam_graph failed: ${String(err)}`);
-          return `Error querying exam graph: ${(err as Error).message}`;
+          this.logger.warn(`list_exams failed: ${String(err)}`);
+          return `Error listing exams: ${(err as Error).message}`;
         } finally {
-          if (neo4jSession) {
-            await neo4jSession.close().catch(() => undefined);
-          }
+          if (session) await session.close().catch(() => undefined);
         }
       },
       {
-        name: 'query_exam_graph',
+        name: 'list_exams',
         description:
-          'Queries Neo4j to find specific exams/exercises based on metadata ' +
-          'filters. Useful for structured navigation like finding all "Math" ' +
-          'exams from "2020".',
+          'List Bac exams (year × session × subject × track) optionally ' +
+          'filtered, each with a count of corrected gate-passing pairs. Use ' +
+          'this to ground "how was the 2019 math controle structured?"-style ' +
+          'questions before searching specific items.',
         schema: z.object({
+          matiere: z
+            .enum([
+              'math',
+              'physique',
+              'svt',
+              'gestion',
+              'technique',
+              'bd',
+              'economie',
+              'info',
+              'algorithme',
+            ])
+            .optional(),
           year: z.number().int().optional(),
-          session: z
-            .enum(['principale', 'controle'])
+          session: z.enum(['principale', 'controle']).optional(),
+          track: z.string().optional(),
+          limit: z
+            .number()
+            .int()
+            .min(1)
+            .max(200)
             .optional()
-            .describe('Session type'),
-          section: z
-            .string()
-            .optional()
-            .describe('Section (math, sciences, technique, informatique)'),
-          subject: z.string().optional(),
-          topic: z.string().optional(),
-          limit: z.number().int().optional(),
+            .describe('Max exams to return (default 50, max 200).'),
         }),
       },
     );
   }
 
-  private getContentByIdTool(): StructuredToolInterface {
-    return tool(
-      async ({ doc_id }) => {
-        try {
-          const point = await this.qdrant.scrollByDocId(doc_id);
-          if (!point) {
-            return `No content found for doc_id=${doc_id}.`;
-          }
-          return JSON.stringify(point.payload ?? {});
-        } catch (err) {
-          this.logger.warn(`get_content_by_id failed: ${String(err)}`);
-          return `Error getting content: ${(err as Error).message}`;
-        }
-      },
-      {
-        name: 'get_content_by_id',
-        description:
-          'Fetches the full content (text, LaTeX, metadata) for a specific ' +
-          'exercise/document by its doc_id. Use this after search_vectors or ' +
-          'query_exam_graph to retrieve full content.',
-        schema: z.object({
-          doc_id: z.string().describe('The document id'),
-        }),
-      },
-    );
+  // ---- helpers ----------------------------------------------------------
+
+  private clampLimit(
+    requested: number | undefined,
+    fallback: number = AgentToolsService.DEFAULT_LIMIT,
+    cap: number = AgentToolsService.MAX_LIMIT,
+  ): number {
+    if (typeof requested !== 'number' || !Number.isFinite(requested)) {
+      return fallback;
+    }
+    return Math.max(1, Math.min(cap, Math.floor(requested)));
   }
+
+  /**
+   * Build a Qdrant filter from a flat object of agent-supplied options.
+   * Only the optional filters live here — the mandatory `critic_label` /
+   * `under_gate` clauses are injected inside the Qdrant client.
+   */
+  private buildQdrantFilterFromArgs(args: {
+    matiere?: string;
+    chapter?: string;
+    topic?: string;
+    year?: number;
+    session?: string;
+    track?: string;
+    exam?: string;
+    difficulty_min?: number;
+    difficulty_max?: number;
+    bloom_level?: string;
+    answer_format?: string;
+    requires_figure?: boolean;
+  }): QdrantFilter | undefined {
+    const must: QdrantCondition[] = [];
+    if (args.matiere)
+      must.push({ key: 'matiere', match: { value: args.matiere } });
+    if (args.chapter)
+      must.push({ key: 'chapter', match: { value: args.chapter } });
+    if (args.topic) must.push({ key: 'topics', match: { value: args.topic } });
+    if (args.year !== undefined)
+      must.push({ key: 'year', match: { value: args.year } });
+    if (args.session)
+      must.push({ key: 'session', match: { value: args.session } });
+    if (args.track) must.push({ key: 'track', match: { value: args.track } });
+    if (args.exam) must.push({ key: 'exam', match: { value: args.exam } });
+    if (args.bloom_level)
+      must.push({ key: 'bloom_level', match: { value: args.bloom_level } });
+    if (args.answer_format)
+      must.push({ key: 'answer_format', match: { value: args.answer_format } });
+    if (typeof args.requires_figure === 'boolean') {
+      must.push({
+        key: 'requires_figure',
+        match: { value: args.requires_figure },
+      });
+    }
+    if (
+      typeof args.difficulty_min === 'number' ||
+      typeof args.difficulty_max === 'number'
+    ) {
+      const range: { gte?: number; lte?: number } = {};
+      if (typeof args.difficulty_min === 'number')
+        range.gte = args.difficulty_min;
+      if (typeof args.difficulty_max === 'number')
+        range.lte = args.difficulty_max;
+      must.push({ key: 'difficulty', range });
+    }
+    return must.length ? { must } : undefined;
+  }
+}
+
+// ---- formatting helpers (module-private) -------------------------------
+
+function formatPairForLLM(
+  point: QdrantPoint,
+  opts?: { full?: boolean },
+): Record<string, unknown> {
+  const payload = (point.payload ?? {}) as Record<string, unknown>;
+  const question = readStringPayload(point, 'question_text') ?? '';
+  const answer = readStringPayload(point, 'answer_text') ?? '';
+  const cap = AgentToolsService['TEXT_PREVIEW_CHARS'] as number;
+  return {
+    pair_id: payload.pair_id ?? null,
+    matiere: payload.matiere ?? null,
+    chapter: payload.chapter ?? null,
+    exam: payload.exam ?? null,
+    year: payload.year ?? null,
+    session: payload.session ?? null,
+    track: payload.track ?? null,
+    exercise_number: payload.exercise_number ?? null,
+    question_number: payload.question_number ?? null,
+    difficulty: payload.difficulty ?? null,
+    bloom_level: payload.bloom_level ?? null,
+    answer_format: payload.answer_format ?? null,
+    requires_figure: payload.requires_figure ?? null,
+    topics: payload.topics ?? [],
+    keywords_fr: payload.keywords_fr ?? [],
+    question_text: opts?.full ? question : truncate(question, cap),
+    answer_text: opts?.full ? answer : truncate(answer, cap),
+    score: typeof point.score === 'number' ? point.score : undefined,
+  };
+}
+
+function formatRerankPassage(point: QdrantPoint): string {
+  const q = readStringPayload(point, 'question_text') ?? '';
+  const a = readStringPayload(point, 'answer_text') ?? '';
+  return `Question: ${q}\nAnswer: ${a}`;
+}
+
+function readStringPayload(p: QdrantPoint, key: string): string | undefined {
+  const v = (p.payload ?? {})[key];
+  return typeof v === 'string' ? v : undefined;
+}
+
+function truncate(s: string, max: number): string {
+  if (s.length <= max) return s;
+  return `${s.slice(0, max)}…`;
+}
+
+/**
+ * neo4j-driver returns integer columns as `{ low, high }` BigInt-ish
+ * objects to avoid JS precision loss. None of our counts overflow 32 bits,
+ * so this lossy cast is fine.
+ */
+function toNumber(v: unknown): number | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v === 'number') return v;
+  if (typeof v === 'bigint') return Number(v);
+  if (typeof v === 'object' && v !== null && 'low' in v) {
+    const lowField = (v as { low: number }).low;
+    return typeof lowField === 'number' ? lowField : null;
+  }
+  return null;
 }

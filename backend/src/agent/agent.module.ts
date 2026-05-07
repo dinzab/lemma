@@ -6,12 +6,13 @@ import { AgentToolsService } from './tools';
 import { QdrantClientProvider } from './tools/qdrant.client';
 import { Neo4jClientProvider } from './tools/neo4j.client';
 import { EmbeddingsClient } from './tools/embeddings.client';
+import { RerankerClient } from './tools/reranker.client';
 
 /**
  * AgentModule wires up:
  *   - the singleton CheckpointerService (shared with ChatModule)
  *   - the LLM factory
- *   - the three RAG tool clients (Qdrant, Neo4j, embeddings)
+ *   - the data clients (Qdrant, Neo4j, NIM embeddings + reranker)
  *   - the compiled LangGraph (AgentService)
  *
  * Both CheckpointerService and AgentService are exported so ChatModule can
@@ -25,6 +26,7 @@ import { EmbeddingsClient } from './tools/embeddings.client';
     QdrantClientProvider,
     Neo4jClientProvider,
     EmbeddingsClient,
+    RerankerClient,
     AgentToolsService,
     AgentService,
   ],

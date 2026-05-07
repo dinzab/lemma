@@ -205,61 +205,81 @@ export function useLemmaChat({
 // ---------- conversion helpers ----------
 
 function toUiMessages(persisted: PersistedMessage[]): UIMessage[] {
-  // Group `role: 'tool'` rows by the run they belong to so we can fold
-  // them back onto the assistant turn that owns them. The AI SDK's
-  // `UIMessage` model attaches tool I/O as `dynamic-tool` parts on the
-  // assistant message; the database stores them as separate rows
-  // (which is the right shape for audit + retrieval but the wrong
-  // shape for direct UI rendering).
-  const toolRowsByRun = new Map<string, PersistedMessage[]>();
-  for (const m of persisted) {
-    if (m.role !== "tool" || !m.runId) continue;
-    const bucket = toolRowsByRun.get(m.runId);
-    if (bucket) {
-      bucket.push(m);
-    } else {
-      toolRowsByRun.set(m.runId, [m]);
-    }
-  }
-
+  // Walk persisted rows in chronological order (the input is already in
+  // sequence-ascending order). Each user row becomes its own UIMessage;
+  // every consecutive non-user row that shares the same `runId` is folded
+  // into a single assistant UIMessage whose `parts` array preserves the
+  // exact text/tool/text/tool/text interleaving the user saw live.
+  //
+  // The backend persists each text segment between two tool-call
+  // boundaries as its own `role: 'assistant'` row, so reload reproduces
+  // the streaming order without any extra metadata.
   const out: UIMessage[] = [];
-  for (const m of persisted) {
-    if (m.role === "tool") continue;
-    if (m.role === "system") continue;
+  let i = 0;
+  while (i < persisted.length) {
+    const m = persisted[i];
+    if (m.role === "system") {
+      i++;
+      continue;
+    }
+    if (m.role === "user") {
+      out.push({
+        id: m.id,
+        role: "user",
+        parts: m.content
+          ? [{ type: "text", text: m.content, state: "done" }]
+          : [],
+      } as UIMessage);
+      i++;
+      continue;
+    }
+
+    // assistant or tool row — start an assistant turn and gather every
+    // following row that shares this run id (or both lack a runId).
+    const runKey = m.runId ?? null;
+    const turnRows: PersistedMessage[] = [];
+    while (i < persisted.length) {
+      const r = persisted[i];
+      if (r.role === "user") break;
+      if (r.role === "system") {
+        i++;
+        continue;
+      }
+      const sameRun = (r.runId ?? null) === runKey;
+      if (!sameRun) break;
+      turnRows.push(r);
+      i++;
+    }
+    if (turnRows.length === 0) continue;
 
     const parts: UIMessage["parts"] = [];
-    if (m.role === "assistant" && m.runId) {
-      const toolRows = toolRowsByRun.get(m.runId);
-      if (toolRows) {
-        for (const tool of toolRows) {
-          if (!tool.toolName || !tool.toolCallId) continue;
-          // Legacy rows persisted before the dual-write split only
-          // populated `content` (the stringified tool result) and left
-          // `toolInput` / `toolOutput` null. Fall back to the content
-          // column so old threads still render their tool outputs
-          // instead of looking like the tool never returned.
-          const output =
-            tool.toolOutput ??
-            (tool.content ? safeParse(tool.content) : undefined);
-          const hasOutput = output !== undefined && output !== null;
-          parts.push({
-            type: "dynamic-tool",
-            toolName: tool.toolName,
-            toolCallId: tool.toolCallId,
-            state: hasOutput ? "output-available" : "input-available",
-            input: (tool.toolInput ?? {}) as Record<string, unknown>,
-            ...(hasOutput ? { output } : {}),
-          } as UIMessage["parts"][number]);
-        }
+    for (const r of turnRows) {
+      if (r.role === "tool") {
+        if (!r.toolName || !r.toolCallId) continue;
+        // Legacy rows from before the dual-write split only populated
+        // `content` (the stringified tool result) and left `toolInput`
+        // / `toolOutput` null. Fall back to the content column so old
+        // threads still render their tool outputs instead of looking
+        // like the tool never returned.
+        const output =
+          r.toolOutput ?? (r.content ? safeParse(r.content) : undefined);
+        const hasOutput = output !== undefined && output !== null;
+        parts.push({
+          type: "dynamic-tool",
+          toolName: r.toolName,
+          toolCallId: r.toolCallId,
+          state: hasOutput ? "output-available" : "input-available",
+          input: (r.toolInput ?? {}) as Record<string, unknown>,
+          ...(hasOutput ? { output } : {}),
+        } as UIMessage["parts"][number]);
+      } else if (r.role === "assistant" && r.content) {
+        parts.push({ type: "text", text: r.content, state: "done" });
       }
-    }
-    if (m.content) {
-      parts.push({ type: "text", text: m.content, state: "done" });
     }
 
     out.push({
-      id: m.id,
-      role: m.role === "user" ? "user" : "assistant",
+      id: turnRows[0].id,
+      role: "assistant",
       parts,
     } as UIMessage);
   }

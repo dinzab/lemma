@@ -1,28 +1,35 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useState, useRef, useEffect } from "react";
-import { Sparkles } from "lucide-react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { AlertCircle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useLemmaChat } from "@/hooks/useChat";
-import { CustomUserMessage, CustomAssistantMessage } from "@/components/chat/CustomMessages";
+import { LemmaConversation } from "@/components/chat/LemmaConversation";
 import { getThread } from "@/lib/api/threads";
 import { PromptComposer } from "@/components/chat/PromptComposer";
+
+interface ActiveRunResponse {
+  runId: string | null;
+  status: "running" | "completed" | "failed" | "cancelled" | "idle";
+}
 
 export default function ChatThreadPage() {
   const params = useParams();
   const router = useRouter();
   const threadId = params.id as string;
-  
+
   const [input, setInput] = useState("");
   const [isValidating, setIsValidating] = useState(true);
   const [hasValidated, setHasValidated] = useState(false);
+  const [activeRun, setActiveRun] = useState<ActiveRunResponse | null>(null);
+  const [resumeDismissed, setResumeDismissed] = useState(false);
   const initialMessageSentRef = useRef(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const {
     messages,
     isLoading,
+    isStreaming,
     error,
     isInitialized,
     sendMessage,
@@ -34,33 +41,67 @@ export default function ChatThreadPage() {
 
   useEffect(() => {
     const validateThread = async () => {
-      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+      const uuidRegex =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
       if (!uuidRegex.test(threadId)) {
-        console.error('Invalid thread ID format');
-        router.replace('/new');
+        console.error("Invalid thread ID format");
+        router.replace("/new");
         return;
       }
 
       try {
         const thread = await getThread(threadId);
         if (!thread) {
-          console.error('Thread not found or not authorized');
-          router.replace('/new');
+          console.error("Thread not found or not authorized");
+          router.replace("/new");
           return;
         }
         setIsValidating(false);
         setHasValidated(true);
       } catch (err) {
-        console.error('Failed to validate thread:', err);
-        router.replace('/new');
+        console.error("Failed to validate thread:", err);
+        router.replace("/new");
       }
     };
 
     validateThread();
   }, [threadId, router]);
 
+  // Resume-on-reload: once the thread is validated, ask the backend
+  // whether the most recent run is still `running` (page was reloaded
+  // mid-stream) or `failed` (server restart killed the previous turn).
+  // The full Redis Streams replay is deferred — here we only surface a
+  // banner so the user can decide whether to retry.
   useEffect(() => {
-    if (!hasValidated || !isInitialized || initialMessageSentRef.current || messages.length > 0) return;
+    if (!hasValidated) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/threads/${threadId}/active-run`, {
+          credentials: "include",
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as ActiveRunResponse;
+        if (!cancelled) {
+          setActiveRun(data);
+        }
+      } catch (err) {
+        console.warn("active-run probe failed:", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [hasValidated, threadId]);
+
+  useEffect(() => {
+    if (
+      !hasValidated ||
+      !isInitialized ||
+      initialMessageSentRef.current ||
+      messages.length > 0
+    )
+      return;
 
     const storageKey = `thread_${threadId}_initial_message`;
     const initialMessage = sessionStorage.getItem(storageKey);
@@ -72,20 +113,29 @@ export default function ChatThreadPage() {
     }
   }, [hasValidated, isInitialized, threadId, messages.length, sendMessage]);
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
-
-  const handleSend = async () => {
+  const handleSend = useCallback(async () => {
     if (!input.trim() || isLoading) return;
     const message = input;
     setInput("");
     await sendMessage(message);
-  };
+  }, [input, isLoading, sendMessage]);
 
-  const handleStop = () => {
+  const handleStop = useCallback(() => {
     stopGeneration();
-  };
+  }, [stopGeneration]);
+
+  const handleResumeRetry = useCallback(() => {
+    setResumeDismissed(true);
+    if (!isLoading) {
+      regenerateLastMessage();
+    }
+  }, [isLoading, regenerateLastMessage]);
+
+  const showResumeBanner =
+    !resumeDismissed &&
+    activeRun !== null &&
+    !isLoading &&
+    (activeRun.status === "running" || activeRun.status === "failed");
 
   if (isValidating) {
     return (
@@ -102,72 +152,76 @@ export default function ChatThreadPage() {
         <div className="absolute left-1/2 top-[5%] h-72 w-[26rem] -translate-x-1/2 rounded-full bg-primary/5 blur-3xl" />
       </div>
       <div className="flex h-full flex-1 flex-col">
-        {/* Messages Area */}
-        <div className="min-h-0 flex-1 overflow-y-auto scroll-smooth">
-          <div className="mx-auto max-w-3xl space-y-1 px-4 py-5">
-            {!isInitialized && (
-              <div className="py-12 text-center text-muted-foreground">
-                <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
+        {/* Resume banner — shown when a previous run was interrupted. */}
+        {showResumeBanner && activeRun && (
+          <div className="mx-auto mt-3 flex w-full max-w-3xl items-center gap-3 rounded-xl border border-amber-300/40 bg-amber-50/60 px-4 py-2.5 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+            <AlertCircle className="size-4 shrink-0" />
+            <span className="flex-1 truncate">
+              {activeRun.status === "running"
+                ? "Your previous response was still streaming when this page reloaded. Stream replay isn't supported yet — retry to regenerate it."
+                : "Your previous response didn't finish. You can retry it."}
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleResumeRetry}
+              className="h-7 px-2 text-xs hover:bg-amber-100/80 dark:hover:bg-amber-500/20"
+            >
+              <RefreshCw className="mr-1 size-3" />
+              Retry
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setResumeDismissed(true)}
+              className="h-7 px-2 text-xs hover:bg-amber-100/80 dark:hover:bg-amber-500/20"
+            >
+              Dismiss
+            </Button>
+          </div>
+        )}
+
+        {/* Messages area */}
+        <div className="min-h-0 flex-1 overflow-hidden">
+          {!isInitialized ? (
+            <div className="flex h-full items-center justify-center">
+              <div className="flex flex-col items-center gap-3 text-muted-foreground">
+                <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary/30 border-t-primary" />
                 <p className="text-sm">Loading conversation...</p>
               </div>
-            )}
-
-            {isInitialized && hasOlder && (
-              <div className="flex justify-center pb-4">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => loadOlder()}
-                  className="rounded-full border bg-card px-4 text-xs text-muted-foreground hover:text-foreground"
-                >
-                  Load older messages
-                </Button>
-              </div>
-            )}
-
-            {isInitialized && messages.length === 0 && !isLoading && (
-              <div className="py-16 text-center text-muted-foreground">
-                <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-xl border bg-muted/50 shadow-sm">
-                  <Sparkles className="h-6 w-6 text-primary" />
+            </div>
+          ) : (
+            <div className="relative h-full">
+              {hasOlder && (
+                <div className="absolute left-0 right-0 top-2 z-10 flex justify-center">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => loadOlder()}
+                    className="rounded-full border bg-card/90 px-4 text-xs text-muted-foreground shadow-sm backdrop-blur hover:text-foreground"
+                  >
+                    Load older messages
+                  </Button>
                 </div>
-                <p className="text-lg font-semibold text-foreground">Start a conversation</p>
-                <p className="mt-1 text-sm">Ask me anything about your Baccalaureate studies</p>
-              </div>
-            )}
-
-            {messages.map((message, index) => {
-              if (message.role === 'user') {
-                return <CustomUserMessage key={message.id} message={message} />;
-              } else if (message.role === 'tool') {
-                return null;
-              } else if (message.role === 'system') {
-                return null;
-              } else {
-                return (
-                  <CustomAssistantMessage
-                    key={message.id}
-                    message={message}
-                    isLoading={isLoading && index === messages.length - 1}
-                    isLastMessage={index === messages.length - 1}
-                    onRegenerate={regenerateLastMessage}
-                  />
-                );
-              }
-            })}
-
-            {error && (
-              <div className="flex justify-center py-2">
-                <div className="rounded-xl bg-destructive/10 px-4 py-2.5 text-sm text-destructive">
-                  {error}
-                </div>
-              </div>
-            )}
-
-            <div ref={messagesEndRef} />
-          </div>
+              )}
+              <LemmaConversation
+                messages={messages}
+                isLoading={isLoading}
+                isStreaming={isStreaming}
+              />
+            </div>
+          )}
         </div>
 
-        {/* Input Area */}
+        {error && (
+          <div className="mx-auto w-full max-w-3xl px-4 pb-2">
+            <div className="rounded-xl bg-destructive/10 px-4 py-2.5 text-sm text-destructive">
+              {error}
+            </div>
+          </div>
+        )}
+
+        {/* Input area */}
         <div className="bg-gradient-to-t from-background via-background to-transparent px-4 pb-4 pt-3 sm:px-6">
           <div className="mx-auto w-full max-w-3xl">
             <PromptComposer

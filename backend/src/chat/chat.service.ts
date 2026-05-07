@@ -1,10 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
-import {
-  AIMessage,
-  AIMessageChunk,
-  ToolMessage,
-  type BaseMessage,
-} from '@langchain/core/messages';
+import { AIMessageChunk } from '@langchain/core/messages';
+import type { BaseMessage } from '@langchain/core/messages';
 import { createUIMessageStream, pipeUIMessageStreamToResponse } from 'ai';
 import type { ServerResponse } from 'http';
 import { randomUUID } from 'crypto';
@@ -100,12 +96,62 @@ export class ChatService {
         // Map tool_call_id → messages row id so we can patch tool_output
         // when the corresponding ToolMessage arrives later in the stream.
         const toolRowByCallId = new Map<string, string>();
+        // Tool calls we've already announced via `tool-input-available`.
+        // The AI SDK rejects `tool-output-available` for any callId it
+        // hasn't seen registered first (`No tool invocation found …`),
+        // so we guard every output emission against this set and emit
+        // a synthetic input event when needed.
+        const announcedInputs = new Set<string>();
+        // Cached metadata for any tool call we've seen at least once,
+        // populated from both `messages`-mode chunks and `updates`-mode
+        // full AIMessages. Used to recover toolName / args when an
+        // output event arrives before its matching input event.
+        const knownToolCalls = new Map<
+          string,
+          { toolName: string; input: unknown }
+        >();
 
         const openTextOnce = () => {
           if (!textOpen) {
             writer.write({ type: 'start' });
             writer.write({ type: 'text-start', id: turnId });
             textOpen = true;
+          }
+        };
+
+        const announceToolInput = async (
+          callId: string,
+          toolName: string,
+          input: unknown,
+        ): Promise<void> => {
+          if (announcedInputs.has(callId)) return;
+          writer.write({
+            type: 'tool-input-available',
+            toolCallId: callId,
+            toolName,
+            input,
+            dynamic: true,
+          });
+          announcedInputs.add(callId);
+          if (!toolRowByCallId.has(callId)) {
+            try {
+              const row = await this.messages.insertMessage({
+                threadId,
+                runId: run.id,
+                userId,
+                role: 'tool',
+                content: '',
+                toolName,
+                toolCallId: callId,
+                toolInput: (input ?? {}) as unknown,
+              });
+              toolRowByCallId.set(callId, row.id);
+            } catch (err) {
+              this.logger.warn(
+                `Failed to persist tool call ${callId} ` +
+                  `(${toolName}): ${String(err)}`,
+              );
+            }
           }
         };
 
@@ -130,6 +176,22 @@ export class ChatService {
                     delta,
                   });
                 }
+                // Tool call args may also stream via `messages` mode as
+                // `tool_call_chunks` on the AIMessageChunk. We don't
+                // forward partial input deltas to the wire (the AI SDK
+                // protocol expects them to be paired with a stable id
+                // we may not have yet), but we do harvest the fully
+                // assembled `tool_calls` so we can announce inputs as
+                // soon as they're known — without depending on the
+                // matching `updates`-mode AIMessage payload arriving
+                // first.
+                for (const tc of chunk.tool_calls ?? []) {
+                  if (!tc.id || !tc.name) continue;
+                  knownToolCalls.set(tc.id, {
+                    toolName: tc.name,
+                    input: tc.args ?? {},
+                  });
+                }
               }
               continue;
             }
@@ -143,51 +205,90 @@ export class ChatService {
               >;
               for (const [, stateUpdate] of Object.entries(updates)) {
                 for (const m of stateUpdate.messages ?? []) {
-                  if (
-                    m instanceof AIMessage &&
-                    m.tool_calls &&
-                    m.tool_calls.length > 0
-                  ) {
-                    for (const tc of m.tool_calls) {
-                      const callId = tc.id ?? randomUUID();
-                      writer.write({
-                        type: 'tool-input-available',
-                        toolCallId: callId,
-                        toolName: tc.name,
-                        input: tc.args,
-                        dynamic: true,
-                      });
-                      // Persist the tool call as a `tool` message row. We
-                      // intentionally store input only here; output is
-                      // patched in when the ToolMessage arrives below.
-                      try {
-                        const row = await this.messages.insertMessage({
-                          threadId,
-                          runId: run.id,
-                          userId,
-                          role: 'tool',
-                          content: '',
+                  // Duck-typing instead of `instanceof` is intentional:
+                  // `@langchain/core` and `@langchain/langgraph` each
+                  // bundle their own copy of the message classes, so a
+                  // message returned from a graph node may have the
+                  // shape of an AIMessage but a prototype that doesn't
+                  // match the import we'd compare against (see the
+                  // matching note in `nodes/router.ts`). Without this,
+                  // the AIMessage branch silently misses tool_calls
+                  // and the AI SDK throws "No tool invocation found"
+                  // when the matching ToolMessage arrives.
+                  const kind = (m as { _getType?: () => string })._getType?.();
+                  if (kind === 'ai') {
+                    const ai = m as unknown as {
+                      content: unknown;
+                      tool_calls?: Array<{
+                        id?: string;
+                        name: string;
+                        args?: Record<string, unknown>;
+                      }>;
+                    };
+                    const toolCalls = ai.tool_calls ?? [];
+                    if (toolCalls.length > 0) {
+                      for (const tc of toolCalls) {
+                        const callId = tc.id ?? randomUUID();
+                        const args = (tc.args ?? {}) as unknown;
+                        knownToolCalls.set(callId, {
                           toolName: tc.name,
-                          toolCallId: callId,
-                          toolInput: (tc.args ?? {}) as unknown,
+                          input: args,
                         });
-                        toolRowByCallId.set(callId, row.id);
-                      } catch (err) {
-                        this.logger.warn(
-                          `Failed to persist tool call ${callId} ` +
-                            `(${tc.name}): ${String(err)}`,
-                        );
+                        await announceToolInput(callId, tc.name, args);
+                      }
+                      continue;
+                    }
+                    if (!textStreamedViaMessages) {
+                      // AIMessage without tool_calls — covers the chat
+                      // node's fallback error reply and any non-streamed
+                      // assistant turn. Skip when messages-mode already
+                      // streamed the same content to avoid duplicates.
+                      const text =
+                        typeof ai.content === 'string'
+                          ? ai.content
+                          : JSON.stringify(ai.content);
+                      if (text) {
+                        openTextOnce();
+                        assistantText += text;
+                        writer.write({
+                          type: 'text-delta',
+                          id: turnId,
+                          delta: text,
+                        });
                       }
                     }
-                  } else if (m instanceof ToolMessage) {
-                    const output = safeParse(m.content as string);
+                    continue;
+                  }
+                  if (kind === 'tool') {
+                    const tool = m as unknown as {
+                      tool_call_id?: string;
+                      content: unknown;
+                    };
+                    const callId = tool.tool_call_id;
+                    if (!callId) continue;
+                    const output =
+                      typeof tool.content === 'string'
+                        ? safeParse(tool.content)
+                        : tool.content;
+                    // Defensive: if the matching input never arrived
+                    // (different langchain copies, missed update,
+                    // etc.) synthesise it from whatever we know about
+                    // the call so the AI SDK can place the output.
+                    if (!announcedInputs.has(callId)) {
+                      const known = knownToolCalls.get(callId);
+                      await announceToolInput(
+                        callId,
+                        known?.toolName ?? 'tool',
+                        known?.input ?? {},
+                      );
+                    }
                     writer.write({
                       type: 'tool-output-available',
-                      toolCallId: m.tool_call_id,
+                      toolCallId: callId,
                       output,
                       dynamic: true,
                     });
-                    const rowId = toolRowByCallId.get(m.tool_call_id);
+                    const rowId = toolRowByCallId.get(callId);
                     if (rowId) {
                       try {
                         await this.messages.setToolOutput({
@@ -199,30 +300,6 @@ export class ChatService {
                           `Failed to patch tool_output on row ${rowId}: ${String(err)}`,
                         );
                       }
-                    }
-                  } else if (
-                    m instanceof AIMessage &&
-                    !textStreamedViaMessages
-                  ) {
-                    // AIMessage without tool_calls — covers the chat node's
-                    // fallback error reply and any non-streamed assistant
-                    // turn. We only emit it when nothing came through
-                    // `messages` mode for this turn; otherwise LangGraph
-                    // would deliver the same content twice (incremental
-                    // chunks from the LLM stream + the full message in the
-                    // node-level state update).
-                    const text =
-                      typeof m.content === 'string'
-                        ? m.content
-                        : JSON.stringify(m.content);
-                    if (text) {
-                      openTextOnce();
-                      assistantText += text;
-                      writer.write({
-                        type: 'text-delta',
-                        id: turnId,
-                        delta: text,
-                      });
                     }
                   }
                 }

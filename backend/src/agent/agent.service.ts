@@ -51,10 +51,16 @@ export class AgentService {
    * Stream a single agent turn. Yields LangGraph stream events in
    * `streamMode: ["messages", "updates"]` shape so the controller can adapt
    * them into Vercel AI SDK UI message chunks.
+   *
+   * The optional `signal` is forwarded into the LangGraph runnable
+   * config so client disconnects / explicit `useChat.stop()` actually
+   * cancel the in-flight LLM + tool calls instead of letting them run
+   * to completion and burn tokens.
    */
   async *streamRun(
     threadId: string,
     userMessage: string,
+    signal?: AbortSignal,
   ): AsyncGenerator<{ mode: 'messages' | 'updates'; payload: unknown }> {
     const graph = this.getGraph();
     const stream = await graph.stream(
@@ -62,6 +68,7 @@ export class AgentService {
       {
         configurable: { thread_id: threadId },
         streamMode: ['messages', 'updates'],
+        signal,
       },
     );
 

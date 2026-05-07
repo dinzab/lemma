@@ -15,6 +15,15 @@ type Provider = 'nvidia' | 'openrouter' | 'openai';
 export class LlmService implements OnModuleInit {
   private readonly logger = new Logger(LlmService.name);
   private readonly provider: Provider;
+  /**
+   * Cached client. ChatOpenAI is a thin wrapper around an OpenAI SDK
+   * client and our config doesn't change at runtime, so building one
+   * per chat-node invocation (4× a turn for a typical ReAct loop) is
+   * pure overhead. We construct it lazily on first use so a missing
+   * credential still surfaces as a graceful AIMessage via the chat
+   * node's try/catch, not a startup crash.
+   */
+  private model?: ChatOpenAI;
 
   constructor(private readonly config: ConfigService) {
     const raw = (
@@ -32,11 +41,19 @@ export class LlmService implements OnModuleInit {
   }
 
   /**
-   * Build a ChatOpenAI instance for the configured provider.
-   * Throws if the provider's API key is missing — surfaced as a graceful
-   * AIMessage by `chat.node.ts`'s try/catch rather than crashing the stream.
+   * Return the cached ChatOpenAI instance, constructing it on first
+   * use. Throws if the provider's API key is missing — surfaced as a
+   * graceful AIMessage by `chat.node.ts`'s try/catch rather than
+   * crashing the stream.
    */
   getChatModel(): ChatOpenAI {
+    if (!this.model) {
+      this.model = this.constructModel();
+    }
+    return this.model;
+  }
+
+  private constructModel(): ChatOpenAI {
     switch (this.provider) {
       case 'nvidia':
         return this.buildNvidia();

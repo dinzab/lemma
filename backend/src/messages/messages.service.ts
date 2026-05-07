@@ -36,8 +36,15 @@ export class MessagesService {
 
   /**
    * Insert a message row, computing `sequence` as `MAX(sequence)+1` for
-   * the thread in a single round-trip. Returns the persisted row so the
-   * caller can attach the generated id to subsequent events.
+   * the thread. Returns the persisted row so the caller can attach the
+   * generated id to subsequent events.
+   *
+   * Concurrent inserts on the same thread (rare but possible: an HTTP
+   * retry races the original, two browser tabs send simultaneously,
+   * etc.) used to silently fail the loser with a `(thread_id, sequence)`
+   * unique-constraint violation, leaving holes in the persisted history.
+   * We retry the read-max + insert pair on the well-known PostgREST
+   * `23505` code so concurrent inserts each get a fresh sequence.
    */
   async insertMessage(input: {
     threadId: string;
@@ -51,51 +58,69 @@ export class MessagesService {
     toolOutput?: unknown;
     tokenCount?: number | null;
   }): Promise<MessageRecord> {
-    // Compute next sequence for the thread. The `(thread_id, sequence)`
-    // UNIQUE constraint prevents duplicates if two concurrent inserts ever
-    // race; in practice a single user only drives one turn at a time.
-    const { data: maxRow, error: maxErr } = await this.supabase
-      .from('messages')
-      .select('sequence')
-      .eq('thread_id', input.threadId)
-      .order('sequence', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (maxErr) {
-      throw new Error(
-        `Failed to read sequence for thread ${input.threadId}: ${maxErr.message}`,
+    const MAX_ATTEMPTS = 5;
+    let lastError: { code?: string; message: string } | null = null;
+
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+      const { data: maxRow, error: maxErr } = await this.supabase
+        .from('messages')
+        .select('sequence')
+        .eq('thread_id', input.threadId)
+        .order('sequence', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (maxErr) {
+        throw new Error(
+          `Failed to read sequence for thread ${input.threadId}: ${maxErr.message}`,
+        );
+      }
+      const nextSequence = (maxRow?.sequence ?? -1) + 1;
+
+      const { data, error } = await this.supabase
+        .from('messages')
+        .insert({
+          thread_id: input.threadId,
+          run_id: input.runId,
+          user_id: input.userId,
+          role: input.role,
+          content: input.content ?? '',
+          tool_name: input.toolName ?? null,
+          tool_call_id: input.toolCallId ?? null,
+          tool_input: input.toolInput ?? null,
+          tool_output: input.toolOutput ?? null,
+          token_count: input.tokenCount ?? null,
+          sequence: nextSequence,
+        })
+        .select(
+          'id, thread_id, run_id, user_id, role, content, ' +
+            'tool_name, tool_call_id, tool_input, tool_output, ' +
+            'token_count, sequence, created_at',
+        )
+        .single();
+
+      if (data) {
+        return rowToMessage(data as unknown as MessageRow);
+      }
+
+      const err = error as { code?: string; message: string } | null;
+      lastError = err;
+      // 23505 = unique_violation. Anything else (RLS denial, network,
+      // schema problem) won't be cured by a retry, so fail fast.
+      if (err?.code !== '23505') {
+        throw new Error(
+          `Failed to insert message: ${err?.message ?? 'unknown error'}`,
+        );
+      }
+      this.logger.debug(
+        `Sequence collision on thread ${input.threadId} ` +
+          `(attempt ${attempt + 1}/${MAX_ATTEMPTS}); retrying.`,
       );
     }
-    const nextSequence = (maxRow?.sequence ?? -1) + 1;
 
-    const { data, error } = await this.supabase
-      .from('messages')
-      .insert({
-        thread_id: input.threadId,
-        run_id: input.runId,
-        user_id: input.userId,
-        role: input.role,
-        content: input.content ?? '',
-        tool_name: input.toolName ?? null,
-        tool_call_id: input.toolCallId ?? null,
-        tool_input: input.toolInput ?? null,
-        tool_output: input.toolOutput ?? null,
-        token_count: input.tokenCount ?? null,
-        sequence: nextSequence,
-      })
-      .select(
-        'id, thread_id, run_id, user_id, role, content, ' +
-          'tool_name, tool_call_id, tool_input, tool_output, ' +
-          'token_count, sequence, created_at',
-      )
-      .single();
-
-    if (error || !data) {
-      throw new Error(
-        `Failed to insert message: ${error?.message ?? 'unknown error'}`,
-      );
-    }
-    return rowToMessage(data as unknown as MessageRow);
+    throw new Error(
+      `Failed to insert message after ${MAX_ATTEMPTS} sequence-retry attempts: ` +
+        (lastError?.message ?? 'unknown error'),
+    );
   }
 
   /**

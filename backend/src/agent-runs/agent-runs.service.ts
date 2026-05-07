@@ -110,6 +110,40 @@ export class AgentRunsService implements OnApplicationBootstrap {
   }
 
   /**
+   * Mark a run as cancelled. Used when the client disconnects mid-stream
+   * (browser tab closed, network drop, useChat.stop() abort) — distinct
+   * from `failRun` so dashboards / retry UX can tell user-aborts apart
+   * from real failures.
+   */
+  async cancelRun(runId: string, reason?: string | null): Promise<void> {
+    await this.finalize(runId, 'cancelled', reason ?? null);
+  }
+
+  /**
+   * Look up a single run by id, scoped to `userId`. Returns `null` when
+   * the run doesn't exist or doesn't belong to the caller (callers
+   * should treat both cases as "not found" so a non-owner can't observe
+   * another user's run id space).
+   */
+  async getRunOwnedBy(
+    runId: string,
+    userId: string,
+  ): Promise<AgentRunRecord | null> {
+    const { data, error } = await this.supabase
+      .from('agent_runs')
+      .select('id, thread_id, user_id, status, started_at, completed_at, error')
+      .eq('id', runId)
+      .eq('user_id', userId)
+      .maybeSingle();
+
+    if (error) {
+      this.logger.warn(`getRunOwnedBy query failed: ${error.message}`);
+      return null;
+    }
+    return data ? rowToAgentRun(data) : null;
+  }
+
+  /**
    * Look up the latest run on a thread. Used by the active-run endpoint so
    * the frontend can decide whether to reconnect, show a retry affordance,
    * or just render history from the messages table.

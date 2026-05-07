@@ -9,6 +9,16 @@ export class StreamChatDto {
   message!: string;
 }
 
+/**
+ * Query string for `GET /chat/stream/resume` — re-attach a client to an
+ * already-running agent turn after a reload or transient disconnect.
+ * The runId is the `agent_runs.id` returned by `/threads/:id/active-run`.
+ */
+export class ResumeStreamQueryDto {
+  @IsUUID()
+  runId!: string;
+}
+
 export class GetMessagesQueryDto {
   @IsOptional()
   @Type(() => Number)

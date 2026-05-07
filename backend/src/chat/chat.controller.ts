@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  NotFoundException,
   Param,
   ParseUUIDPipe,
   Post,
@@ -11,7 +12,12 @@ import {
 } from '@nestjs/common';
 import type { Response } from 'express';
 import { ChatService } from './chat.service';
-import { GetMessagesQueryDto, MessagesPageDto, StreamChatDto } from './dto';
+import {
+  GetMessagesQueryDto,
+  MessagesPageDto,
+  ResumeStreamQueryDto,
+  StreamChatDto,
+} from './dto';
 import { SupabaseAuthGuard, type SupabaseJwtPayload } from '../auth';
 import { CurrentUser } from '../decorators';
 import { AgentRunsService, type ActiveRunDto } from '../agent-runs';
@@ -79,5 +85,30 @@ export class ChatController {
     // ThreadsService (consistent with /messages and /chat/stream).
     await this.threads.getThread(threadId, user.sub);
     return this.agentRuns.getActiveRun(threadId, user.sub);
+  }
+
+  /**
+   * Re-attach to an in-flight agent turn after a reload or transient
+   * network drop. The wire protocol is the same Vercel AI SDK UI message
+   * stream as `POST /chat/stream`, so the frontend's `useChat` parsing
+   * loop reads it the same way. Ownership is enforced by `getOwnedRun`
+   * — a non-owner gets a 404 before any SSE bytes are written.
+   *
+   * If the run id has been evicted from memory (server restart, TTL
+   * elapsed) the response is still a well-formed `start … finish`
+   * envelope so the SDK doesn't hang; the client's history fetch is
+   * the source of truth for content in that case.
+   */
+  @Get('chat/stream/resume')
+  async resumeStream(
+    @CurrentUser() user: SupabaseJwtPayload,
+    @Query() query: ResumeStreamQueryDto,
+    @Res() response: Response,
+  ): Promise<void> {
+    const run = await this.chat.getOwnedRun(query.runId, user.sub);
+    if (!run) {
+      throw new NotFoundException(`Run ${query.runId} not found.`);
+    }
+    await this.chat.resumeRunToResponse({ runId: run.id, response });
   }
 }

@@ -42,6 +42,7 @@ interface PersistedMessage {
   toolInput?: unknown;
   /** Tool call return value — present on `role: 'tool'` rows. */
   toolOutput?: unknown;
+  createdAt?: string;
 }
 
 interface MessagesPage {
@@ -232,15 +233,22 @@ function toUiMessages(persisted: PersistedMessage[]): UIMessage[] {
       if (toolRows) {
         for (const tool of toolRows) {
           if (!tool.toolName || !tool.toolCallId) continue;
-          const hasOutput =
-            tool.toolOutput !== undefined && tool.toolOutput !== null;
+          // Legacy rows persisted before the dual-write split only
+          // populated `content` (the stringified tool result) and left
+          // `toolInput` / `toolOutput` null. Fall back to the content
+          // column so old threads still render their tool outputs
+          // instead of looking like the tool never returned.
+          const output =
+            tool.toolOutput ??
+            (tool.content ? safeParse(tool.content) : undefined);
+          const hasOutput = output !== undefined && output !== null;
           parts.push({
             type: "dynamic-tool",
             toolName: tool.toolName,
             toolCallId: tool.toolCallId,
             state: hasOutput ? "output-available" : "input-available",
             input: (tool.toolInput ?? {}) as Record<string, unknown>,
-            ...(hasOutput ? { output: tool.toolOutput } : {}),
+            ...(hasOutput ? { output } : {}),
           } as UIMessage["parts"][number]);
         }
       }
@@ -256,4 +264,12 @@ function toUiMessages(persisted: PersistedMessage[]): UIMessage[] {
     } as UIMessage);
   }
   return out;
+}
+
+function safeParse(raw: string): unknown {
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
+  }
 }

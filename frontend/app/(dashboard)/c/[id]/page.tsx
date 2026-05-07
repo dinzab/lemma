@@ -191,7 +191,7 @@ export default function ChatThreadPage() {
               </div>
             </div>
           ) : (
-            <div className="relative h-full">
+            <div className="relative flex h-full flex-col">
               {hasOlder && (
                 <div className="absolute left-0 right-0 top-2 z-10 flex justify-center">
                   <Button

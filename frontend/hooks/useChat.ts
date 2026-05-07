@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { useChat as useAiChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import type { UIMessage } from "ai";
-import type { Message, ToolCall } from "@/components/chat/CustomMessages";
 
 interface UseLemmaChatOptions {
   threadId: string;
@@ -52,11 +51,11 @@ interface MessagesPage {
  * turns and pairs it with a paginated history fetch against the NestJS
  * `/threads/:id/messages` endpoint.
  *
- * The returned shape matches the API expected by `CustomMessages` so the
- * existing renderer keeps working unchanged. Internally
- * everything goes through the v5 UI message stream protocol —
- * `text-start`/`text-delta`/`text-end` for text, plus
- * `tool-input-available`/`tool-output-available` for tool calls.
+ * Returns the SDK's native `UIMessage[]` shape so callers can render with
+ * the AI Elements components (`<Conversation />`, `<Message />`, `<Tool />`,
+ * `<MessageResponse />`) without further conversion. Tool calls are
+ * already encoded as `dynamic-tool` parts on the wire by the NestJS
+ * stream — see `chat.service.ts`.
  */
 export function useLemmaChat({
   threadId,
@@ -70,8 +69,8 @@ export function useLemmaChat({
   const [olderCursor, setOlderCursor] = useState<string | null>(null);
   const [olderTotal, setOlderTotal] = useState(0);
 
-  // Stable transport across renders — `useChat` re-instantiates heavy state
-  // when it sees a different transport reference.
+  // Stable transport across renders — `useChat` re-instantiates heavy
+  // state when it sees a different transport reference.
   const transport = useMemo(
     () => new DefaultChatTransport<UIMessage>({ api }),
     [api],
@@ -107,7 +106,6 @@ export function useLemmaChat({
           credentials: "include",
         });
         if (!res.ok) {
-          // 404/403 → empty thread is a normal first-load.
           if (cancelled) return;
           setMessages([]);
           setSeededAt(threadId);
@@ -133,17 +131,16 @@ export function useLemmaChat({
     return () => {
       cancelled = true;
     };
-    // historyApi/setMessages intentionally not in deps — historyApi is a
-    // closure over threadId, and setMessages is stable per useChat instance.
+    // historyApi/setMessages intentionally omitted — historyApi is a
+    // closure over threadId, and setMessages is stable per useChat
+    // instance.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [threadId]);
 
-  // Convert AI SDK UIMessage[] back to the legacy Message[] shape the existing
-  // renderer (CustomMessages.tsx) consumes. Done lazily per render.
-  const messages: Message[] = useMemo(() => {
-    if (!seededAt) return [];
-    return aiMessages.map(uiMessageToLegacy);
-  }, [aiMessages, seededAt]);
+  const messages: UIMessage[] = useMemo(
+    () => (seededAt ? aiMessages : []),
+    [aiMessages, seededAt],
+  );
 
   const sendText = useCallback(
     (text: string) => {
@@ -155,10 +152,7 @@ export function useLemmaChat({
 
   const stopGeneration = useCallback(() => stop(), [stop]);
 
-  const regenerateLastMessage = useCallback(
-    () => regenerate(),
-    [regenerate],
-  );
+  const regenerateLastMessage = useCallback(() => regenerate(), [regenerate]);
 
   const loadOlder = useCallback(async () => {
     if (!olderCursor) return;
@@ -175,10 +169,13 @@ export function useLemmaChat({
   }, [historyApi, olderCursor, setMessages, threadId]);
 
   const isLoading = status === "submitted" || status === "streaming";
+  const isStreaming = status === "streaming";
 
   return {
     messages,
+    status,
     isLoading,
+    isStreaming,
     error: error?.message ?? historyError,
     isInitialized,
     threadId,
@@ -195,9 +192,10 @@ export function useLemmaChat({
 // ---------- conversion helpers ----------
 
 function toUiMessages(persisted: PersistedMessage[]): UIMessage[] {
-  // Build a tool result lookup so we can fold tool messages back into the
-  // assistant turn that owns them — Vercel AI SDK's UI uses one message
-  // with tool-* parts rather than separate role: 'tool' messages.
+  // Build a tool result lookup so tool messages can be folded back into
+  // the assistant turn that owns them — the AI SDK's `UIMessage` model
+  // attaches tool I/O as `dynamic-tool` parts on the assistant message,
+  // not as separate `role: 'tool'` messages.
   const toolResults = new Map<string, string>();
   for (const m of persisted) {
     if (m.role === "tool" && m.toolCallId) {
@@ -223,8 +221,6 @@ function toUiMessages(persisted: PersistedMessage[]): UIMessage[] {
           toolCallId: tc.id,
           state: result ? "output-available" : "input-available",
           input: tc.args ?? {},
-          // `output` only valid on the output-available variant; cast keeps
-          // the discriminated union happy at runtime.
           ...(result ? { output: safeParse(result) } : {}),
         } as UIMessage["parts"][number]);
       }
@@ -237,80 +233,6 @@ function toUiMessages(persisted: PersistedMessage[]): UIMessage[] {
     } as UIMessage);
   }
   return out;
-}
-
-function uiMessageToLegacy(m: UIMessage): Message {
-  let text = "";
-  const toolCalls: ToolCall[] = [];
-  let toolCallId: string | undefined;
-  let toolName: string | undefined;
-
-  for (const p of m.parts ?? []) {
-    if (p.type === "text") {
-      text += p.text;
-      continue;
-    }
-    if (
-      p.type === "dynamic-tool" ||
-      (typeof p.type === "string" && p.type.startsWith("tool-"))
-    ) {
-      const part = p as Record<string, unknown> & {
-        type: string;
-        toolName?: string;
-        toolCallId?: string;
-        state?: string;
-        input?: unknown;
-        output?: unknown;
-        errorText?: string;
-      };
-      const status = mapToolState(part.state);
-      toolCalls.push({
-        id: part.toolCallId ?? "",
-        name:
-          part.toolName ??
-          (part.type.startsWith("tool-")
-            ? part.type.slice("tool-".length)
-            : "tool"),
-        args: part.input ?? {},
-        result:
-          part.output !== undefined
-            ? part.output
-            : part.errorText
-              ? { error: part.errorText }
-              : undefined,
-        status,
-      });
-    }
-  }
-
-  return {
-    id: m.id,
-    role:
-      m.role === "user"
-        ? "user"
-        : m.role === "system"
-          ? "system"
-          : "assistant",
-    content: text,
-    toolCalls: toolCalls.length ? toolCalls : undefined,
-    toolCallId,
-    toolName,
-  };
-}
-
-function mapToolState(state: string | undefined): ToolCall["status"] {
-  switch (state) {
-    case "input-streaming":
-    case "input-available":
-      return "executing";
-    case "output-available":
-      return "complete";
-    case "output-error":
-    case "output-denied":
-      return "error";
-    default:
-      return "pending";
-  }
 }
 
 function safeParse(raw: string): unknown {

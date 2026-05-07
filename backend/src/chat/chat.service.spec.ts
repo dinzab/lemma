@@ -41,10 +41,7 @@ function makeMockResponse(): {
     flushHeaders: () => undefined,
     writeHead: (
       status: number,
-      statusOrHeaders?:
-        | string
-        | Record<string, string | number | string[]>
-        | undefined,
+      statusOrHeaders?: string | Record<string, string | number | string[]>,
       maybeHeaders?: Record<string, string | number | string[]>,
     ) => {
       response.statusCode = status;

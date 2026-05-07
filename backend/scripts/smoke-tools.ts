@@ -37,7 +37,9 @@ async function main() {
     console.log(`\n=== ${name} ===`);
     console.log(`args: ${JSON.stringify(args)}`);
     const summary = JSON.stringify(parsed, null, 2);
-    console.log(summary.length > 1500 ? summary.slice(0, 1500) + '\n...' : summary);
+    console.log(
+      summary.length > 1500 ? summary.slice(0, 1500) + '\n...' : summary,
+    );
   }
 
   try {

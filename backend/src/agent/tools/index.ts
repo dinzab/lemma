@@ -11,6 +11,7 @@ import {
 import { Neo4jClientProvider } from './neo4j.client';
 import { EmbeddingsClient } from './embeddings.client';
 import { RerankerClient } from './reranker.client';
+import { AnalogiesClient } from './analogies.client';
 
 /**
  * Description for the write_todos planning tool. Mirrors the public
@@ -62,7 +63,7 @@ Only use this tool if you think it will help you stay organized. If the student'
  * than the underlying data store, so the agent can reason about
  * "questions on a chapter" instead of "points in a Qdrant collection".
  *
- * Surface (7):
+ * Surface (8 + planning):
  *   - search_questions       semantic retrieval + rerank, w/ filters
  *   - get_question_pair      full Q/A pair by pair_id
  *   - find_similar_questions vector neighbours of a known pair
@@ -70,6 +71,9 @@ Only use this tool if you think it will help you stay organized. If the student'
  *   - list_chapters          Neo4j catalogue, by matiere
  *   - list_topics            Neo4j catalogue, by matiere/chapter
  *   - list_exams             Neo4j exam metadata catalogue
+ *   - recall_analogy         pull a curated Tunisian real-life anchor for
+ *                            a concept (Teacher Protocol step 4 / A12
+ *                            *Dans la vraie vie* render block)
  *
  * Two non-negotiable filters are baked into every Qdrant read inside
  * {@link QdrantClientProvider} (`critic_label='correct'`, `under_gate=false`),
@@ -97,6 +101,7 @@ export class AgentToolsService {
     private readonly neo4j: Neo4jClientProvider,
     private readonly embeddings: EmbeddingsClient,
     private readonly reranker: RerankerClient,
+    private readonly analogies: AnalogiesClient,
   ) {}
 
   getAll(): StructuredToolInterface[] {
@@ -108,6 +113,7 @@ export class AgentToolsService {
       this.listChaptersTool(),
       this.listTopicsTool(),
       this.listExamsTool(),
+      this.recallAnalogyTool(),
       this.writeTodosTool(),
     ];
   }
@@ -699,6 +705,98 @@ export class AgentToolsService {
             .max(200)
             .optional()
             .describe('Max exams to return (default 50, max 200).'),
+        }),
+      },
+    );
+  }
+
+  // ---- recall_analogy ---------------------------------------------------
+
+  /**
+   * Curated Tunisian real-life anchor for a math/physique/svt/etc.
+   * concept. This is step 4 of the Teacher Protocol (RECALL anchor) —
+   * the agent pulls a hand-curated analogy from the on-disk library
+   * BEFORE composing its reply. The frontend renders the result as the
+   * A12 *Dans la vraie vie* chip (see product-vision SKILL.md Part E.3).
+   *
+   * The tool is intentionally honest: when the library doesn't cover
+   * the concept it returns `{ covered: false }`. The system prompt
+   * forbids fabricating an anchor in that case — better to skip the
+   * chip than pollute it with a generic "imagine a pizza" analogy that
+   * defeats the whole point of being a Tunisian-specific moat.
+   */
+  private recallAnalogyTool(): StructuredToolInterface {
+    return tool(
+      async ({ concept_query, matiere }) => {
+        try {
+          const anchor = this.analogies.recall({
+            query: concept_query,
+            matiere,
+          });
+          if (!anchor) {
+            return JSON.stringify({
+              covered: false,
+              concept_query,
+            });
+          }
+          return JSON.stringify({
+            covered: true,
+            anchor: {
+              id: anchor.id,
+              concept_label: anchor.concept_label,
+              matiere: anchor.matiere,
+              label: anchor.label,
+              short: anchor.short,
+              full: anchor.full,
+              language: anchor.language,
+              tags: anchor.tags,
+            },
+          });
+        } catch (err) {
+          this.logger.warn(`recall_analogy failed: ${String(err)}`);
+          return `Error recalling analogy: ${(err as Error).message}`;
+        }
+      },
+      {
+        name: 'recall_analogy',
+        description:
+          'Pull a curated Tunisian real-life analogy for the concept ' +
+          'currently being taught. Call this BEFORE writing the main ' +
+          'explanation when the student is asking about a concrete ' +
+          'mathematical/physical/biological concept that benefits from ' +
+          'grounding (e.g. "fonction affine", "forme exponentielle", ' +
+          '"mitose", "loi de Newton", "clé étrangère"). The library is ' +
+          'small and curated — if no match is found, the tool returns ' +
+          '`covered: false` and you must NOT invent an analogy yourself: ' +
+          'just continue with the explanation without an analogy chip.',
+        schema: z.object({
+          concept_query: z
+            .string()
+            .min(2)
+            .describe(
+              'Short label for the concept being taught, in French or ' +
+                'English. Examples: "fonction affine", "forme exponentielle", ' +
+                '"mitose", "deuxième loi de Newton", "clé étrangère SQL".',
+            ),
+          matiere: z
+            .enum([
+              'math',
+              'physique',
+              'svt',
+              'gestion',
+              'technique',
+              'bd',
+              'economie',
+              'info',
+              'algorithme',
+            ])
+            .optional()
+            .describe(
+              'Matière filter. When provided, only anchors tagged with ' +
+                'this matière are eligible — useful when the same word ' +
+                '(e.g. "limite") could match different concepts across ' +
+                'subjects.',
+            ),
         }),
       },
     );

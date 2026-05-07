@@ -16,6 +16,10 @@ import {
 } from "@/components/ai-elements/message";
 import { LemmaToolCall } from "@/components/chat/LemmaToolCall";
 import type { LemmaToolUIPart } from "@/components/chat/LemmaToolCall";
+import {
+  RealLifeAnchorChip,
+  type LemmaAnalogyToolPart,
+} from "@/components/chat/RealLifeAnchorChip";
 import { cn } from "@/lib/utils";
 
 interface LemmaConversationProps {
@@ -108,6 +112,17 @@ export function LemmaConversation({
                   // be noisy and reveal an internal tool name.
                   return null;
                 }
+                if (isRecallAnalogyPart(part)) {
+                  // A12 *Dans la vraie vie* surface — render the
+                  // curated anchor as a soft pinned card instead of
+                  // the generic debug-style tool chip.
+                  return (
+                    <RealLifeAnchorChip
+                      key={key}
+                      part={part as LemmaAnalogyToolPart}
+                    />
+                  );
+                }
                 return (
                   <LemmaToolCall
                     key={key}
@@ -168,6 +183,16 @@ function isWriteTodosPart(part: { type?: string; toolName?: string }): boolean {
     return true;
   }
   return part.type === "tool-write_todos";
+}
+
+function isRecallAnalogyPart(part: {
+  type?: string;
+  toolName?: string;
+}): boolean {
+  if (part.type === "dynamic-tool" && part.toolName === "recall_analogy") {
+    return true;
+  }
+  return part.type === "tool-recall_analogy";
 }
 
 function TypingIndicator() {

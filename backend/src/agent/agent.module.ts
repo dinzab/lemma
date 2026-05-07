@@ -7,6 +7,7 @@ import { QdrantClientProvider } from './tools/qdrant.client';
 import { Neo4jClientProvider } from './tools/neo4j.client';
 import { EmbeddingsClient } from './tools/embeddings.client';
 import { RerankerClient } from './tools/reranker.client';
+import { AnalogiesClient } from './tools/analogies.client';
 
 /**
  * AgentModule wires up:
@@ -27,6 +28,7 @@ import { RerankerClient } from './tools/reranker.client';
     Neo4jClientProvider,
     EmbeddingsClient,
     RerankerClient,
+    AnalogiesClient,
     AgentToolsService,
     AgentService,
   ],

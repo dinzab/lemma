@@ -231,7 +231,7 @@ export default function ChatThreadPage() {
         </div>
 
         {error && (
-          <div className="mx-auto w-full max-w-3xl px-4 pb-2">
+          <div className="mx-auto w-full max-w-3xl px-3 pb-2 sm:px-4">
             <div className="rounded-xl bg-destructive/10 px-4 py-2.5 text-sm text-destructive">
               {error}
             </div>
@@ -239,7 +239,7 @@ export default function ChatThreadPage() {
         )}
 
         {/* Input area */}
-        <div className="bg-gradient-to-t from-background via-background to-transparent px-4 pb-4 pt-3 sm:px-6">
+        <div className="sticky bottom-0 z-10 bg-gradient-to-t from-background via-background/95 to-background/0 px-3 pb-3 pt-4 sm:px-6 sm:pb-4">
           <div className="mx-auto w-full max-w-3xl">
             <PromptComposer
               value={input}
@@ -249,6 +249,9 @@ export default function ChatThreadPage() {
               isStreaming={isLoading}
               placeholder="Ask anything…"
             />
+            <p className="mt-2 hidden text-center text-[11px] leading-4 text-muted-foreground/70 sm:block">
+              BacPrep AI can make mistakes. Verify important information.
+            </p>
           </div>
         </div>
       </div>

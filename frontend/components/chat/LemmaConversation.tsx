@@ -1,6 +1,6 @@
 "use client";
 
-import { Sparkles } from "lucide-react";
+import { GraduationCap, Sparkles } from "lucide-react";
 import type { UIMessage } from "ai";
 
 import {
@@ -16,6 +16,7 @@ import {
 } from "@/components/ai-elements/message";
 import { LemmaToolCall } from "@/components/chat/LemmaToolCall";
 import type { LemmaToolUIPart } from "@/components/chat/LemmaToolCall";
+import { cn } from "@/lib/utils";
 
 interface LemmaConversationProps {
   messages: UIMessage[];
@@ -23,6 +24,21 @@ interface LemmaConversationProps {
   isStreaming?: boolean;
   emptyTitle?: string;
   emptyDescription?: string;
+}
+
+function AssistantAvatar({ className }: { className?: string }) {
+  return (
+    <div
+      aria-hidden
+      className={cn(
+        "flex size-7 shrink-0 items-center justify-center rounded-full",
+        "bg-gradient-to-br from-primary/15 via-secondary/15 to-chart-3/15 ring-1 ring-primary/20",
+        className,
+      )}
+    >
+      <GraduationCap className="size-3.5 text-primary" />
+    </div>
+  );
 }
 
 /**
@@ -67,48 +83,71 @@ export function LemmaConversation({
         {messages.map((message, idx) => {
           const isLastMessage = idx === messages.length - 1;
           const messageIsStreaming = isStreaming && isLastMessage;
-          return (
-            <Message from={message.role} key={message.id}>
-              <MessageContent>
-                {message.parts.map((part, partIdx) => {
-                  const key = `${message.id}-${partIdx}`;
-                  if (part.type === "text") {
-                    return (
-                      <MessageResponse key={key}>{part.text}</MessageResponse>
-                    );
-                  }
-                  if (
-                    part.type === "dynamic-tool" ||
-                    (typeof part.type === "string" &&
-                      part.type.startsWith("tool-"))
-                  ) {
-                    if (isWriteTodosPart(part)) {
-                      // Rendered as the live plan panel above the chat
-                      // (see <TodoPlanPanel />); inline duplication would
-                      // be noisy and reveal an internal tool name.
-                      return null;
-                    }
-                    return (
-                      <LemmaToolCall
-                        key={key}
-                        part={part as LemmaToolUIPart}
-                        isStreaming={messageIsStreaming}
-                      />
-                    );
-                  }
+          const isAssistant = message.role === "assistant";
+          const renderedParts = message.parts
+            .map((part, partIdx) => {
+              const key = `${message.id}-${partIdx}`;
+              if (part.type === "text") {
+                return (
+                  <MessageResponse key={key}>{part.text}</MessageResponse>
+                );
+              }
+              if (
+                part.type === "dynamic-tool" ||
+                (typeof part.type === "string" &&
+                  part.type.startsWith("tool-"))
+              ) {
+                if (isWriteTodosPart(part)) {
+                  // Rendered as the live plan panel above the chat
+                  // (see <TodoPlanPanel />); inline duplication would
+                  // be noisy and reveal an internal tool name.
                   return null;
-                })}
-              </MessageContent>
+                }
+                return (
+                  <LemmaToolCall
+                    key={key}
+                    part={part as LemmaToolUIPart}
+                    isStreaming={messageIsStreaming}
+                  />
+                );
+              }
+              return null;
+            })
+            .filter(Boolean);
+
+          if (renderedParts.length === 0) {
+            return null;
+          }
+
+          return isAssistant ? (
+            <div
+              key={message.id}
+              className="flex w-full items-start gap-3"
+            >
+              <AssistantAvatar className="mt-0.5" />
+              <Message from="assistant" className="flex-1 min-w-0">
+                <MessageContent>{renderedParts}</MessageContent>
+              </Message>
+            </div>
+          ) : (
+            <Message from={message.role} key={message.id}>
+              <MessageContent>{renderedParts}</MessageContent>
             </Message>
           );
         })}
 
         {showAssistantTyping && (
-          <Message from="assistant" key="assistant-typing">
-            <MessageContent>
-              <TypingIndicator />
-            </MessageContent>
-          </Message>
+          <div
+            className="flex w-full items-start gap-3"
+            key="assistant-typing"
+          >
+            <AssistantAvatar className="mt-0.5" />
+            <Message from="assistant" className="flex-1 min-w-0">
+              <MessageContent>
+                <TypingIndicator />
+              </MessageContent>
+            </Message>
+          </div>
         )}
       </ConversationContent>
       <ConversationScrollButton />
@@ -126,12 +165,13 @@ function isWriteTodosPart(part: { type?: string; toolName?: string }): boolean {
 function TypingIndicator() {
   return (
     <div
-      className="flex items-center gap-1.5 py-1 text-muted-foreground"
+      className="flex items-center gap-1 py-1.5 text-muted-foreground"
       aria-label="Tutor is thinking"
+      role="status"
     >
-      <span className="size-2 animate-pulse rounded-full bg-primary/70 [animation-delay:-0.3s]" />
-      <span className="size-2 animate-pulse rounded-full bg-primary/70 [animation-delay:-0.15s]" />
-      <span className="size-2 animate-pulse rounded-full bg-primary/70" />
+      <span className="size-1.5 animate-bounce rounded-full bg-primary/80 [animation-delay:-0.3s]" />
+      <span className="size-1.5 animate-bounce rounded-full bg-primary/80 [animation-delay:-0.15s]" />
+      <span className="size-1.5 animate-bounce rounded-full bg-primary/80" />
     </div>
   );
 }

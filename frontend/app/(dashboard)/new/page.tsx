@@ -101,7 +101,7 @@ export default function NewChatPage() {
   return (
     <div className="relative flex h-full flex-1 flex-col overflow-y-auto">
       {/* Top toolbar */}
-      <div className="absolute right-4 top-4 z-10 flex items-center gap-2 sm:right-6 sm:top-5">
+      <div className="flex items-center justify-end gap-2 px-4 pt-3 sm:absolute sm:right-6 sm:top-5 sm:z-10 sm:px-0 sm:pt-0">
         <button
           type="button"
           className={cn(
@@ -121,9 +121,9 @@ export default function NewChatPage() {
         </button>
       </div>
 
-      <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col items-center justify-center gap-10 px-4 py-10 text-center sm:px-6 lg:px-8">
+      <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col items-center justify-center gap-8 px-4 py-8 text-center sm:max-w-3xl sm:gap-10 sm:px-6 sm:py-10 lg:px-8">
         {/* Hero */}
-        <div className="flex flex-col items-center gap-4">
+        <div className="flex flex-col items-center gap-3 sm:gap-4">
           <span className="inline-flex items-center gap-2 rounded-full border border-border/60 px-3 py-1 text-xs font-medium text-muted-foreground">
             <span className="relative flex h-2 w-2">
               <span className="absolute inset-0 animate-ping rounded-full bg-primary/60" />
@@ -136,7 +136,7 @@ export default function NewChatPage() {
             <span>Ready for today&apos;s Bac session</span>
           </span>
 
-          <h1 className="max-w-3xl text-balance text-3xl font-semibold leading-tight tracking-tight text-foreground sm:text-4xl lg:text-[2.875rem]">
+          <h1 className="max-w-3xl text-balance text-2xl font-semibold leading-tight tracking-tight text-foreground sm:text-4xl lg:text-[2.875rem]">
             Hello{" "}
             <span className="bg-gradient-to-br from-primary via-chart-3 to-secondary bg-clip-text text-transparent">
               {firstName}
@@ -157,6 +157,7 @@ export default function NewChatPage() {
             placeholder="Example: Explain derivatives from the Bac Math section…"
             isSubmitting={isLoading}
             modes={capabilities}
+            size="hero"
             autoFocus
           />
 

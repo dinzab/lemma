@@ -26,13 +26,18 @@ export interface MessageDto {
   id: string;
   role: 'user' | 'assistant' | 'tool' | 'system';
   content: string;
-  toolCalls?: Array<{
-    id: string;
-    name: string;
-    args: Record<string, unknown>;
-  }>;
+  /**
+   * id of the agent run this message belongs to. The frontend uses
+   * this to fold tool-role rows back into the dynamic-tool parts of
+   * the assistant turn that owns them on history reload.
+   */
+  runId?: string | null;
   toolCallId?: string;
   toolName?: string;
+  /** Tool call arguments — present on `role: 'tool'` rows. */
+  toolInput?: unknown;
+  /** Tool call return value — present on `role: 'tool'` rows. */
+  toolOutput?: unknown;
   createdAt?: string;
 }
 

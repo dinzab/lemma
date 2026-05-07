@@ -25,7 +25,11 @@ export type ToolProps = ComponentProps<typeof Collapsible>;
 
 export const Tool = ({ className, ...props }: ToolProps) => (
   <Collapsible
-    className={cn("group not-prose mb-4 w-full rounded-md border", className)}
+    className={cn(
+      "group not-prose my-2 w-full rounded-xl border border-border/70 bg-muted/30",
+      "transition-colors hover:bg-muted/50",
+      className,
+    )}
     {...props}
   />
 );
@@ -65,7 +69,10 @@ const statusIcons: Record<ToolPart["state"], ReactNode> = {
 };
 
 export const getStatusBadge = (status: ToolPart["state"]) => (
-  <Badge className="gap-1.5 rounded-full text-xs" variant="secondary">
+  <Badge
+    className="hidden gap-1 rounded-full px-2 py-0 text-[10px] sm:inline-flex"
+    variant="secondary"
+  >
     {statusIcons[status]}
     {statusLabels[status]}
   </Badge>
@@ -85,17 +92,20 @@ export const ToolHeader = ({
   return (
     <CollapsibleTrigger
       className={cn(
-        "flex w-full items-center justify-between gap-4 p-3",
+        "flex w-full items-center justify-between gap-3 px-3 py-2 text-left",
+        "rounded-xl transition-colors",
         className
       )}
       {...props}
     >
-      <div className="flex items-center gap-2">
-        <WrenchIcon className="size-4 text-muted-foreground" />
-        <span className="font-medium text-sm">{title ?? derivedName}</span>
+      <div className="flex min-w-0 items-center gap-2">
+        <WrenchIcon className="size-3.5 shrink-0 text-muted-foreground" />
+        <span className="truncate text-[13px] font-medium text-foreground/90">
+          {title ?? derivedName}
+        </span>
         {getStatusBadge(state)}
       </div>
-      <ChevronDownIcon className="size-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+      <ChevronDownIcon className="size-3.5 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
     </CollapsibleTrigger>
   );
 };
@@ -105,7 +115,9 @@ export type ToolContentProps = ComponentProps<typeof CollapsibleContent>;
 export const ToolContent = ({ className, ...props }: ToolContentProps) => (
   <CollapsibleContent
     className={cn(
-      "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 space-y-4 p-4 text-popover-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in",
+      "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2",
+      "space-y-3 border-t border-border/60 px-3 pb-3 pt-2 text-popover-foreground outline-none",
+      "data-[state=closed]:animate-out data-[state=open]:animate-in",
       className
     )}
     {...props}

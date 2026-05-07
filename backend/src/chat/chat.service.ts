@@ -15,13 +15,20 @@ import type { MessageDto, MessagesPageDto } from './dto';
  * path. It owns:
  *
  *   - Lifecycle bookkeeping for `public.agent_runs` (start/complete/fail)
- *   - Dual-write of conversation rows into `public.messages` while the
+ *   - Persistence of conversation rows into `public.messages` while the
  *     LangGraph checkpointer continues to drive agent memory + resumption
- *   - The Vercel AI SDK v5 UI message stream wire protocol (unchanged)
+ *   - The Vercel AI SDK v5 UI message stream wire protocol
  *
- * Persistence and the wire protocol are deliberately decoupled: a failed
- * DB write logs and continues so the user still gets a streamed reply,
- * and a failed stream still marks the run `failed` in agent_runs.
+ * Wire + persistence are aligned: every assistant text segment streamed
+ * between two tool-call boundaries is also persisted as its own
+ * `role: 'assistant'` row at that boundary, so on reload the message
+ * sequence reproduces the original text/tool/text/tool/text interleaving
+ * the user saw live. Tool calls land as `role: 'tool'` rows whose
+ * `sequence` slots in between the surrounding text rows.
+ *
+ * Persistence and the wire protocol are decoupled enough that a failed DB
+ * write logs and continues so the user still gets a streamed reply, and a
+ * failed stream still marks the run `failed` in agent_runs.
  */
 @Injectable()
 export class ChatService {
@@ -42,12 +49,12 @@ export class ChatService {
    * Persistence side-effects, in order:
    *   1. Open `agent_runs` row (status='running').
    *   2. Insert user `messages` row.
-   *   3. Per tool call: insert a `tool` row when input arrives, patch its
+   *   3. Per text segment (between two tool-call boundaries): insert an
+   *      `assistant` row with that segment's content.
+   *   4. Per tool call: insert a `tool` row when input arrives, patch its
    *      `tool_output` when the result arrives.
-   *   4. On success: insert assembled assistant `messages` row + mark run
-   *      `completed`.
-   *   5. On error: insert (possibly empty) assistant row with whatever was
-   *      streamed so far + mark run `failed` with the error message.
+   *   5. On success: mark run `completed`.
+   *   6. On error: persist any in-flight text segment + mark run `failed`.
    */
   async streamRunToResponse(opts: {
     threadId: string;
@@ -81,18 +88,17 @@ export class ChatService {
 
     const stream = createUIMessageStream({
       execute: async ({ writer }) => {
-        // Surface a stable id for the assistant's reply turn so the client
-        // can correlate streamed deltas to a single message bubble.
-        const turnId = randomUUID();
-        let textOpen = false;
+        // The current open text part on the wire. Each tool-call boundary
+        // closes it; the next text-delta opens a fresh one with a new id.
+        // This is what makes tools render INLINE between text segments
+        // instead of clumping at the end of one big text part.
+        let activeTextId: string | null = null;
+        let activeTextBuffer = '';
         // Tracks whether `messages`-mode already streamed text for this turn.
         // When true we skip emitting the same content again from the
         // `updates`-mode AIMessage at the end of the node, which carries the
         // full reply and would otherwise duplicate every assistant message.
         let textStreamedViaMessages = false;
-        // Accumulator for the final assistant text. Streamed deltas are
-        // appended here; on `done` we persist the full string in one row.
-        let assistantText = '';
         // Map tool_call_id → messages row id so we can patch tool_output
         // when the corresponding ToolMessage arrives later in the stream.
         const toolRowByCallId = new Map<string, string>();
@@ -111,11 +117,40 @@ export class ChatService {
           { toolName: string; input: unknown }
         >();
 
-        const openTextOnce = () => {
-          if (!textOpen) {
-            writer.write({ type: 'start' });
-            writer.write({ type: 'text-start', id: turnId });
-            textOpen = true;
+        // Open the wire envelope unconditionally so even tool-only or
+        // error-only turns produce a well-formed `start … finish` stream.
+        writer.write({ type: 'start' });
+
+        const openText = () => {
+          if (activeTextId !== null) return;
+          activeTextId = randomUUID();
+          activeTextBuffer = '';
+          writer.write({ type: 'text-start', id: activeTextId });
+        };
+
+        // Close the current text part on the wire AND persist its content
+        // as an `assistant` row. Called at every tool-call boundary and at
+        // end-of-turn — no-op if no text is currently open.
+        const closeTextSegment = async () => {
+          if (activeTextId === null) return;
+          writer.write({ type: 'text-end', id: activeTextId });
+          const buffered = activeTextBuffer;
+          activeTextId = null;
+          activeTextBuffer = '';
+          if (buffered.trim().length === 0) return;
+          try {
+            await this.messages.insertMessage({
+              threadId,
+              runId: run.id,
+              userId,
+              role: 'assistant',
+              content: buffered,
+            });
+          } catch (err) {
+            this.logger.warn(
+              `Failed to persist assistant segment for run ${run.id}: ` +
+                String(err),
+            );
           }
         };
 
@@ -125,6 +160,10 @@ export class ChatService {
           input: unknown,
         ): Promise<void> => {
           if (announcedInputs.has(callId)) return;
+          // Close + persist any active text segment BEFORE announcing the
+          // tool — both on the wire and in the DB sequence — so reload
+          // reconstructs the same text/tool ordering the user saw live.
+          await closeTextSegment();
           writer.write({
             type: 'tool-input-available',
             toolCallId: callId,
@@ -167,12 +206,12 @@ export class ChatService {
               if (chunk instanceof AIMessageChunk) {
                 const delta = chunkToText(chunk);
                 if (delta) {
-                  openTextOnce();
+                  openText();
                   textStreamedViaMessages = true;
-                  assistantText += delta;
+                  activeTextBuffer += delta;
                   writer.write({
                     type: 'text-delta',
-                    id: turnId,
+                    id: activeTextId!,
                     delta,
                   });
                 }
@@ -248,11 +287,11 @@ export class ChatService {
                           ? ai.content
                           : JSON.stringify(ai.content);
                       if (text) {
-                        openTextOnce();
-                        assistantText += text;
+                        openText();
+                        activeTextBuffer += text;
                         writer.write({
                           type: 'text-delta',
-                          id: turnId,
+                          id: activeTextId!,
                           delta: text,
                         });
                       }
@@ -307,40 +346,17 @@ export class ChatService {
             }
           }
         } catch (err) {
-          // Persist whatever we managed to assemble + mark the run failed
-          // before re-raising so the SDK's `onError` handler can surface the
-          // failure to the client.
-          await this.persistFinalAssistantMessage({
-            threadId,
-            runId: run.id,
-            userId,
-            content: assistantText,
-          });
+          // Persist whatever's still buffered as a final assistant segment
+          // and mark the run failed before re-raising so the SDK's
+          // `onError` handler can surface the failure to the client.
+          await closeTextSegment();
           await this.agentRuns.failRun(run.id, errorMessage(err));
-          if (textOpen) {
-            writer.write({ type: 'text-end', id: turnId });
-          }
           throw err;
         }
 
-        // Success path: persist the assembled assistant text in a fresh row.
-        // We deliberately DO NOT pre-create an empty assistant row at stream
-        // start: that would leak a half-rendered bubble to any reload while
-        // the run is still in flight. With a finalize-on-done write the
-        // history endpoint stays consistent — either the row is fully
-        // persisted, or the active-run endpoint reports `running` and the
-        // client knows to wait.
-        await this.persistFinalAssistantMessage({
-          threadId,
-          runId: run.id,
-          userId,
-          content: assistantText,
-        });
+        // Flush the trailing text segment (the model's final answer).
+        await closeTextSegment();
         await this.agentRuns.completeRun(run.id);
-
-        if (textOpen) {
-          writer.write({ type: 'text-end', id: turnId });
-        }
         writer.write({ type: 'finish' });
       },
       onError: (err) => {
@@ -368,33 +384,6 @@ export class ChatService {
       nextCursor: page.nextCursor,
       total: page.total,
     };
-  }
-
-  /**
-   * Persist the final assistant message row. Tolerates empty content (e.g.
-   * an error before any tokens streamed) — the agent_run row carries the
-   * authoritative status, while this row gives the UI a stable bubble id
-   * tied to the run.
-   */
-  private async persistFinalAssistantMessage(opts: {
-    threadId: string;
-    runId: string;
-    userId: string;
-    content: string;
-  }): Promise<void> {
-    try {
-      await this.messages.insertMessage({
-        threadId: opts.threadId,
-        runId: opts.runId,
-        userId: opts.userId,
-        role: 'assistant',
-        content: opts.content,
-      });
-    } catch (err) {
-      this.logger.warn(
-        `Failed to persist assistant message for run ${opts.runId}: ${String(err)}`,
-      );
-    }
   }
 }
 

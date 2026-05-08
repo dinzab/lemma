@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { GraduationCap, Sparkles } from "lucide-react";
 import type { UIMessage } from "ai";
 
@@ -28,6 +29,10 @@ import {
   ThinkingPatternChip,
   type LemmaPatternToolPart,
 } from "@/components/chat/ThinkingPatternChip";
+import {
+  TodoPlanPanel,
+  extractTodosFromToolPart,
+} from "@/components/chat/TodoPlanPanel";
 import { cn } from "@/lib/utils";
 
 interface LemmaConversationProps {
@@ -80,6 +85,15 @@ export function LemmaConversation({
   // the assistant icon were removed when the agent starts streaming".
   const showAssistantTyping = isLoading;
 
+  // The agent emits the entire plan state on every `write_todos`
+  // call, so older calls are superseded by later ones. Render the
+  // plan panel inline only at the most recent `write_todos` part —
+  // earlier ones in the stream collapse to nothing.
+  const latestWriteTodosLocation = useMemo(
+    () => findLatestWriteTodosLocation(messages),
+    [messages],
+  );
+
   if (messages.length === 0 && !isLoading) {
     return (
       <Conversation>
@@ -115,10 +129,23 @@ export function LemmaConversation({
                   part.type.startsWith("tool-"))
               ) {
                 if (isWriteTodosPart(part)) {
-                  // Rendered as the live plan panel above the chat
-                  // (see <TodoPlanPanel />); inline duplication would
-                  // be noisy and reveal an internal tool name.
-                  return null;
+                  // Inline plan panel — render only at the latest
+                  // `write_todos` part (the agent emits the full
+                  // plan state on each call, so earlier calls are
+                  // superseded). At every other write_todos part we
+                  // render nothing.
+                  if (
+                    !latestWriteTodosLocation ||
+                    latestWriteTodosLocation.messageIdx !== idx ||
+                    latestWriteTodosLocation.partIdx !== partIdx
+                  ) {
+                    return null;
+                  }
+                  const todos = extractTodosFromToolPart(
+                    part as { input?: unknown },
+                  );
+                  if (!todos) return null;
+                  return <TodoPlanPanel key={key} todos={todos} />;
                 }
                 if (isRecallAnalogyPart(part)) {
                   // A12 *Dans la vraie vie* surface — render the
@@ -216,6 +243,20 @@ function isWriteTodosPart(part: { type?: string; toolName?: string }): boolean {
     return true;
   }
   return part.type === "tool-write_todos";
+}
+
+function findLatestWriteTodosLocation(
+  messages: UIMessage[],
+): { messageIdx: number; partIdx: number } | null {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i];
+    for (let j = message.parts.length - 1; j >= 0; j--) {
+      if (isWriteTodosPart(message.parts[j])) {
+        return { messageIdx: i, partIdx: j };
+      }
+    }
+  }
+  return null;
 }
 
 function isRecallAnalogyPart(part: {

@@ -1,15 +1,11 @@
 "use client";
 
 import { useParams, useRouter } from "next/navigation";
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { AlertCircle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useLemmaChat } from "@/hooks/useChat";
 import { LemmaConversation } from "@/components/chat/LemmaConversation";
-import {
-  extractCurrentTodos,
-  TodoPlanPanel,
-} from "@/components/chat/TodoPlanPanel";
 import { getThread } from "@/lib/api/threads";
 import { PromptComposer } from "@/components/chat/PromptComposer";
 
@@ -141,11 +137,6 @@ export default function ChatThreadPage() {
     !isLoading &&
     (activeRun.status === "running" || activeRun.status === "failed");
 
-  const currentTodos = useMemo(
-    () => extractCurrentTodos(messages),
-    [messages],
-  );
-
   if (isValidating) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3">
@@ -188,14 +179,6 @@ export default function ChatThreadPage() {
               Dismiss
             </Button>
           </div>
-        )}
-
-        {/* Live plan panel — rendered above the transcript whenever the
-            agent has emitted a structured todo list for the current
-            request. Stays in sync with the message stream automatically
-            via `extractCurrentTodos`. */}
-        {currentTodos && currentTodos.length > 0 && (
-          <TodoPlanPanel todos={currentTodos} />
         )}
 
         {/* Messages area */}

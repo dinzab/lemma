@@ -61,9 +61,28 @@ export function sanitizeTitle(input: string): string {
 }
 
 /**
- * Extracts a title from the first message
- * @param message - The user's first message
- * @param maxLength - Maximum title length (default: 50)
+ * Extracts a title from the first message.
+ *
+ * The backend stores titles HTML-escaped (apostrophes become `&#x27;`,
+ * etc. — see `sanitizeString` in the API), and validates `MaxLength(50)`
+ * AFTER that escape pass. A short user prompt with one apostrophe can
+ * therefore exceed 50 chars once stored, which used to fail thread
+ * creation outright with `"Title must not exceed 50 characters"`.
+ *
+ * We solve this by:
+ *
+ * 1. Not pre-sanitizing on the client. The backend's @Transform always
+ *    runs `sanitizeString`, so doing it twice produced triple-encoded
+ *    titles like `C&amp;amp;#x27;est…` that the sidebar then rendered
+ *    literally.
+ * 2. Computing the post-sanitization length in the same way the backend
+ *    will, and binary-searching the longest raw prefix whose escaped
+ *    length still fits `maxLength` (with a single-character `…` ellipsis
+ *    when truncation is needed).
+ *
+ * @param message - The user's first message.
+ * @param maxLength - Maximum title length AFTER backend sanitization
+ *   (default: 50, matching `CreateThreadDto`).
  */
 export function extractTitleFromMessage(message: string, maxLength: number = 50): string {
     if (!message || typeof message !== 'string') {
@@ -75,15 +94,49 @@ export function extractTitleFromMessage(message: string, maxLength: number = 50)
         return 'New Chat';
     }
 
-    // Take first line only (in case of multiline message)
+    // Take first line only (in case of multiline message).
     const firstLine = trimmed.split('\n')[0].trim();
-
-    if (firstLine.length <= maxLength) {
-        return sanitizeTitle(firstLine);
+    if (!firstLine) {
+        return 'New Chat';
     }
 
-    // Truncate and add ellipsis
-    return sanitizeTitle(firstLine.substring(0, maxLength - 3)) + '...';
+    if (sanitizedLength(firstLine) <= maxLength) {
+        return firstLine;
+    }
+
+    // Find the longest prefix whose sanitized length, with a trailing
+    // `…`, still fits maxLength. Binary search keeps this O(log n) over
+    // the first-line length even though sanitization is O(n).
+    const ellipsis = '…';
+    let lo = 0;
+    let hi = firstLine.length;
+    while (lo < hi) {
+        const mid = Math.ceil((lo + hi) / 2);
+        const candidate = firstLine.slice(0, mid) + ellipsis;
+        if (sanitizedLength(candidate) <= maxLength) {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    return firstLine.slice(0, lo) + ellipsis;
+}
+
+/**
+ * Mirrors the backend's `sanitizeString` so we can predict the stored
+ * title length. Keep this in sync with `backend/src/utils/sanitize.ts`.
+ */
+function sanitizedLength(s: string): number {
+    return s
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#x27;')
+        .replace(/\//g, '&#x2F;')
+        .replace(/\\/g, '&#x5C;')
+        .replace(/`/g, '&#96;')
+        .length;
 }
 
 /**

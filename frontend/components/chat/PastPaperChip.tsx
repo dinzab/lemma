@@ -1,0 +1,211 @@
+"use client";
+
+import { useState } from "react";
+import { ChevronDown, ScrollText } from "lucide-react";
+import type { DynamicToolUIPart, ToolUIPart } from "ai";
+
+import { cn } from "@/lib/utils";
+
+export type LemmaSearchQuestionsToolPart = DynamicToolUIPart | ToolUIPart;
+
+interface PastPaperChipProps {
+  part: LemmaSearchQuestionsToolPart;
+}
+
+/**
+ * Inline render block A2 — *Passage du BAC*.
+ *
+ * When the agent calls `search_questions`, render the top-1 match as a
+ * soft pinned card showing year + session + chapter + a confidence
+ * indicator. The chip pairs visually with `<RealLifeAnchorChip>` (A12)
+ * — together they signal "this is BAC-aware AND Tunisia-anchored",
+ * which is the emotional differentiator vs. generic chat assistants.
+ *
+ * Three intentional behaviours:
+ *
+ * 1. We render NOTHING while the tool is still streaming — there's no
+ *    payload to show yet, and a skeleton would just be noise.
+ * 2. We render NOTHING when the results array is empty. The agent's
+ *    prose explains the concept; an empty chip would just confuse.
+ * 3. We render NOTHING when the top match's similarity score is below
+ *    {@link MIN_SCORE}. False positives are worse than no chip — a
+ *    student who sees "BAC 2009 · 12% match" loses trust in everything
+ *    around it. The threshold is conservative on purpose; we'd rather
+ *    drop a borderline match than over-promise.
+ */
+export function PastPaperChip({ part }: PastPaperChipProps) {
+  const [expanded, setExpanded] = useState(false);
+  const top = extractTopMatch(part);
+
+  if (!top) return null;
+
+  const examLine = formatExamLine(top);
+  const matchPct =
+    typeof top.score === "number"
+      ? Math.round(Math.min(Math.max(top.score, 0), 1) * 100)
+      : null;
+  const exerciseLine = formatExerciseLine(top);
+  const hasQuestion =
+    typeof top.question_text === "string" && top.question_text.trim().length > 0;
+
+  return (
+    <aside
+      aria-label="Passage du BAC"
+      className={cn(
+        "my-3 w-full rounded-xl border border-secondary/25 bg-secondary/5",
+        "px-4 py-3 text-sm text-foreground shadow-sm",
+      )}
+    >
+      <div className="flex items-start gap-3">
+        <span
+          aria-hidden
+          className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-secondary/15 ring-1 ring-secondary/25"
+        >
+          <ScrollText className="size-3.5 text-secondary-foreground" />
+        </span>
+
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-secondary-foreground/80">
+            <span>Passage du BAC</span>
+            {matchPct !== null && (
+              <span className="rounded-full bg-secondary/20 px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal text-secondary-foreground">
+                {matchPct}% match
+              </span>
+            )}
+          </div>
+
+          {examLine && (
+            <div className="mt-0.5 text-[13px] font-medium text-foreground">
+              {examLine}
+            </div>
+          )}
+
+          {top.chapter && (
+            <p className="mt-0.5 text-[13px] leading-relaxed text-muted-foreground">
+              {top.chapter}
+              {exerciseLine ? ` · ${exerciseLine}` : ""}
+            </p>
+          )}
+
+          {hasQuestion && (
+            <>
+              {expanded && (
+                <p className="mt-2 whitespace-pre-line text-[13px] leading-relaxed text-foreground/90">
+                  {top.question_text}
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={() => setExpanded((v) => !v)}
+                aria-expanded={expanded}
+                className="mt-2 inline-flex items-center gap-1 text-[12px] font-medium text-secondary-foreground hover:underline focus:outline-none focus-visible:underline"
+              >
+                {expanded ? "Réduire" : "Voir la question"}
+                <ChevronDown
+                  className={cn(
+                    "size-3 transition-transform",
+                    expanded && "rotate-180",
+                  )}
+                />
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+/**
+ * Minimum cosine similarity (Qdrant dense score) for a match to be
+ * surfaced as a chip. Tuned against the live corpus where dense
+ * cosine on this embedding clusters in 0.30–0.50 for relevant matches
+ * and dips below 0.30 for off-topic recalls — empirically:
+ *
+ * | query                                       | top score | top chapter (chosen by rerank) |
+ * |---------------------------------------------|-----------|--------------------------------|
+ * | "forme exponentielle d'un nombre complexe"  | 0.468     | Nombres complexes ✓            |
+ * | "module et argument d'un complexe"          | 0.306     | Nombres complexes ✓            |
+ * | "limite d'une suite"                        | 0.322     | Suites numériques ✓            |
+ * | "fonction affine"                           | 0.297     | Probabilités ✗ (off-topic)     |
+ *
+ * 0.30 is the cleanest split between the "correct topic" cluster and
+ * the off-topic noise floor. False positives (a chip for the wrong
+ * topic) hurt trust more than false negatives (no chip when the
+ * corpus genuinely lacks a strong match), so we err toward silence.
+ * See component-level comment for rationale.
+ */
+const MIN_SCORE = 0.3;
+
+interface PaperMatch {
+  pair_id?: string;
+  matiere?: string;
+  chapter?: string;
+  exam?: string;
+  year?: number;
+  session?: "principale" | "controle" | string;
+  track?: string;
+  exercise_number?: string | number;
+  question_number?: string | number;
+  question_text?: string;
+  score?: number;
+}
+
+interface SearchQuestionsOutput {
+  results?: PaperMatch[];
+}
+
+function extractTopMatch(
+  part: LemmaSearchQuestionsToolPart,
+): PaperMatch | null {
+  if (!("output" in part) || part.output === undefined || part.output === null) {
+    return null;
+  }
+  const parsed = parseOutput(part.output);
+  if (!parsed || typeof parsed !== "object") return null;
+
+  const results = (parsed as SearchQuestionsOutput).results;
+  if (!Array.isArray(results) || results.length === 0) return null;
+
+  const top = results[0];
+  if (!top || typeof top !== "object") return null;
+
+  if (typeof top.score === "number" && top.score < MIN_SCORE) {
+    return null;
+  }
+  return top;
+}
+
+function parseOutput(output: unknown): unknown {
+  if (typeof output === "string") {
+    try {
+      return JSON.parse(output);
+    } catch {
+      return null;
+    }
+  }
+  return output;
+}
+
+function formatExamLine(top: PaperMatch): string {
+  const parts: string[] = [];
+  if (typeof top.year === "number") parts.push(`BAC ${top.year}`);
+  if (typeof top.session === "string" && top.session.trim()) {
+    parts.push(`session ${top.session}`);
+  }
+  if (typeof top.track === "string" && top.track.trim()) {
+    parts.push(top.track);
+  }
+  return parts.join(" · ");
+}
+
+function formatExerciseLine(top: PaperMatch): string {
+  const parts: string[] = [];
+  if (top.exercise_number !== undefined && top.exercise_number !== null) {
+    parts.push(`Exercice ${top.exercise_number}`);
+  }
+  if (top.question_number !== undefined && top.question_number !== null) {
+    parts.push(`Q.${top.question_number}`);
+  }
+  return parts.join(" · ");
+}

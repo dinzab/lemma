@@ -30,6 +30,10 @@ import {
   type LemmaPatternToolPart,
 } from "@/components/chat/ThinkingPatternChip";
 import {
+  HintLadderChip,
+  type LemmaHintLadderToolPart,
+} from "@/components/chat/HintLadderChip";
+import {
   TodoPlanPanel,
   extractTodosFromToolPart,
 } from "@/components/chat/TodoPlanPanel";
@@ -183,6 +187,19 @@ export function LemmaConversation({
                     />
                   );
                 }
+                if (isEmitHintLadderPart(part)) {
+                  // A1 *Hint Ladder* surface — render the agent's
+                  // four-rung scaffold as a stacked accordion. The
+                  // chip suppresses itself while still streaming and
+                  // when any rung is missing, so the assistant's
+                  // prose can still render through.
+                  return (
+                    <HintLadderChip
+                      key={key}
+                      part={part as LemmaHintLadderToolPart}
+                    />
+                  );
+                }
                 return (
                   <LemmaToolCall
                     key={key}
@@ -277,6 +294,16 @@ function isRecallPatternPart(part: {
     return true;
   }
   return part.type === "tool-recall_pattern";
+}
+
+function isEmitHintLadderPart(part: {
+  type?: string;
+  toolName?: string;
+}): boolean {
+  if (part.type === "dynamic-tool" && part.toolName === "emit_hint_ladder") {
+    return true;
+  }
+  return part.type === "tool-emit_hint_ladder";
 }
 
 function isSearchQuestionsPart(part: {

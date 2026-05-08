@@ -12,6 +12,7 @@ import { Neo4jClientProvider } from './neo4j.client';
 import { EmbeddingsClient } from './embeddings.client';
 import { RerankerClient } from './reranker.client';
 import { AnalogiesClient } from './analogies.client';
+import { PatternsClient } from './patterns.client';
 
 /**
  * Description for the write_todos planning tool. Mirrors the public
@@ -74,6 +75,11 @@ Only use this tool if you think it will help you stay organized. If the student'
  *   - recall_analogy         pull a curated Tunisian real-life anchor for
  *                            a concept (Teacher Protocol step 4 / A12
  *                            *Dans la vraie vie* render block)
+ *   - recall_pattern         pull the canonical thinking-frame for a
+ *                            recurring BAC exercise genre — genre +
+ *                            recipe + trap (Teacher Protocol steps
+ *                            2-3 / A11 *Comment penser à ça* render
+ *                            block)
  *
  * Two non-negotiable filters are baked into every Qdrant read inside
  * {@link QdrantClientProvider} (`critic_label='correct'`, `under_gate=false`),
@@ -102,6 +108,7 @@ export class AgentToolsService {
     private readonly embeddings: EmbeddingsClient,
     private readonly reranker: RerankerClient,
     private readonly analogies: AnalogiesClient,
+    private readonly patterns: PatternsClient,
   ) {}
 
   getAll(): StructuredToolInterface[] {
@@ -114,6 +121,7 @@ export class AgentToolsService {
       this.listTopicsTool(),
       this.listExamsTool(),
       this.recallAnalogyTool(),
+      this.recallPatternTool(),
       this.writeTodosTool(),
     ];
   }
@@ -796,6 +804,107 @@ export class AgentToolsService {
                 'this matière are eligible — useful when the same word ' +
                 '(e.g. "limite") could match different concepts across ' +
                 'subjects.',
+            ),
+        }),
+      },
+    );
+  }
+
+  // ---- recall_pattern ---------------------------------------------------
+
+  /**
+   * Curated thinking-frame for a recurring BAC exercise genre. This is
+   * steps 2 and 3 of the Teacher Protocol (RECALL the recipe / RECALL
+   * the trap) — the agent pulls a hand-curated genre + canonical
+   * recipe + typical trap from the on-disk Pattern Atlas BEFORE
+   * composing its reply. The frontend renders the result as the A11
+   * *Comment penser à ça* card pinned at the top of the assistant's
+   * turn (see product-vision SKILL.md Part E.1).
+   *
+   * The tool is intentionally honest: when the atlas doesn't cover
+   * the topic it returns `{ covered: false }`. The system prompt
+   * forbids fabricating a recipe in that case — better to skip the
+   * card than make up a generic "step 1: read the question" recipe
+   * that defeats the whole point of being a Tunisian-BAC-specific
+   * moat.
+   */
+  private recallPatternTool(): StructuredToolInterface {
+    return tool(
+      async ({ concept_query, matiere }) => {
+        try {
+          const pattern = this.patterns.recall({
+            query: concept_query,
+            matiere,
+          });
+          if (!pattern) {
+            return JSON.stringify({
+              covered: false,
+              concept_query,
+            });
+          }
+          return JSON.stringify({
+            covered: true,
+            pattern: {
+              id: pattern.id,
+              topic_label: pattern.topic_label,
+              matiere: pattern.matiere,
+              frequency_in_bac: pattern.frequency_in_bac,
+              genre: pattern.genre,
+              recipe: pattern.recipe,
+              trap: pattern.trap,
+              typical_framings: pattern.typical_framings,
+              variations: pattern.variations,
+            },
+          });
+        } catch (err) {
+          this.logger.warn(`recall_pattern failed: ${String(err)}`);
+          return `Error recalling pattern: ${(err as Error).message}`;
+        }
+      },
+      {
+        name: 'recall_pattern',
+        description:
+          'Pull the canonical thinking-frame for a recurring BAC ' +
+          'exercise genre — what *type* of exercise it is, the ' +
+          '3-step canonical procedure to solve it, and the typical ' +
+          'trap markers look for. Call this BEFORE writing your ' +
+          'main explanation when the student asks about a concept ' +
+          'that maps to a known recurring exercise type (e.g. ' +
+          '"forme exponentielle", "suite géométrique", "dipôle RC", ' +
+          '"mitose", "recherche dichotomique"). The atlas is small ' +
+          'and curated — if no match is found, the tool returns ' +
+          '`covered: false` and you must NOT invent a recipe ' +
+          'yourself: just continue with the explanation without a ' +
+          'thinking-frame card.',
+        schema: z.object({
+          concept_query: z
+            .string()
+            .min(2)
+            .describe(
+              'Short label for the exercise genre / topic, in French ' +
+                'or English. Examples: "forme exponentielle", "suite ' +
+                'géométrique", "intégration par parties", "dipôle RC ' +
+                'charge", "mitose", "recherche dichotomique", "clé ' +
+                'étrangère SQL".',
+            ),
+          matiere: z
+            .enum([
+              'math',
+              'physique',
+              'svt',
+              'gestion',
+              'technique',
+              'bd',
+              'economie',
+              'info',
+              'algorithme',
+            ])
+            .optional()
+            .describe(
+              'Matière filter. When provided, only patterns tagged ' +
+                'with this matière are eligible — useful when the ' +
+                'same word (e.g. "limite") could match different ' +
+                'concepts across subjects.',
             ),
         }),
       },

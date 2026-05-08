@@ -8,6 +8,7 @@ import { Neo4jClientProvider } from './tools/neo4j.client';
 import { EmbeddingsClient } from './tools/embeddings.client';
 import { RerankerClient } from './tools/reranker.client';
 import { AnalogiesClient } from './tools/analogies.client';
+import { PatternsClient } from './tools/patterns.client';
 
 /**
  * AgentModule wires up:
@@ -29,6 +30,7 @@ import { AnalogiesClient } from './tools/analogies.client';
     EmbeddingsClient,
     RerankerClient,
     AnalogiesClient,
+    PatternsClient,
     AgentToolsService,
     AgentService,
   ],

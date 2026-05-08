@@ -34,6 +34,10 @@ import {
   type LemmaHintLadderToolPart,
 } from "@/components/chat/HintLadderChip";
 import {
+  StepwiseSolutionCards,
+  type LemmaSolutionStepsToolPart,
+} from "@/components/chat/StepwiseSolutionCards";
+import {
   TodoPlanPanel,
   extractTodosFromToolPart,
 } from "@/components/chat/TodoPlanPanel";
@@ -200,6 +204,19 @@ export function LemmaConversation({
                     />
                   );
                 }
+                if (isEmitSolutionStepsPart(part)) {
+                  // A4 *Stepwise Solution Cards* surface — render the
+                  // agent's worked solution as a numbered, folded
+                  // card stack. Suppresses itself while streaming or
+                  // when any step is missing required fields, so
+                  // half-built stacks never reach the student.
+                  return (
+                    <StepwiseSolutionCards
+                      key={key}
+                      part={part as LemmaSolutionStepsToolPart}
+                    />
+                  );
+                }
                 return (
                   <LemmaToolCall
                     key={key}
@@ -294,6 +311,19 @@ function isRecallPatternPart(part: {
     return true;
   }
   return part.type === "tool-recall_pattern";
+}
+
+function isEmitSolutionStepsPart(part: {
+  type?: string;
+  toolName?: string;
+}): boolean {
+  if (
+    part.type === "dynamic-tool" &&
+    part.toolName === "emit_solution_steps"
+  ) {
+    return true;
+  }
+  return part.type === "tool-emit_solution_steps";
 }
 
 function isEmitHintLadderPart(part: {

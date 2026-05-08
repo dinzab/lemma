@@ -29,6 +29,7 @@ const TOOL_LABELS: Record<string, string> = {
   recall_analogy: "Recalling a real-life analogy",
   recall_pattern: "Recalling the canonical recipe",
   emit_hint_ladder: "Building a hint ladder",
+  emit_solution_steps: "Laying out the worked solution",
 };
 
 /**

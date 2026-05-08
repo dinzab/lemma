@@ -59,6 +59,42 @@ Only use this tool if you think it will help you stay organized. If the student'
 `;
 
 /**
+ * Description for the emit_hint_ladder pedagogical tool. Forces the
+ * model to emit four progressively-richer hints as a structured
+ * payload instead of dumping the full solution as prose. The frontend
+ * renders the result as the A1 Hint Ladder accordion — four collapsed
+ * pills the student opens at their own pace, with rung 4 visually
+ * de-emphasised so the student is gently guided to try the smaller
+ * hints first.
+ */
+const EMIT_HINT_LADDER_TOOL_DESCRIPTION = `Use this tool when a student is stuck on a problem and asks for help, or when you would otherwise be tempted to dump a full step-by-step solution as prose. The student sees a stacked accordion of four progressively-richer hints and chooses how much help to reveal — they read rung 1 (a one-sentence steer) first, then rung 2 (the high-level technique), then rung 3 (the first move of the working) before peeking at rung 4 (the full solution). This is the single highest-leverage pedagogical move you can make: it forces the student to do as much of the thinking as they can before peeking, which is the only setup that actually produces learning.
+
+## When to Use This Tool
+1. The student asks a problem-shaped question ("how do I solve...", "je suis bloqué sur...", "explique-moi cet exercice", "aide-moi avec…") and there is enough information in the conversation to actually structure a 4-rung response.
+2. The student paraphrases or pastes a specific exercise and is asking for guidance, not just a definition.
+3. The student has already attempted a step and is stuck mid-working — emit a ladder targeted at where they are stuck (rung 1 still nudges, rung 2-3 push deeper into the right technique).
+
+## When NOT to Use This Tool
+1. Pure metadata / discovery questions ("how many exam papers in 2018?", "list chapters in math", "qu'est-ce qu'une matière ?").
+2. Pure concept definitions with no specific problem to solve ("c'est quoi la mitose ?", "définis le mot dérivée"). For those, recall_analogy + recall_pattern + a normal prose explanation is the right shape.
+3. Trivial problems where a one-line answer is enough — forcing four rungs would feel patronising.
+4. The student has explicitly asked for the full solution twice — honour the request and stepwise-walk through it instead.
+5. You don't actually have a 4-rung structure to give. If your rungs would all say the same thing in different words, this tool is the wrong shape and you should answer in prose instead.
+
+## How to Structure the Four Rungs
+- **tiny_nudge** — ONE sentence. The smallest steer that points at the key observation. Examples: "Look at the modulus before the argument.", "Pense à ce qui se conserve dans le mouvement.", "Quel signe change quand tu dérives la valeur absolue ?". Never names the technique outright.
+- **technique** — ONE or two sentences naming the high-level approach by name ("Use the trigonometric form of complex numbers", "Applique le PFD selon l'axe horizontal puis vertical"). Still no working.
+- **first_move** — The first concrete line of working only. Show the setup of the equation / the first integration step / the first call of the recurrence. Stop after that line.
+- **full_solution** — The complete worked solution. Use LaTeX, structure with numbered steps if helpful. The frontend de-emphasises this rung visually — it stays clickable, but the student is nudged to try the smaller rungs first.
+
+## Important Notes
+- Emit all four rungs every time. The whole point of the ladder is the gradient of help.
+- The chip IS the hint ladder. Do NOT also restate the rungs as bullet points in your prose. A short framing sentence before the chip ("Voici quelques pistes pour avancer.") is fine; restating the rungs is the bug.
+- Pass a short \`problem_summary\` (one sentence) so the chip has a header even when the student scrolls back.
+- Match the language of the student in every rung (FR or EN).
+`;
+
+/**
  * Domain-shaped tools the LLM binds against. Each verb mirrors how a
  * student / tutor talks about the Tunisian Baccalaureate corpus rather
  * than the underlying data store, so the agent can reason about
@@ -80,6 +116,11 @@ Only use this tool if you think it will help you stay organized. If the student'
  *                            recipe + trap (Teacher Protocol steps
  *                            2-3 / A11 *Comment penser à ça* render
  *                            block)
+ *   - emit_hint_ladder       structured 4-rung scaffold for problem-
+ *                            shaped help requests (A1 Hint Ladder
+ *                            render block) — forces progressive
+ *                            disclosure instead of dumping the full
+ *                            solution as prose
  *
  * Two non-negotiable filters are baked into every Qdrant read inside
  * {@link QdrantClientProvider} (`critic_label='correct'`, `under_gate=false`),
@@ -122,6 +163,7 @@ export class AgentToolsService {
       this.listExamsTool(),
       this.recallAnalogyTool(),
       this.recallPatternTool(),
+      this.emitHintLadderTool(),
       this.writeTodosTool(),
     ];
   }
@@ -173,6 +215,89 @@ export class AgentToolsService {
               'The full ordered todo list. Each call replaces the previous ' +
                 'list, so always include items already marked completed so ' +
                 'their status is preserved.',
+            ),
+        }),
+      },
+    );
+  }
+
+  // ---- emit_hint_ladder -------------------------------------------------
+
+  /**
+   * Pedagogical scaffold for problem-shaped help requests (A1 Hint
+   * Ladder). The agent emits four progressively-richer hints — a
+   * tiny nudge, the technique name, the first move of the working,
+   * and the full solution — and the frontend renders them as a
+   * stacked accordion the student opens at their own pace.
+   *
+   * Like {@link writeTodosTool}, this is a no-op on the server. The
+   * authoritative state lives on the wire as the
+   * `tool-emit_hint_ladder` part input — the frontend reads
+   * `part.input.rungs` and `part.input.problem_summary` directly off
+   * the message stream. We don't need a server-side response, so the
+   * tool just echoes the count back to keep the agent loop happy.
+   */
+  private emitHintLadderTool(): StructuredToolInterface {
+    return tool(
+      async ({ rungs }) => {
+        return JSON.stringify({
+          ok: true,
+          rung_count: Object.values(rungs).filter(
+            (r) => typeof r === 'string' && r.length > 0,
+          ).length,
+        });
+      },
+      {
+        name: 'emit_hint_ladder',
+        description: EMIT_HINT_LADDER_TOOL_DESCRIPTION,
+        schema: z.object({
+          problem_summary: z
+            .string()
+            .min(1)
+            .describe(
+              'One short sentence describing the problem the ladder is ' +
+                'about (used as the chip header). Match the student’s ' +
+                'language. Example: "Mettre 1 + i√3 sous forme exponentielle."',
+            ),
+          rungs: z
+            .object({
+              tiny_nudge: z
+                .string()
+                .min(1)
+                .describe(
+                  'ONE-sentence steer that points at the key observation ' +
+                    'WITHOUT naming the technique. Example: "Look at the ' +
+                    'modulus before the argument."',
+                ),
+              technique: z
+                .string()
+                .min(1)
+                .describe(
+                  'One or two sentences naming the high-level approach by ' +
+                    'name. Example: "Use the trigonometric / exponential ' +
+                    'form of complex numbers."',
+                ),
+              first_move: z
+                .string()
+                .min(1)
+                .describe(
+                  'The first concrete line of working only — the setup of ' +
+                    'the equation, the first integration step, the first ' +
+                    'recurrence call. Stop after that line.',
+                ),
+              full_solution: z
+                .string()
+                .min(1)
+                .describe(
+                  'The complete worked solution in LaTeX. Use numbered ' +
+                    'steps when helpful. The frontend de-emphasises this ' +
+                    'rung visually so the student is nudged to try the ' +
+                    'smaller rungs first.',
+                ),
+            })
+            .describe(
+              'Four progressively-richer hints. Emit all four every time — ' +
+                'the gradient of help is the whole point of this tool.',
             ),
         }),
       },

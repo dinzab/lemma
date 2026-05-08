@@ -65,6 +65,28 @@ async function main() {
       limit: 3,
       matiere: 'math',
     });
+    // Newly added tools (PR: section filter + exercise drilldown).
+    await call('list_sections', {});
+    // Cross-section guard: the same matière + chapter must NOT leak
+    // across tracks once the filter is enforced.
+    await call('count_questions', {
+      matiere: 'math',
+      track: 'sciences_ex',
+    });
+    await call('count_questions', {
+      matiere: 'math',
+      track: 'math',
+    });
+    // Full exercise drilldown — every sub-question of Exercice 4 in
+    // 2017 contrôle informatique math, in canonical order.
+    await call('list_exam_questions', {
+      exam: '2017_controle_informatique_math',
+      exercise_number: 4,
+    });
+    // Whole-exam mode (no exercise filter).
+    await call('list_exam_questions', {
+      exam: '2017_controle_informatique_math',
+    });
   } finally {
     await app.close();
   }

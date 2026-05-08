@@ -135,12 +135,57 @@ const EMIT_SOLUTION_STEPS_TOOL_DESCRIPTION = `Use this tool when the student has
 `;
 
 /**
+ * Canonical Tunisian Bac **section** (a.k.a. "track") values as they
+ * appear in the Qdrant `track` payload field. Exposed as a typed enum
+ * to every tool that filters by section, so the model can't fabricate
+ * a value like `"sciences"` (which doesn't exist — the right code is
+ * `"sciences_ex"`). Mirrors the values returned by the Qdrant facet
+ * on `track` (see `list_sections`).
+ *
+ * Tunisian student-facing vocabulary mapping:
+ *  - sciences_ex       = "section sciences expérimentales"
+ *                       (often shortened to "section science"
+ *                       or just "sciences")
+ *  - math              = "section mathématiques"
+ *  - technique         = "section sciences techniques"
+ *  - informatique      = "section sciences informatique"
+ *  - economie_gestion  = "section économie et gestion"
+ *
+ * NOTE: the *track* `math` (Bac section) and the *matière* `math`
+ * (the maths subject) collide on the same word — when the student
+ * just says "math", check the broader phrasing to disambiguate
+ * ("la section math" → track; "un exercice de math" → matière).
+ */
+const SECTION_ENUM = [
+  'sciences_ex',
+  'math',
+  'technique',
+  'informatique',
+  'economie_gestion',
+] as const;
+
+/**
+ * Human-friendly description for each section code, surfaced inside
+ * `list_sections` so the agent can map a vague natural-language
+ * section reference ("section science", "BAC math", "éco-gestion") to
+ * the canonical track value without rote memorisation.
+ */
+const SECTION_DESCRIPTIONS: Record<string, string> = {
+  sciences_ex:
+    'Section sciences expérimentales (often shortened to "section science" or just "sciences").',
+  math: 'Section mathématiques.',
+  technique: 'Section sciences techniques.',
+  informatique: 'Section sciences informatique.',
+  economie_gestion: 'Section économie et gestion.',
+};
+
+/**
  * Domain-shaped tools the LLM binds against. Each verb mirrors how a
  * student / tutor talks about the Tunisian Baccalaureate corpus rather
  * than the underlying data store, so the agent can reason about
  * "questions on a chapter" instead of "points in a Qdrant collection".
  *
- * Surface (8 + planning):
+ * Surface (10 + planning):
  *   - search_questions       semantic retrieval + rerank, w/ filters
  *   - get_question_pair      full Q/A pair by pair_id
  *   - find_similar_questions vector neighbours of a known pair
@@ -148,6 +193,16 @@ const EMIT_SOLUTION_STEPS_TOOL_DESCRIPTION = `Use this tool when the student has
  *   - list_chapters          Neo4j catalogue, by matiere
  *   - list_topics            Neo4j catalogue, by matiere/chapter
  *   - list_exams             Neo4j exam metadata catalogue
+ *   - list_sections          enumerate the 5 Bac sections (track values)
+ *                            with pair counts — cheap discovery so the
+ *                            agent can land an exact `track` filter
+ *                            instead of guessing
+ *   - list_exam_questions    scroll all sub-questions inside one exam,
+ *                            optionally one exercise — closes the gap
+ *                            where the student wants the full structure
+ *                            of a specific exercise ("give me all
+ *                            sub-questions of Exercice 4 in 2017
+ *                            contrôle info math")
  *   - recall_analogy         pull a curated Tunisian real-life anchor for
  *                            a concept (Teacher Protocol step 4 / A12
  *                            *Dans la vraie vie* render block)
@@ -188,6 +243,13 @@ export class AgentToolsService {
   private static readonly MAX_LIMIT = 25;
   /** Truncate long French/LaTeX text in tool responses to keep prompts small. */
   private static readonly TEXT_PREVIEW_CHARS = 600;
+  /** Soft ceiling on how many pairs `list_exam_questions` will ever return. */
+  private static readonly LIST_EXAM_QUESTIONS_MAX = 100;
+  /** Default page size for `list_exam_questions`. */
+  private static readonly LIST_EXAM_QUESTIONS_DEFAULT = 30;
+  /** Hard cap on the Qdrant scroll backing `list_exam_questions` — the
+   *  largest exam in the corpus has ~30 sub-questions, so 200 is safe. */
+  private static readonly LIST_EXAM_QUESTIONS_SCROLL_CAP = 200;
 
   constructor(
     private readonly qdrant: QdrantClientProvider,
@@ -207,6 +269,8 @@ export class AgentToolsService {
       this.listChaptersTool(),
       this.listTopicsTool(),
       this.listExamsTool(),
+      this.listSectionsTool(),
+      this.listExamQuestionsTool(),
       this.recallAnalogyTool(),
       this.recallPatternTool(),
       this.emitHintLadderTool(),
@@ -534,16 +598,26 @@ export class AgentToolsService {
               'Exam session — principale (June) or controle (September retake).',
             ),
           track: z
-            .string()
+            .enum(SECTION_ENUM)
             .optional()
             .describe(
-              'Bac track / section, e.g. "informatique", "math", "sciences".',
+              'Bac **section** (also called "track"). One of the 5 ' +
+                'Tunisian Bac sections: sciences_ex (sciences expérimentales), ' +
+                'math (mathématiques), technique (sciences techniques), ' +
+                'informatique (sciences informatique), economie_gestion ' +
+                '(économie et gestion). Pass this whenever the student ' +
+                'names or implies a specific section — a request shaped like ' +
+                '"fel section science..." / "in section sciences..." / ' +
+                '"section maths" must always be filtered by section, ' +
+                'otherwise results leak across tracks. If unsure of the ' +
+                'canonical code, call list_sections first.',
             ),
           exam: z
             .string()
             .optional()
             .describe(
-              'Specific exam_id, e.g. "2017_controle_informatique_math".',
+              'Specific exam_id, e.g. "2017_controle_informatique_math". ' +
+                'Format: {year}_{session}_{track}_{matiere}.',
             ),
           difficulty_min: z
             .number()
@@ -724,7 +798,14 @@ export class AgentToolsService {
           topic: z.string().optional(),
           year: z.number().int().optional(),
           session: z.enum(['principale', 'controle']).optional(),
-          track: z.string().optional(),
+          track: z
+            .enum(SECTION_ENUM)
+            .optional()
+            .describe(
+              'Bac section / track. One of: sciences_ex, math, technique, ' +
+                'informatique, economie_gestion. Required whenever the ' +
+                'student names or implies a specific Bac section.',
+            ),
           exam: z.string().optional(),
           difficulty_min: z.number().int().optional(),
           difficulty_max: z.number().int().optional(),
@@ -971,7 +1052,14 @@ export class AgentToolsService {
             .optional(),
           year: z.number().int().optional(),
           session: z.enum(['principale', 'controle']).optional(),
-          track: z.string().optional(),
+          track: z
+            .enum(SECTION_ENUM)
+            .optional()
+            .describe(
+              'Bac section / track. One of: sciences_ex, math, technique, ' +
+                'informatique, economie_gestion. Pass this when the student ' +
+                'names a section.',
+            ),
           limit: z
             .number()
             .int()
@@ -979,6 +1067,171 @@ export class AgentToolsService {
             .max(200)
             .optional()
             .describe('Max exams to return (default 50, max 200).'),
+        }),
+      },
+    );
+  }
+
+  // ---- list_sections ----------------------------------------------------
+
+  /**
+   * Discovery tool over the 5 Tunisian Bac sections (a.k.a. tracks).
+   * Returns the canonical short codes (`sciences_ex`, `math`, `technique`,
+   * `informatique`, `economie_gestion`) with pair counts so the agent
+   * can pick an exact `track` filter instead of guessing from natural
+   * language. Cheap (one Cypher aggregate, no embeddings).
+   *
+   * The student-facing names are encoded in the `description` field so
+   * the agent can answer "section sciences" → `sciences_ex`,
+   * "section maths" → `math`, "BAC techniques" → `technique`, etc.,
+   * without rote memorisation of the mapping.
+   */
+  private listSectionsTool(): StructuredToolInterface {
+    return tool(
+      async () => {
+        let session: ReturnType<typeof this.neo4j.openSession> | undefined;
+        try {
+          session = this.neo4j.openSession();
+          const cypher = `
+            MATCH (p:Pair)-[:FROM_EXAM]->(e:Exam)
+            WHERE p.critic_label = 'correct' AND p.under_gate = false
+              AND e.track IS NOT NULL
+            RETURN e.track AS section, count(p) AS pair_count
+            ORDER BY pair_count DESC, section ASC
+          `;
+          const result = await session.run(cypher);
+          return JSON.stringify({
+            sections: result.records.map((r) => {
+              const code = r.get('section') as string;
+              return {
+                section: code,
+                pair_count: toNumber(r.get('pair_count')),
+                description: SECTION_DESCRIPTIONS[code] ?? null,
+              };
+            }),
+          });
+        } catch (err) {
+          this.logger.warn(`list_sections failed: ${String(err)}`);
+          return `Error listing sections: ${(err as Error).message}`;
+        } finally {
+          if (session) await session.close().catch(() => undefined);
+        }
+      },
+      {
+        name: 'list_sections',
+        description:
+          'List the 5 Tunisian Bac **sections** (also called "tracks") ' +
+          'with the count of corrected, gate-passing pairs in each. ' +
+          'Use this whenever the student names a Bac section ("section ' +
+          'science", "BAC math", "section informatique", "éco-gestion", ' +
+          'etc.) and you are not sure which canonical code (e.g. ' +
+          '`sciences_ex`, `math`, `technique`) to pass to the `track` ' +
+          'filter on search_questions / count_questions / list_exams. ' +
+          'Cheap (one aggregate query, no embeddings).',
+        schema: z.object({}),
+      },
+    );
+  }
+
+  // ---- list_exam_questions ---------------------------------------------
+
+  /**
+   * Scroll all corrected sub-questions inside a specific Bac exam,
+   * optionally restricted to a single exercise number. Closes the gap
+   * where the student wants the full structure of a specific exercise
+   * ("déroule-moi tout l'Exercice 4 du 2017 contrôle info math") — a
+   * vector search returns top-K relevant pairs, never the full ordered
+   * list, and the existing catalogue tools (list_chapters / list_exams)
+   * stop one level above the per-question grain.
+   *
+   * Implementation note: only `exam` is indexed in Qdrant
+   * (`exercise_number` is an unindexed payload field), so we scroll on
+   * `exam` and filter by `exercise_number` in Node. The largest exam in
+   * the corpus has < 30 sub-questions, well under the scroll cap.
+   */
+  private listExamQuestionsTool(): StructuredToolInterface {
+    return tool(
+      async ({ exam, exercise_number, limit }) => {
+        try {
+          const points = await this.qdrant.scrollByFilter({
+            filter: {
+              must: [{ key: 'exam', match: { value: exam } }],
+            },
+            limit: AgentToolsService.LIST_EXAM_QUESTIONS_SCROLL_CAP,
+          });
+          let filtered = points;
+          if (typeof exercise_number === 'number') {
+            filtered = points.filter((p) => {
+              const ex = (p.payload ?? {}).exercise_number;
+              return typeof ex === 'number' && ex === exercise_number;
+            });
+          }
+          const sorted = [...filtered].sort((a, b) => {
+            const ea = numberPayload(a, 'exercise_number') ?? 0;
+            const eb = numberPayload(b, 'exercise_number') ?? 0;
+            if (ea !== eb) return ea - eb;
+            const qa = String((a.payload ?? {}).question_number ?? '');
+            const qb = String((b.payload ?? {}).question_number ?? '');
+            return qa.localeCompare(qb, undefined, { numeric: true });
+          });
+          const cap = this.clampLimit(
+            limit,
+            AgentToolsService.LIST_EXAM_QUESTIONS_DEFAULT,
+            AgentToolsService.LIST_EXAM_QUESTIONS_MAX,
+          );
+          const exercises = uniqueExerciseNumbers(sorted);
+          return JSON.stringify({
+            exam,
+            ...(typeof exercise_number === 'number' && { exercise_number }),
+            total: sorted.length,
+            truncated: sorted.length > cap,
+            exercises,
+            questions: sorted.slice(0, cap).map((p) => formatPairForLLM(p)),
+          });
+        } catch (err) {
+          this.logger.warn(`list_exam_questions failed: ${String(err)}`);
+          return `Error listing exam questions: ${(err as Error).message}`;
+        }
+      },
+      {
+        name: 'list_exam_questions',
+        description:
+          'List **all** corrected sub-questions inside a specific Bac ' +
+          'exam, optionally restricted to a single exercise. Returns ' +
+          'the questions in canonical order (by exercise_number then ' +
+          'question_number). Use this when the student asks "give me ' +
+          'all the sub-questions of Exercice 4", "déroule-moi tout ' +
+          'l\'énoncé", "liste les questions de cet exercice" — a vector ' +
+          'search returns top-K, not the full ordered structure. ' +
+          'Cheap (Qdrant scroll on the indexed `exam` field; no ' +
+          'embeddings, no rerank).',
+        schema: z.object({
+          exam: z
+            .string()
+            .min(1)
+            .describe(
+              'The exam_id (format `{year}_{session}_{track}_{matiere}`), ' +
+                'e.g. "2017_controle_informatique_math". Use list_exams ' +
+                'to discover valid ids when needed.',
+            ),
+          exercise_number: z
+            .number()
+            .int()
+            .optional()
+            .describe(
+              'Optional. Restrict to a single exercise (e.g. 4 for ' +
+                '"Exercice 4"). Omit to list every sub-question across ' +
+                'every exercise in the exam.',
+            ),
+          limit: z
+            .number()
+            .int()
+            .min(1)
+            .max(AgentToolsService.LIST_EXAM_QUESTIONS_MAX)
+            .optional()
+            .describe(
+              `Max questions to return (default ${AgentToolsService.LIST_EXAM_QUESTIONS_DEFAULT}, max ${AgentToolsService.LIST_EXAM_QUESTIONS_MAX}). The "total" field always reflects the unsliced count.`,
+            ),
         }),
       },
     );
@@ -1287,6 +1540,26 @@ function formatRerankPassage(point: QdrantPoint): string {
 function readStringPayload(p: QdrantPoint, key: string): string | undefined {
   const v = (p.payload ?? {})[key];
   return typeof v === 'string' ? v : undefined;
+}
+
+function numberPayload(p: QdrantPoint, key: string): number | undefined {
+  const v = (p.payload ?? {})[key];
+  return typeof v === 'number' ? v : undefined;
+}
+
+/**
+ * Distinct sorted list of exercise_number values across a list of
+ * pairs — used to surface the exercise table-of-contents inside a
+ * `list_exam_questions` response (the agent often wants to know "what
+ * exercises are even in this exam?" before drilling further).
+ */
+function uniqueExerciseNumbers(points: QdrantPoint[]): number[] {
+  const set = new Set<number>();
+  for (const p of points) {
+    const ex = numberPayload(p, 'exercise_number');
+    if (typeof ex === 'number') set.add(ex);
+  }
+  return [...set].sort((a, b) => a - b);
 }
 
 function truncate(s: string, max: number): string {

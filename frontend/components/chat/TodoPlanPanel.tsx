@@ -9,7 +9,6 @@ import {
   CircleDashed,
   ListTodo,
 } from "lucide-react";
-import type { UIMessage } from "ai";
 
 import { cn } from "@/lib/utils";
 
@@ -21,37 +20,19 @@ export interface TodoItem {
 }
 
 /**
- * Walk the message stream and return the most recent `write_todos`
- * tool input. The agent emits the full list on every call (each call
- * replaces the prior one), so the latest one is the source of truth.
- *
- * Returns `null` when the agent hasn't written a plan in this thread —
- * the panel stays hidden in that case.
+ * Pull the structured todo list out of a `write_todos` tool part.
+ * Returns `null` when the part has no usable input yet (still
+ * streaming, malformed payload, empty list).
  */
-export function extractCurrentTodos(messages: UIMessage[]): TodoItem[] | null {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const m = messages[i];
-    if (m.role !== "assistant") continue;
-    for (let j = m.parts.length - 1; j >= 0; j--) {
-      const part = m.parts[j] as {
-        type?: string;
-        toolName?: string;
-        input?: unknown;
-      };
-      const isWriteTodos =
-        (part.type === "dynamic-tool" && part.toolName === "write_todos") ||
-        part.type === "tool-write_todos";
-      if (!isWriteTodos) continue;
-      const input = part.input as { todos?: unknown } | undefined;
-      if (!input || !Array.isArray(input.todos)) continue;
-      const todos = (input.todos as unknown[])
-        .map((t) => normaliseTodo(t))
-        .filter((t): t is TodoItem => t !== null);
-      if (todos.length === 0) continue;
-      return todos;
-    }
-  }
-  return null;
+export function extractTodosFromToolPart(part: {
+  input?: unknown;
+}): TodoItem[] | null {
+  const input = part.input as { todos?: unknown } | undefined;
+  if (!input || !Array.isArray(input.todos)) return null;
+  const todos = (input.todos as unknown[])
+    .map((t) => normaliseTodo(t))
+    .filter((t): t is TodoItem => t !== null);
+  return todos.length > 0 ? todos : null;
 }
 
 function normaliseTodo(raw: unknown): TodoItem | null {
@@ -66,11 +47,17 @@ function normaliseTodo(raw: unknown): TodoItem | null {
 }
 
 /**
- * Live-updating plan panel rendered above the chat transcript. Mirrors
- * the deepagents / langchain `write_todos` UX: the assistant emits a
- * structured task list, statuses tick from `pending` → `in_progress` →
- * `completed` as work progresses, and the student sees the agent's plan
- * unfold in real time.
+ * Live-updating plan panel. Mirrors the deepagents / langchain
+ * `write_todos` UX: the assistant emits a structured task list,
+ * statuses tick from `pending` → `in_progress` → `completed` as work
+ * progresses, and the student sees the agent's plan unfold in real
+ * time.
+ *
+ * Rendered inline as the special-case render block for the latest
+ * `tool-write_todos` part (see <LemmaConversation />). Earlier
+ * write_todos calls in the same conversation render nothing because
+ * each call replaces the entire plan state — only the most recent
+ * one is the source of truth.
  *
  * Collapsible by default once all items are completed so it doesn't
  * dominate the screen on a finished turn — but stays expanded while
@@ -84,7 +71,7 @@ export function TodoPlanPanel({ todos }: { todos: TodoItem[] }) {
   const effectivelyCollapsed = collapsed || (allDone && !stats.inProgress);
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-4 pt-3">
+    <div className="my-3 w-full">
       <div className="rounded-2xl border border-border/60 bg-card/70 shadow-sm backdrop-blur">
         <button
           type="button"

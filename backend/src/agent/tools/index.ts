@@ -95,6 +95,46 @@ const EMIT_HINT_LADDER_TOOL_DESCRIPTION = `Use this tool when a student is stuck
 `;
 
 /**
+ * Description for the emit_solution_steps pedagogical tool. Forces
+ * the model to emit a worked solution as a structured stack of
+ * numbered cards (each with its own title, working, and justification)
+ * instead of dumping a wall of LaTeX as prose. The frontend renders
+ * the result as the A4 Stepwise Solution Cards — every card folded by
+ * default, expanded one tap at a time, with optional "⚠ Common
+ * mistake here" callouts and a "🤔 Predict the next step" active-
+ * recall gate that hides subsequent cards until the student types
+ * their guess.
+ */
+const EMIT_SOLUTION_STEPS_TOOL_DESCRIPTION = `Use this tool when the student has explicitly asked for the full worked solution to a specific exercise, OR when the Hint Ladder isn't the right shape (e.g. they already worked through the hints and now want to see it laid out, or they're reviewing a corrigé). The student sees a numbered card stack — every card folded by default, expanded one tap at a time — instead of a wall of LaTeX. Each card is a single step with its own equation, justification, and an optional "common mistake" callout. Some cards can carry a "Predict the next step" gate that hides the following card until the student types their guess: this is the highest-leverage active-recall move there is.
+
+## When to Use This Tool
+1. The student has explicitly asked for the full solution / corrigé ("montre-moi la résolution complète", "déroule-moi tout l'exercice", "give me the full solution").
+2. The student has already worked through the Hint Ladder and now wants to see the worked-out steps laid out cleanly.
+3. The agent is reviewing a past-paper exercise step by step (e.g. after a search_questions match where the student wants to walk through the corrigé).
+4. The exercise has 3 or more meaningful steps. Two-line problems should stay in prose.
+
+## When NOT to Use This Tool
+1. The student hasn't asked for the full solution and is still working through hints — use emit_hint_ladder, don't pre-empt to the worked solution.
+2. Pure metadata / discovery questions or pure concept definitions.
+3. One-shot answers that fit on a single line.
+4. The student has already pasted their own attempt and wants targeted feedback — that is the Error-Diagnosis Card surface (A5), not stepwise cards.
+
+## How to Structure Each Step
+- **title** — one short verb phrase that names what this step accomplishes ("Mettre $z$ sous forme exponentielle", "Calculer le module", "Dresser le tableau de variations"). Match the student's language. NO numbering — the frontend prepends "Étape N".
+- **latex** — the actual working line(s) for this step, in LaTeX. Use \`$...$\` for inline and \`$$...$$\` for display math. One step = one (or a few tightly-related) lines of working, not a whole sub-derivation.
+- **justification** — one or two sentences explaining *why* this step works — the rule / theorem / observation that licences the move. This is the part students miss when they read a corrigé; surface it explicitly.
+- **common_mistake** (optional) — the typical Tunisian-BAC trap on this step. Skip the field when the step has no notable trap.
+- **predict_next** (optional) — set to true on a step when the next move is something the student should be able to figure out from what's already on screen. The frontend hides the following step behind a "🤔 Predict the next step" affordance with a text input; the student types their guess (anything; we don't validate) and the next card unlocks. Use sparingly — 1-2 gates per solution, on the most pedagogically valuable transitions. Do NOT set on the last step.
+
+## Important Notes
+- Order matters. The frontend renders steps in array order with auto-numbering.
+- Pass a short \`problem_summary\` (one sentence, in the student's language) so the card stack has a header even when the student scrolls back.
+- The card stack IS the solution. Do NOT also restate the steps as a numbered prose list afterwards — the frontend already shows them. A short framing sentence before the stack ("Voici la résolution étape par étape.") is fine; re-narrating the steps in prose is the bug.
+- Match the student's language in every field (FR or EN). Don't mix.
+- 3-8 steps is the sweet spot. Fewer than 3 — use prose. More than 8 — the student loses the thread; consolidate.
+`;
+
+/**
  * Domain-shaped tools the LLM binds against. Each verb mirrors how a
  * student / tutor talks about the Tunisian Baccalaureate corpus rather
  * than the underlying data store, so the agent can reason about
@@ -121,6 +161,12 @@ const EMIT_HINT_LADDER_TOOL_DESCRIPTION = `Use this tool when a student is stuck
  *                            render block) — forces progressive
  *                            disclosure instead of dumping the full
  *                            solution as prose
+ *   - emit_solution_steps    structured numbered-card stack for full
+ *                            worked solutions (A4 Stepwise Solution
+ *                            Cards render block) — each card carries
+ *                            title + LaTeX + justification + optional
+ *                            common-mistake callout + optional
+ *                            predict-next gate
  *
  * Two non-negotiable filters are baked into every Qdrant read inside
  * {@link QdrantClientProvider} (`critic_label='correct'`, `under_gate=false`),
@@ -164,6 +210,7 @@ export class AgentToolsService {
       this.recallAnalogyTool(),
       this.recallPatternTool(),
       this.emitHintLadderTool(),
+      this.emitSolutionStepsTool(),
       this.writeTodosTool(),
     ];
   }
@@ -298,6 +345,100 @@ export class AgentToolsService {
             .describe(
               'Four progressively-richer hints. Emit all four every time — ' +
                 'the gradient of help is the whole point of this tool.',
+            ),
+        }),
+      },
+    );
+  }
+
+  // ---- emit_solution_steps ----------------------------------------------
+
+  /**
+   * Pedagogical scaffold for full worked solutions (A4 Stepwise
+   * Solution Cards). The agent emits a numbered stack of step cards
+   * — each carrying its own LaTeX, justification, and optional
+   * common-mistake callout — and the frontend renders them folded
+   * by default. The student opens cards one at a time instead of
+   * scanning a wall of LaTeX. Some cards can flag `predict_next:
+   * true` to hide the following card behind a "Predict the next
+   * step" gate, the highest-leverage active-recall move available.
+   *
+   * Like {@link writeTodosTool} and {@link emitHintLadderTool}, this
+   * is a no-op on the server. The authoritative state lives on the
+   * wire as the `tool-emit_solution_steps` part input — the
+   * frontend reads `part.input.steps` directly off the message
+   * stream. The server-side function just echoes a count back to
+   * keep the agent loop happy.
+   */
+  private emitSolutionStepsTool(): StructuredToolInterface {
+    return tool(
+      async ({ steps }) => {
+        return JSON.stringify({ ok: true, step_count: steps.length });
+      },
+      {
+        name: 'emit_solution_steps',
+        description: EMIT_SOLUTION_STEPS_TOOL_DESCRIPTION,
+        schema: z.object({
+          problem_summary: z
+            .string()
+            .min(1)
+            .describe(
+              'One short sentence describing the exercise the cards solve ' +
+                '(used as the stack header). Match the student’s ' +
+                'language. Example: "Résoudre $z^2 = -4$ dans $\\mathbb{C}$."',
+            ),
+          steps: z
+            .array(
+              z.object({
+                title: z
+                  .string()
+                  .min(1)
+                  .describe(
+                    'Short verb phrase naming what the step accomplishes ' +
+                      '("Mettre $z$ sous forme exponentielle"). NO ' +
+                      'numbering — the frontend prepends "Étape N".',
+                  ),
+                latex: z
+                  .string()
+                  .min(1)
+                  .describe(
+                    'The actual working line(s) for this step, in LaTeX. ' +
+                      'Inline math: $...$, display: $$...$$. One step = ' +
+                      'one tightly-related working block, not a whole ' +
+                      'sub-derivation.',
+                  ),
+                justification: z
+                  .string()
+                  .min(1)
+                  .describe(
+                    'One or two sentences explaining *why* this step ' +
+                      'works — the rule, theorem, or observation that ' +
+                      'licences the move.',
+                  ),
+                common_mistake: z
+                  .string()
+                  .optional()
+                  .describe(
+                    'Optional. The typical Tunisian-BAC trap on this ' +
+                      'step. Omit when the step has no notable trap.',
+                  ),
+                predict_next: z
+                  .boolean()
+                  .optional()
+                  .describe(
+                    'Optional. Set to true when the next move is ' +
+                      'something the student should be able to predict ' +
+                      'from what is already on screen. The frontend ' +
+                      'hides the following card behind a "Predict the ' +
+                      'next step" gate. Use sparingly (1-2 gates total) ' +
+                      'and never on the last step.',
+                  ),
+              }),
+            )
+            .min(2)
+            .describe(
+              'Ordered list of step cards. 3-8 is the sweet spot. ' +
+                'Order matters — the frontend auto-numbers in array order.',
             ),
         }),
       },

@@ -20,6 +20,10 @@ import {
   RealLifeAnchorChip,
   type LemmaAnalogyToolPart,
 } from "@/components/chat/RealLifeAnchorChip";
+import {
+  PastPaperChip,
+  type LemmaSearchQuestionsToolPart,
+} from "@/components/chat/PastPaperChip";
 import { cn } from "@/lib/utils";
 
 interface LemmaConversationProps {
@@ -123,6 +127,19 @@ export function LemmaConversation({
                     />
                   );
                 }
+                if (isSearchQuestionsPart(part)) {
+                  // A2 *Passage du BAC* surface — render the top
+                  // matching past-paper question as a soft pinned
+                  // card. Pairs visually with the analogy chip; the
+                  // chip itself decides whether the match is strong
+                  // enough to surface (else renders nothing).
+                  return (
+                    <PastPaperChip
+                      key={key}
+                      part={part as LemmaSearchQuestionsToolPart}
+                    />
+                  );
+                }
                 return (
                   <LemmaToolCall
                     key={key}
@@ -193,6 +210,16 @@ function isRecallAnalogyPart(part: {
     return true;
   }
   return part.type === "tool-recall_analogy";
+}
+
+function isSearchQuestionsPart(part: {
+  type?: string;
+  toolName?: string;
+}): boolean {
+  if (part.type === "dynamic-tool" && part.toolName === "search_questions") {
+    return true;
+  }
+  return part.type === "tool-search_questions";
 }
 
 function TypingIndicator() {

@@ -30,6 +30,8 @@ const TOOL_LABELS: Record<string, string> = {
   recall_pattern: "Recalling the canonical recipe",
   emit_hint_ladder: "Building a hint ladder",
   emit_solution_steps: "Laying out the worked solution",
+  list_sections: "Listing Bac sections",
+  list_exam_questions: "Listing the questions in this exam",
 };
 
 /**
@@ -134,6 +136,12 @@ function countResults(toolName: string, output: unknown): number | null {
       return arrayLen(o.topics);
     case "list_exams":
       return arrayLen(o.exams);
+    case "list_sections":
+      return arrayLen(o.sections);
+    case "list_exam_questions":
+      return typeof o.total === "number"
+        ? o.total
+        : arrayLen(o.questions);
     case "count_questions":
       return typeof o.count === "number" ? o.count : null;
     default:
@@ -157,6 +165,12 @@ function formatCount(toolName: string, count: number): string {
   }
   if (toolName === "list_exams") {
     return `${count} exam${count === 1 ? "" : "s"}`;
+  }
+  if (toolName === "list_sections") {
+    return `${count} section${count === 1 ? "" : "s"}`;
+  }
+  if (toolName === "list_exam_questions") {
+    return `${count} question${count === 1 ? "" : "s"}`;
   }
   return `${count} result${count === 1 ? "" : "s"}`;
 }
@@ -182,6 +196,18 @@ interface ExamRow {
   subject?: string;
   track?: string;
   pair_count?: number;
+}
+interface SectionRow {
+  section: string;
+  description?: string | null;
+  pair_count?: number;
+}
+interface ExamQuestionRow {
+  pair_id?: string;
+  exercise_number?: number | null;
+  question_number?: string | null;
+  chapter?: string | null;
+  question_text?: string | null;
 }
 
 /**
@@ -255,9 +281,69 @@ function renderFriendlyBody(
       if (typeof o.count !== "number") return null;
       return <CountSummary count={o.count} filters={input} />;
     }
+    case "list_sections": {
+      const sections = (o.sections as SectionRow[] | undefined) ?? [];
+      return (
+        <CatalogueList
+          summary={`${sections.length} Bac section${sections.length === 1 ? "" : "s"} available`}
+          rows={sections.map((s) => ({
+            primary: s.section,
+            secondary:
+              [
+                s.description ?? undefined,
+                s.pair_count !== undefined
+                  ? `${s.pair_count} exercises`
+                  : undefined,
+              ]
+                .filter(Boolean)
+                .join(" · ") || undefined,
+          }))}
+        />
+      );
+    }
+    case "list_exam_questions": {
+      const questions =
+        (o.questions as ExamQuestionRow[] | undefined) ?? [];
+      const total =
+        typeof o.total === "number" ? o.total : questions.length;
+      const exam = stringField(input.exam) ?? stringField(o.exam) ?? "exam";
+      const exerciseFilter = numberField(input.exercise_number);
+      const summary =
+        exerciseFilter !== null
+          ? `${total} question${total === 1 ? "" : "s"} in Exercice ${exerciseFilter} of ${exam}`
+          : `${total} question${total === 1 ? "" : "s"} in ${exam}`;
+      return (
+        <CatalogueList
+          summary={summary}
+          rows={questions.map((q) => ({
+            primary: formatExamQuestionPrimary(q),
+            secondary: q.chapter
+              ? `${q.chapter}${q.question_text ? ` — ${truncatePreview(q.question_text)}` : ""}`
+              : q.question_text
+                ? truncatePreview(q.question_text)
+                : undefined,
+          }))}
+        />
+      );
+    }
     default:
       return null;
   }
+}
+
+function formatExamQuestionPrimary(q: ExamQuestionRow): string {
+  const ex =
+    typeof q.exercise_number === "number" ? `Ex${q.exercise_number}` : null;
+  const qn = q.question_number ? `Q${q.question_number}` : null;
+  const fragments = [ex, qn].filter(Boolean) as string[];
+  if (fragments.length === 0) return q.pair_id ?? "Question";
+  return fragments.join(" · ");
+}
+
+function truncatePreview(s: string): string {
+  const cap = 80;
+  if (s.length <= cap) return s;
+  return `${s.slice(0, cap)}…`;
 }
 
 interface CatalogueRow {

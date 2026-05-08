@@ -24,6 +24,10 @@ import {
   PastPaperChip,
   type LemmaSearchQuestionsToolPart,
 } from "@/components/chat/PastPaperChip";
+import {
+  ThinkingPatternChip,
+  type LemmaPatternToolPart,
+} from "@/components/chat/ThinkingPatternChip";
 import { cn } from "@/lib/utils";
 
 interface LemmaConversationProps {
@@ -140,6 +144,18 @@ export function LemmaConversation({
                     />
                   );
                 }
+                if (isRecallPatternPart(part)) {
+                  // A11 *Comment penser à ça* surface — render the
+                  // canonical thinking-frame (genre + recipe + trap)
+                  // as a pinned card before the assistant's prose.
+                  // Chip itself returns null for `covered: false`.
+                  return (
+                    <ThinkingPatternChip
+                      key={key}
+                      part={part as LemmaPatternToolPart}
+                    />
+                  );
+                }
                 return (
                   <LemmaToolCall
                     key={key}
@@ -210,6 +226,16 @@ function isRecallAnalogyPart(part: {
     return true;
   }
   return part.type === "tool-recall_analogy";
+}
+
+function isRecallPatternPart(part: {
+  type?: string;
+  toolName?: string;
+}): boolean {
+  if (part.type === "dynamic-tool" && part.toolName === "recall_pattern") {
+    return true;
+  }
+  return part.type === "tool-recall_pattern";
 }
 
 function isSearchQuestionsPart(part: {

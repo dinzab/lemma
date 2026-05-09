@@ -20,11 +20,20 @@
  * math delimiters at all), wrap the entire body in `$$...$$` so
  * `remark-math` will render it. Otherwise return the input unchanged.
  *
- * The heuristic is deliberately conservative: the auto-wrap only
- * triggers when the agent emitted ZERO delimiters of any flavour. As
- * soon as the agent does even one `$x$` we trust they followed the
- * contract and leave their content alone — wrapping mixed prose-plus-
- * inline-math content would break the prose half.
+ * Two failure modes are auto-corrected:
+ *
+ *   1. Bare LaTeX with NO delimiters at all
+ *      e.g. `\sqrt{4} = 2`            → `$$\sqrt{4} = 2$$`
+ *
+ *   2. Malformed delimiters — agent emitted unbalanced `$$` or `$`
+ *      (one of the pair forgotten).
+ *      e.g. `\begin{pmatrix}…\end{pmatrix}$$`  (trailing `$$`, no opener)
+ *      In this case ALL stray delimiters are stripped and the content
+ *      is rewrapped cleanly in `$$...$$`.
+ *
+ * When the agent already emitted balanced delimiters of any flavour,
+ * we trust the contract and return the input unchanged — wrapping
+ * mixed prose-plus-inline-math content would break the prose half.
  *
  * Recognised TeX-command shapes:
  *   - `\command{...}`  e.g. `\sqrt{...}`, `\frac{a}{b}`, `\mathbb{R}`
@@ -32,9 +41,9 @@
  *                       commands that legitimately appear without
  *                       braces (e.g. `x = \pi`, `\sum_{i=1}^n`).
  *
- * Things this does NOT wrap (intentionally):
+ * Things this does NOT touch (intentionally):
  *   - Pure prose (no backslash-commands).
- *   - Strings containing any `$` (agent followed the contract).
+ *   - Strings containing balanced `$...$` / `$$...$$` (contract OK).
  *   - Strings containing `\(` or `\[` (already-LaTeX-native, the
  *     existing `normaliseMathDelimiters` step in `<MessageResponse>`
  *     converts those).
@@ -43,22 +52,61 @@
  *   - Markdown escapes (`\*foo\*`) — single non-alpha after `\`.
  *
  * Examples:
- *   wrapBareLatex("\\sqrt{4} = 2")            === "$$\\sqrt{4} = 2$$"
- *   wrapBareLatex("x = \\pi")                  === "$$x = \\pi$$"
- *   wrapBareLatex("$\\sqrt{4}$")               === "$\\sqrt{4}$"
- *   wrapBareLatex("$$\\sqrt{4}$$")             === "$$\\sqrt{4}$$"
- *   wrapBareLatex("\\(\\sqrt{4}\\)")           === "\\(\\sqrt{4}\\)"
- *   wrapBareLatex("Voici la résolution.")     === "Voici la résolution."
- *   wrapBareLatex("")                          === ""
- *   wrapBareLatex("path: C:\\Users\\foo")     === "path: C:\\Users\\foo"
+ *   wrapBareLatex("\\sqrt{4} = 2")                  === "$$\\sqrt{4} = 2$$"
+ *   wrapBareLatex("x = \\pi")                        === "$$x = \\pi$$"
+ *   wrapBareLatex("$\\sqrt{4}$")                     === "$\\sqrt{4}$"
+ *   wrapBareLatex("$$\\sqrt{4}$$")                   === "$$\\sqrt{4}$$"
+ *   wrapBareLatex("\\(\\sqrt{4}\\)")                 === "\\(\\sqrt{4}\\)"
+ *   wrapBareLatex("\\begin{pmatrix}1\\end{pmatrix}$$")
+ *                                                    === "$$\\begin{pmatrix}1\\end{pmatrix}$$"
+ *   wrapBareLatex("Voici la résolution.")           === "Voici la résolution."
+ *   wrapBareLatex("")                                === ""
+ *   wrapBareLatex("path: C:\\Users\\foo")           === "path: C:\\Users\\foo"
  */
 export function wrapBareLatex(input: string): string {
   if (!input || input.length === 0) return input;
-  // Already contains math delimiters of any kind — trust the agent.
-  if (input.includes("$")) return input;
+  // Already-LaTeX-native delimiters — `normaliseMathDelimiters` in
+  // `<MessageResponse>` rewrites these to `$...$` / `$$...$$` upstream
+  // of remark-math, so we don't touch them here.
   if (input.includes("\\(") || input.includes("\\[")) return input;
+
+  // Detect malformed/half-emitted delimiters (one of the pair missing).
+  // An odd number of `$$` tokens means at least one stray opener or
+  // closer — `remark-math` will then either render the wrong span as
+  // display-math or (more commonly) fail the block and emit raw text,
+  // which is the failure mode that motivated this util.
+  const dollarDollarCount = (input.match(/\$\$/g) || []).length;
+  if (dollarDollarCount % 2 !== 0) {
+    if (!looksLikeTeX(input)) return input;
+    // Strip ALL math delimiters from the body (both `$$` pairs and
+    // any single `$` tokens that aren't backslash-escaped) and
+    // rewrap the whole thing in one clean `$$...$$` block.
+    return `$$${stripAllMathDelimiters(input)}$$`;
+  }
+
+  // After balanced `$$...$$` pairs have been accounted for, check
+  // residual single-`$` tokens for the same imbalance.
+  const withoutDisplayBlocks = input.replace(/\$\$[\s\S]*?\$\$/g, "");
+  const singleDollarCount = (withoutDisplayBlocks.match(SINGLE_DOLLAR_RE) || [])
+    .length;
+  if (singleDollarCount % 2 !== 0) {
+    if (!looksLikeTeX(input)) return input;
+    return `$$${stripAllMathDelimiters(input)}$$`;
+  }
+
+  // Delimiters are balanced — trust the agent if any `$` is present.
+  if (input.includes("$")) return input;
+  // Bare LaTeX with no delimiters at all.
   if (!looksLikeTeX(input)) return input;
   return `$$${input}$$`;
+}
+
+// Matches a single `$` not preceded by a backslash. Used to count
+// inline-math tokens after stripping balanced `$$...$$` blocks.
+const SINGLE_DOLLAR_RE = /(?<!\\)\$/g;
+
+function stripAllMathDelimiters(input: string): string {
+  return input.replace(/\$\$/g, "").replace(SINGLE_DOLLAR_RE, "").trim();
 }
 
 // Allowlist of bare-greek / operator commands that legitimately appear

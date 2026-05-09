@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { motion } from "motion/react";
 import {
   Sparkles,
   BookOpen,
@@ -10,7 +11,7 @@ import {
   FlaskConical,
   Globe,
   History,
-  ArrowUpRight,
+  ArrowRight,
   Languages,
   TimerReset,
   type LucideIcon,
@@ -35,44 +36,72 @@ const MODE_PLACEHOLDERS: Record<string, string> = {
 const DEFAULT_PLACEHOLDER =
   "Example: Explain derivatives from the Bac Math section…";
 
-interface SuggestionTopic {
+interface QuickAction {
+  label: string;
+  prompt: string;
+}
+
+interface TopicCard {
   icon: LucideIcon;
   title: string;
   description: string;
-  /** Tailwind classes applied to the icon tile background. */
-  iconClass: string;
-  /** Tailwind classes for the icon glyph. */
-  iconColor: string;
+  gradient: string;
+  accentColor: string;
+  actions: QuickAction[];
 }
 
-const suggestions: SuggestionTopic[] = [
+const topics: TopicCard[] = [
   {
     icon: Calculator,
     title: "Mathematics",
-    description: "Solve equations, understand theorems, and practice calculus problems.",
-    iconClass: "bg-gradient-to-br from-primary/25 to-primary/5",
-    iconColor: "text-primary",
+    description:
+      "Solve equations, understand theorems, and practice calculus problems.",
+    gradient: "from-primary/15 via-primary/5 to-transparent",
+    accentColor: "text-primary",
+    actions: [
+      { label: "Solve a problem", prompt: "Walk me through solving a Bac-level calculus problem step by step" },
+      { label: "Past Bac paper", prompt: "Show me a past Bac math paper question on derivatives" },
+      { label: "Concept explainer", prompt: "Explain limits and continuity for the Bac Math section" },
+    ],
   },
   {
     icon: FlaskConical,
     title: "Sciences",
-    description: "Explore physics, chemistry, and biology concepts with clear explanations.",
-    iconClass: "bg-gradient-to-br from-secondary/30 to-secondary/5",
-    iconColor: "text-secondary",
+    description:
+      "Explore physics, chemistry, and biology concepts with clear explanations.",
+    gradient: "from-secondary/15 via-secondary/5 to-transparent",
+    accentColor: "text-secondary",
+    actions: [
+      { label: "Physics problem", prompt: "Help me solve a mechanics problem from a past Bac Sciences exam" },
+      { label: "Chemistry equation", prompt: "Explain how to balance this chemical equation for the Bac" },
+      { label: "Biology summary", prompt: "Summarise the genetics chapter for Bac Sciences" },
+    ],
   },
   {
     icon: Globe,
     title: "History & Geography",
-    description: "Review key events, analyze movements, and prepare for essay questions.",
-    iconClass: "bg-gradient-to-br from-chart-3/25 to-chart-3/5",
-    iconColor: "text-chart-3",
+    description:
+      "Review key events, analyze movements, and prepare for essay questions.",
+    gradient: "from-chart-3/15 via-chart-3/5 to-transparent",
+    accentColor: "text-chart-3",
+    actions: [
+      { label: "Essay outline", prompt: "Help me outline a Bac essay on decolonisation in North Africa" },
+      { label: "Key events recap", prompt: "Summarise the key events of the Cold War for the Bac" },
+      { label: "Past Bac essay", prompt: "Show me a past Bac history essay question and model answer" },
+    ],
   },
   {
     icon: History,
     title: "Philosophy",
-    description: "Understand thinkers, build arguments, and structure your dissertation.",
-    iconClass: "bg-gradient-to-br from-chart-5/25 to-chart-5/5",
-    iconColor: "text-chart-5",
+    description:
+      "Understand thinkers, build arguments, and structure your dissertation.",
+    gradient: "from-chart-5/15 via-chart-5/5 to-transparent",
+    accentColor: "text-chart-5",
+    actions: [
+      { label: "Dissertation plan", prompt: "Help me plan a philosophy dissertation on freedom and responsibility" },
+      { label: "Thinker explainer", prompt: "Explain Descartes\' method of doubt for the Bac" },
+      { label: "Argument coach", prompt: "Coach me through building a philosophical argument on justice" },
+    ],
   },
 ];
 
@@ -116,8 +145,8 @@ export default function NewChatPage() {
     }
   };
 
-  const handleSuggestionClick = (text: string) => {
-    setMessage(`Help me study ${text.toLowerCase()}`);
+  const handleActionClick = (prompt: string) => {
+    setMessage(prompt);
   };
 
   return (
@@ -203,53 +232,82 @@ export default function NewChatPage() {
           )}
         </div>
 
-        {/* Topic Suggestions */}
-        <div className="w-full">
-          <div className="mb-3 flex items-center justify-between">
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        {/* Topic Suggestions — redesigned to match landing-page vibe */}
+        <div className="w-full text-left">
+          <div className="mb-4 flex items-center justify-between">
+            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
               Explore topics
             </p>
-            <p className="text-xs text-muted-foreground/80">
-              Click a card to start
-            </p>
           </div>
-          <div className="grid grid-cols-1 gap-3 text-left sm:grid-cols-2">
-            {suggestions.map((item) => {
-              const Icon = item.icon;
+
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {topics.map((topic, idx) => {
+              const Icon = topic.icon;
               return (
-                <button
-                  key={item.title}
-                  onClick={() => handleSuggestionClick(item.title)}
-                  disabled={isLoading}
+                <motion.div
+                  key={topic.title}
+                  initial={{ opacity: 0, filter: "blur(8px)" }}
+                  animate={{ opacity: 1, filter: "blur(0px)" }}
+                  transition={{ duration: 0.4, delay: 0.1 * idx }}
                   className={cn(
-                    "group relative flex items-start gap-4 overflow-hidden rounded-2xl border border-border/70 bg-transparent p-4 transition-colors duration-200",
-                    "hover:border-primary/40",
-                    "disabled:cursor-not-allowed disabled:opacity-60",
+                    "group relative overflow-hidden rounded-2xl border border-border/60 transition-colors duration-200",
+                    "hover:border-primary/30",
                   )}
                 >
+                  {/* Gradient backdrop + dot grid (landing-page pattern) */}
                   <div
                     className={cn(
-                      "flex h-11 w-11 shrink-0 items-center justify-center rounded-xl border border-border/60 transition-transform group-hover:scale-105",
-                      item.iconClass,
-                    )}
-                  >
-                    <Icon className={cn("h-5 w-5", item.iconColor)} />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="mb-1 text-sm font-semibold text-foreground">
-                      {item.title}
-                    </p>
-                    <p className="text-xs leading-relaxed text-muted-foreground">
-                      {item.description}
-                    </p>
-                  </div>
-                  <ArrowUpRight
-                    className={cn(
-                      "h-4 w-4 shrink-0 -translate-x-1 translate-y-0 text-muted-foreground/60 opacity-0 transition-all",
-                      "group-hover:translate-x-0 group-hover:opacity-100 group-hover:text-primary",
+                      "pointer-events-none absolute inset-0 bg-gradient-to-br opacity-60",
+                      topic.gradient,
                     )}
                   />
-                </button>
+                  <div className="pointer-events-none absolute inset-0 [background-image:radial-gradient(circle,var(--border)_1px,transparent_1px)] [background-size:16px_16px] opacity-30" />
+
+                  {/* Ghost icon */}
+                  <Icon className="pointer-events-none absolute -right-4 -top-4 size-28 text-foreground/[0.04] transition-transform duration-500 group-hover:scale-110 sm:size-32" />
+
+                  {/* Content */}
+                  <div className="relative flex flex-col gap-3 p-4 sm:p-5">
+                    <div className="flex items-center gap-2.5">
+                      <div
+                        className={cn(
+                          "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/60 bg-background/80 backdrop-blur",
+                        )}
+                      >
+                        <Icon className={cn("h-4 w-4", topic.accentColor)} />
+                      </div>
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">
+                          {topic.title}
+                        </p>
+                      </div>
+                    </div>
+
+                    <p className="text-xs leading-relaxed text-muted-foreground">
+                      {topic.description}
+                    </p>
+
+                    {/* Quick-action chips */}
+                    <div className="flex flex-wrap gap-1.5">
+                      {topic.actions.map((action) => (
+                        <button
+                          key={action.label}
+                          type="button"
+                          onClick={() => handleActionClick(action.prompt)}
+                          disabled={isLoading}
+                          className={cn(
+                            "group/chip inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/70 px-2.5 py-1 text-[11px] font-medium text-muted-foreground backdrop-blur transition-colors",
+                            "hover:border-primary/40 hover:text-primary",
+                            "disabled:cursor-not-allowed disabled:opacity-50",
+                          )}
+                        >
+                          {action.label}
+                          <ArrowRight className="h-3 w-3 opacity-0 transition-all group-hover/chip:translate-x-0.5 group-hover/chip:opacity-100" />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </motion.div>
               );
             })}
           </div>

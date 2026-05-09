@@ -26,6 +26,15 @@ const capabilities: PromptComposerMode[] = [
   { id: "summaries", label: "Summaries", icon: FileText },
 ];
 
+const MODE_PLACEHOLDERS: Record<string, string> = {
+  reasoning: "Walk me through this problem step by step…",
+  exam: "Generate a past-paper style question on…",
+  summaries: "Summarise this lesson / chapter on…",
+};
+
+const DEFAULT_PLACEHOLDER =
+  "Example: Explain derivatives from the Bac Math section…";
+
 interface SuggestionTopic {
   icon: LucideIcon;
   title: string;
@@ -73,6 +82,19 @@ export default function NewChatPage() {
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Selected capability mode (Reasoning / Exam Prep / Summaries). Currently
+  // a UI-only signal — the backend agent doesn't branch on it yet — but
+  // wiring the selection state means the chips actually toggle and the
+  // placeholder updates so users get tangible feedback when they pick one.
+  const [selectedModeId, setSelectedModeId] = useState<string | null>(null);
+
+  const placeholder = selectedModeId
+    ? (MODE_PLACEHOLDERS[selectedModeId] ?? DEFAULT_PLACEHOLDER)
+    : DEFAULT_PLACEHOLDER;
+
+  const handleSelectMode = (id: string) => {
+    setSelectedModeId((current) => (current === id ? null : id));
+  };
 
   const firstName = userDetails?.fullName?.split(" ")[0] || "there";
 
@@ -99,13 +121,14 @@ export default function NewChatPage() {
   };
 
   return (
-    <div className="relative flex h-full flex-1 flex-col overflow-y-auto">
-      {/* Top toolbar */}
+    <div className="relative flex h-full min-h-0 flex-1 flex-col overflow-y-auto">
+      {/* Top toolbar — inline at the top on mobile, absolute-positioned on
+          ≥sm so it doesn't steal vertical space from the hero. */}
       <div className="flex items-center justify-end gap-2 px-4 pt-3 sm:absolute sm:right-6 sm:top-5 sm:z-10 sm:px-0 sm:pt-0">
         <button
           type="button"
           className={cn(
-            "inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-medium text-primary transition-colors",
+            "inline-flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary transition-colors sm:px-3 sm:py-1.5 sm:text-xs",
             "hover:bg-primary/15",
           )}
         >
@@ -121,19 +144,29 @@ export default function NewChatPage() {
         </button>
       </div>
 
-      <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col items-center justify-center gap-8 px-4 py-8 text-center sm:max-w-3xl sm:gap-10 sm:px-6 sm:py-10 lg:px-8">
+      {/* Hero / composer / topic-suggestion column.
+          - On mobile we anchor to the top of the scroll container so the
+            entire hero, composer, and suggestion cards are reachable
+            without any of them being pushed below the fold by
+            justify-center.
+          - From sm and up there's plenty of viewport height, so we
+            re-enable vertical centering for the classic ChatGPT-style
+            empty-state layout. */}
+      <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col items-center justify-start gap-6 px-4 pb-10 pt-6 text-center sm:max-w-3xl sm:justify-center sm:gap-10 sm:px-6 sm:py-10 lg:px-8">
         {/* Hero */}
         <div className="flex flex-col items-center gap-3 sm:gap-4">
-          <span className="inline-flex items-center gap-2 rounded-full border border-border/60 px-3 py-1 text-xs font-medium text-muted-foreground">
-            <span className="relative flex h-2 w-2">
+          <span className="inline-flex max-w-full items-center gap-2 rounded-full border border-border/60 px-3 py-1 text-xs font-medium text-muted-foreground">
+            <span className="relative flex h-2 w-2 shrink-0">
               <span className="absolute inset-0 animate-ping rounded-full bg-primary/60" />
               <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
             </span>
             <span className="font-semibold uppercase tracking-wide text-primary">
               AI Tutor
             </span>
-            <span className="h-3 w-px bg-border/70" aria-hidden />
-            <span>Ready for today&apos;s Bac session</span>
+            {/* The session-status tail is decorative; on narrow viewports
+                we drop it so the pill never forces horizontal scroll. */}
+            <span className="hidden h-3 w-px bg-border/70 sm:inline-block" aria-hidden />
+            <span className="hidden sm:inline">Ready for today&apos;s Bac session</span>
           </span>
 
           <h1 className="max-w-3xl text-balance text-2xl font-semibold leading-tight tracking-tight text-foreground sm:text-4xl lg:text-[2.875rem]">
@@ -154,9 +187,11 @@ export default function NewChatPage() {
             value={message}
             onChange={setMessage}
             onSubmit={handleSendMessage}
-            placeholder="Example: Explain derivatives from the Bac Math section…"
+            placeholder={placeholder}
             isSubmitting={isLoading}
             modes={capabilities}
+            selectedModeId={selectedModeId ?? undefined}
+            onSelectMode={handleSelectMode}
             size="hero"
             autoFocus
           />

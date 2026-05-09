@@ -138,12 +138,15 @@ export function PromptComposer({
 
         <div className="flex items-end justify-between gap-2 px-2 pb-2 pt-1 sm:px-2.5">
           <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+            {/* Attach is hidden on xs so the mode chips have room to breathe
+                on a 360px viewport. The button is still disabled-only today
+                ("coming soon"); when it lights up we can revisit. */}
             <button
               type="button"
               aria-label="Attach (coming soon)"
               disabled
               className={cn(
-                "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted-foreground/70",
+                "hidden h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted-foreground/70 sm:flex",
                 "transition-colors hover:text-foreground disabled:opacity-50",
               )}
             >
@@ -156,7 +159,7 @@ export function PromptComposer({
                   const Icon = mode.icon;
                   const isActive = selectedModeId === mode.id;
                   const baseClass = cn(
-                    "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12.5px] font-medium",
+                    "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-[12px] font-medium sm:gap-1.5 sm:px-2.5 sm:text-[12.5px]",
                     "transition-colors",
                   );
 

@@ -14,11 +14,7 @@ import {
   GraduationCap,
   Home,
   Search,
-  Archive,
   Sparkles,
-  Plus,
-  Folder,
-  Pin,
   MessageSquare,
   MoreHorizontal,
   Pencil,
@@ -42,10 +38,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { useCallback, useEffect, useMemo, useState, type ComponentType } from "react";
+import { useMemo, useState, type ComponentType } from "react";
 import { cn } from "@/lib/utils";
 import { UserProvider, useUser } from "@/context/user-context";
-import { deleteThread, getUserThreads, renameThread, type Thread } from "@/lib/api/threads";
+import { ThreadsProvider, useThreads } from "@/context/threads-context";
+import { deleteThread, renameThread, type Thread } from "@/lib/api/threads";
 import { toast } from "sonner";
 
 interface SidebarContentProps {
@@ -130,39 +127,14 @@ function SectionHeader({ label, open, onToggle, trailing }: SectionHeaderProps) 
   );
 }
 
-const projectsPlaceholders = [
-  "Math notebook",
-  "Science notes",
-  "Philosophy ideas",
-];
-
 const SidebarContent = ({ setIsSidebarOpen }: SidebarContentProps) => {
   const { setTheme, theme } = useTheme();
   const { userDetails, loading } = useUser();
+  const { threads, isLoading: isLoadingThreads, applyRename, removeThread } = useThreads();
   const pathname = usePathname();
   const router = useRouter();
-  const [threads, setThreads] = useState<Thread[]>([]);
-  const [isLoadingThreads, setIsLoadingThreads] = useState(true);
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
-  const [projectsOpen, setProjectsOpen] = useState(true);
-  const [pinnedOpen, setPinnedOpen] = useState(true);
   const [chatsOpen, setChatsOpen] = useState(true);
-
-  const refreshThreads = useCallback(async () => {
-    try {
-      setIsLoadingThreads(true);
-      const page = await getUserThreads(1, 30);
-      setThreads(page.threads);
-    } catch {
-      toast.error("Could not load recent chats");
-    } finally {
-      setIsLoadingThreads(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    refreshThreads();
-  }, [refreshThreads, pathname]);
 
   const getInitials = (name: string) => {
     if (!name) return "U";
@@ -190,9 +162,7 @@ const SidebarContent = ({ setIsSidebarOpen }: SidebarContentProps) => {
 
     try {
       const updated = await renameThread(thread.id, nextTitle.trim());
-      setThreads((current) =>
-        current.map((item) => (item.id === updated.id ? updated : item)),
-      );
+      applyRename(updated);
       toast.success("Chat renamed");
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to rename chat");
@@ -204,7 +174,7 @@ const SidebarContent = ({ setIsSidebarOpen }: SidebarContentProps) => {
 
     try {
       await deleteThread(thread.id);
-      setThreads((current) => current.filter((item) => item.id !== thread.id));
+      removeThread(thread.id);
       toast.success("Chat deleted");
       if (activeThreadId === thread.id) {
         router.push("/new");
@@ -239,59 +209,12 @@ const SidebarContent = ({ setIsSidebarOpen }: SidebarContentProps) => {
       <nav className="flex flex-col gap-0.5 px-2">
         <NavRow icon={Home} label="Home" href="/new" active={onHome} />
         <NavRow icon={Search} label="Search" />
-        <NavRow icon={Archive} label="Archived" />
         <NavRow icon={Sparkles} label="Upgrade" badge="New" />
       </nav>
 
       {/* Scrollable sections */}
-      <ScrollArea className="mt-3 flex-1 px-2">
+      <ScrollArea className="mt-3 min-h-0 flex-1 px-2">
         <div className="flex flex-col gap-1">
-          {/* Projects */}
-          <Collapsible open={projectsOpen} onOpenChange={setProjectsOpen}>
-            <SectionHeader
-              label="Projects"
-              open={projectsOpen}
-              onToggle={() => setProjectsOpen((v) => !v)}
-              trailing={
-                <button
-                  type="button"
-                  className="flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-foreground"
-                  aria-label="New project"
-                >
-                  <Plus className="h-3.5 w-3.5" />
-                </button>
-              }
-            />
-            <CollapsibleContent>
-              <div className="flex flex-col gap-0.5">
-                {projectsPlaceholders.map((name) => (
-                  <button
-                    key={name}
-                    type="button"
-                    className="flex items-center gap-3 rounded-lg px-3 py-1.5 text-sm text-sidebar-foreground/85 transition-colors hover:bg-sidebar-accent/70"
-                  >
-                    <Folder className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    <span className="truncate">{name}</span>
-                  </button>
-                ))}
-              </div>
-            </CollapsibleContent>
-          </Collapsible>
-
-          {/* Pinned chats */}
-          <Collapsible open={pinnedOpen} onOpenChange={setPinnedOpen}>
-            <SectionHeader
-              label="Pinned chats"
-              open={pinnedOpen}
-              onToggle={() => setPinnedOpen((v) => !v)}
-            />
-            <CollapsibleContent>
-              <div className="px-3 py-1 text-xs leading-relaxed text-muted-foreground/80">
-                Pin a chat to keep it handy.
-              </div>
-            </CollapsibleContent>
-          </Collapsible>
-
           {/* Your chats (real threads) */}
           <Collapsible open={chatsOpen} onOpenChange={setChatsOpen}>
             <SectionHeader
@@ -358,10 +281,6 @@ const SidebarContent = ({ setIsSidebarOpen }: SidebarContentProps) => {
                           >
                             <Pencil className="h-4 w-4" />
                             Rename
-                          </DropdownMenuItem>
-                          <DropdownMenuItem className="cursor-pointer gap-2">
-                            <Pin className="h-4 w-4" />
-                            Pin chat
                           </DropdownMenuItem>
                           <DropdownMenuItem
                             className="cursor-pointer gap-2 text-destructive focus:text-destructive"
@@ -444,70 +363,72 @@ export default function DashboardLayout({
 
   return (
     <UserProvider>
-      <TooltipProvider>
-        <div className="fixed inset-0 flex w-full overflow-hidden bg-background text-foreground">
-          {/* Desktop Sidebar */}
-          <aside
-            className={cn(
-              "relative z-10 hidden flex-col overflow-hidden border-r border-border/60 bg-transparent text-sidebar-foreground transition-all duration-300 ease-in-out md:flex",
-              isSidebarOpen ? "w-[272px]" : "w-0 border-r-0",
-            )}
-          >
-            <div className="h-full w-[272px] p-3">
-              <SidebarContent setIsSidebarOpen={setIsSidebarOpen} />
-            </div>
-          </aside>
-
-          {/* Main Content */}
-          <main className="relative z-10 flex h-full flex-1 flex-col overflow-hidden">
-            {/* Mobile Header */}
-            <header className="flex items-center justify-between border-b border-border bg-background/90 px-4 py-3 backdrop-blur-xl md:hidden">
-              <Link href="/new" className="flex items-center gap-2.5">
-                <div className="rounded-lg bg-primary p-1.5">
-                  <GraduationCap className="text-primary-foreground h-5 w-5" />
-                </div>
-                <span className="text-base font-bold">BacPrep AI</span>
-              </Link>
-              <Sheet>
-                <SheetTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-9 w-9">
-                    <Menu className="h-5 w-5" />
-                  </Button>
-                </SheetTrigger>
-                <SheetContent side="left" className="w-[272px] border-r border-border/60 bg-background p-3 text-sidebar-foreground">
-                  <SheetHeader className="sr-only">
-                    <SheetTitle>Navigation Menu</SheetTitle>
-                  </SheetHeader>
-                  <SidebarContent setIsSidebarOpen={setIsSidebarOpen} />
-                </SheetContent>
-              </Sheet>
-            </header>
-
-            {/* Desktop Sidebar Toggle (when closed) */}
-            {!isSidebarOpen && (
-              <div className="absolute left-3 top-3 z-50 hidden md:block">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-9 w-9 rounded-lg hover:bg-muted"
-                      onClick={() => setIsSidebarOpen(true)}
-                    >
-                      <PanelLeftOpen className="h-5 w-5" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="right">Open sidebar</TooltipContent>
-                </Tooltip>
+      <ThreadsProvider>
+        <TooltipProvider>
+          <div className="fixed inset-0 flex w-full overflow-hidden bg-background text-foreground">
+            {/* Desktop Sidebar */}
+            <aside
+              className={cn(
+                "relative z-10 hidden flex-col overflow-hidden border-r border-border/60 bg-transparent text-sidebar-foreground transition-all duration-300 ease-in-out md:flex",
+                isSidebarOpen ? "w-[272px]" : "w-0 border-r-0",
+              )}
+            >
+              <div className="h-full w-[272px] p-3">
+                <SidebarContent setIsSidebarOpen={setIsSidebarOpen} />
               </div>
-            )}
+            </aside>
 
-            <div className="relative flex min-h-0 flex-1 flex-col">
-              {children}
-            </div>
-          </main>
-        </div>
-      </TooltipProvider>
+            {/* Main Content */}
+            <main className="relative z-10 flex h-full flex-1 flex-col overflow-hidden">
+              {/* Mobile Header */}
+              <header className="flex items-center justify-between border-b border-border bg-background/90 px-4 py-3 backdrop-blur-xl md:hidden">
+                <Link href="/new" className="flex items-center gap-2.5">
+                  <div className="rounded-lg bg-primary p-1.5">
+                    <GraduationCap className="text-primary-foreground h-5 w-5" />
+                  </div>
+                  <span className="text-base font-bold">BacPrep AI</span>
+                </Link>
+                <Sheet>
+                  <SheetTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-9 w-9">
+                      <Menu className="h-5 w-5" />
+                    </Button>
+                  </SheetTrigger>
+                  <SheetContent side="left" className="w-[272px] border-r border-border/60 bg-background p-3 text-sidebar-foreground">
+                    <SheetHeader className="sr-only">
+                      <SheetTitle>Navigation Menu</SheetTitle>
+                    </SheetHeader>
+                    <SidebarContent setIsSidebarOpen={setIsSidebarOpen} />
+                  </SheetContent>
+                </Sheet>
+              </header>
+
+              {/* Desktop Sidebar Toggle (when closed) */}
+              {!isSidebarOpen && (
+                <div className="absolute left-3 top-3 z-50 hidden md:block">
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9 rounded-lg hover:bg-muted"
+                        onClick={() => setIsSidebarOpen(true)}
+                      >
+                        <PanelLeftOpen className="h-5 w-5" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent side="right">Open sidebar</TooltipContent>
+                  </Tooltip>
+                </div>
+              )}
+
+              <div className="relative flex min-h-0 flex-1 flex-col">
+                {children}
+              </div>
+            </main>
+          </div>
+        </TooltipProvider>
+      </ThreadsProvider>
     </UserProvider>
   );
 }

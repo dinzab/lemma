@@ -9,6 +9,8 @@ import { EmbeddingsClient } from './tools/embeddings.client';
 import { RerankerClient } from './tools/reranker.client';
 import { AnalogiesClient } from './tools/analogies.client';
 import { PatternsClient } from './tools/patterns.client';
+import { VisionService } from './vision.service';
+import { FigurePerceptionCacheService } from './figure-perception-cache.service';
 
 /**
  * AgentModule wires up:
@@ -31,6 +33,8 @@ import { PatternsClient } from './tools/patterns.client';
     RerankerClient,
     AnalogiesClient,
     PatternsClient,
+    VisionService,
+    FigurePerceptionCacheService,
     AgentToolsService,
     AgentService,
   ],

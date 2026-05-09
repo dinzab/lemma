@@ -69,18 +69,12 @@ describe('buildImageUrl', () => {
   });
 
   it('returns null for empty / non-string relpaths', () => {
-    expect(
-      buildImageUrl('', 'https://pub-x.r2.dev/ocr_omni'),
-    ).toBeNull();
-    expect(
-      buildImageUrl(null, 'https://pub-x.r2.dev/ocr_omni'),
-    ).toBeNull();
+    expect(buildImageUrl('', 'https://pub-x.r2.dev/ocr_omni')).toBeNull();
+    expect(buildImageUrl(null, 'https://pub-x.r2.dev/ocr_omni')).toBeNull();
     expect(
       buildImageUrl(undefined, 'https://pub-x.r2.dev/ocr_omni'),
     ).toBeNull();
-    expect(
-      buildImageUrl(42, 'https://pub-x.r2.dev/ocr_omni'),
-    ).toBeNull();
+    expect(buildImageUrl(42, 'https://pub-x.r2.dev/ocr_omni')).toBeNull();
   });
 
   it('falls back to the raw relpath when no cdnBase is configured', () => {

@@ -12,22 +12,28 @@ import {
   HttpStatus,
   ParseUUIDPipe,
 } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import { ThreadsService } from './threads.service';
 import {
   CreateThreadDto,
+  GetThreadsQueryDto,
   ThreadResponseDto,
   ThreadsListResponseDto,
   UpdateThreadDto,
 } from './dto';
 import { SupabaseAuthGuard, SupabaseJwtPayload } from '../auth';
 import { CurrentUser } from '../decorators';
+import { UserThrottlerGuard } from '../throttler/user-throttler.guard';
 
 /**
- * Controller for thread management endpoints
- * All routes are protected by SupabaseAuthGuard
+ * Controller for thread management endpoints.
+ *
+ * SupabaseAuthGuard runs first to attach `req.user`, then UserThrottlerGuard
+ * keys rate-limit buckets by `req.user.sub` (see UserThrottlerGuard for why).
+ * The 60 req/min default comes from ThrottlerModule.forRoot in ThreadsModule.
  */
 @Controller('threads')
-@UseGuards(SupabaseAuthGuard)
+@UseGuards(SupabaseAuthGuard, UserThrottlerGuard)
 export class ThreadsController {
   constructor(private readonly threadsService: ThreadsService) {}
 
@@ -62,20 +68,24 @@ export class ThreadsController {
   /**
    * List all threads for the authenticated user
    * GET /threads?page=1&limit=20
+   *
+   * The sidebar fetches 20 chats per page and lazily paginates as the user
+   * scrolls; `total` in the response tells the client when to stop.
+   *
+   * Tighter throttle than the controller default: 30 list calls per minute
+   * per user is plenty for a sidebar that pages while the user scrolls.
    */
   @Get()
+  @Throttle({ default: { ttl: 60_000, limit: 30 } })
   async getUserThreads(
     @CurrentUser() user: SupabaseJwtPayload,
-    @Query('page') page?: string,
-    @Query('limit') limit?: string,
+    @Query() query: GetThreadsQueryDto,
   ): Promise<ThreadsListResponseDto> {
-    const pageNum = Math.max(1, parseInt(page || '1', 10) || 1);
-    const limitNum = Math.min(
-      100,
-      Math.max(1, parseInt(limit || '20', 10) || 20),
+    return this.threadsService.getUserThreads(
+      user.sub,
+      query.page,
+      query.limit,
     );
-
-    return this.threadsService.getUserThreads(user.sub, pageNum, limitNum);
   }
 
   /**

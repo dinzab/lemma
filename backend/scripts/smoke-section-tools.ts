@@ -70,6 +70,28 @@ async function main() {
     // Legacy underscored value: agent or stale state may still pass this;
     // normalizeSection() should translate it to `sciences-ex` transparently.
     await call('count_questions', { matiere: 'math', track: 'sciences_ex' });
+
+    // list_exams: every row should report a non-zero `pair_count`. After
+    // the v6 cutover this query was returning 0 for every exam because
+    // v6 Pair nodes don't carry the v1 `critic_label`/`under_gate`
+    // properties; the coalesce-default fix should restore real counts.
+    await call('list_exams', {
+      track: 'sciences-ex',
+      year: 2022,
+      session: 'principale',
+    });
+
+    // list_exam_questions: canonical v6 hyphenated exam_id (the form
+    // list_exams now returns). Should resolve to ~30 sub-questions.
+    await call('list_exam_questions', {
+      exam: 'math-2022-principale-sciences-ex',
+    });
+    await call('list_exam_questions', {
+      exam: 'math-2022-principale-sciences-ex',
+      exercise_number: 1,
+    });
+    // Backwards-compat: legacy v1 underscored handle should still resolve
+    // through the `exam` payload fallback path.
     await call('list_exam_questions', {
       exam: '2017_controle_informatique_math',
       exercise_number: 4,

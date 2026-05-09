@@ -38,6 +38,10 @@ import {
   type LemmaSolutionStepsToolPart,
 } from "@/components/chat/StepwiseSolutionCards";
 import {
+  QuestionAssetsBlock,
+  type LemmaShowQuestionAssetsToolPart,
+} from "@/components/chat/QuestionAssetsBlock";
+import {
   TodoPlanPanel,
   extractTodosFromToolPart,
 } from "@/components/chat/TodoPlanPanel";
@@ -217,6 +221,20 @@ export function LemmaConversation({
                     />
                   );
                 }
+                if (isShowQuestionAssetsPart(part)) {
+                  // *Voir l'épreuve* surface — render the figure
+                  // panel (énoncé / corrigé gated / exam complet)
+                  // when the agent calls `show_question_assets`.
+                  // Pairs with the passive thumbnail rendered by
+                  // `<PastPaperChip>`; the explicit panel is the
+                  // (C) half of the hybrid figure-surfacing pattern.
+                  return (
+                    <QuestionAssetsBlock
+                      key={key}
+                      part={part as LemmaShowQuestionAssetsToolPart}
+                    />
+                  );
+                }
                 return (
                   <LemmaToolCall
                     key={key}
@@ -344,6 +362,19 @@ function isSearchQuestionsPart(part: {
     return true;
   }
   return part.type === "tool-search_questions";
+}
+
+function isShowQuestionAssetsPart(part: {
+  type?: string;
+  toolName?: string;
+}): boolean {
+  if (
+    part.type === "dynamic-tool" &&
+    part.toolName === "show_question_assets"
+  ) {
+    return true;
+  }
+  return part.type === "tool-show_question_assets";
 }
 
 function TypingIndicator() {

@@ -136,6 +136,53 @@ const EMIT_SOLUTION_STEPS_TOOL_DESCRIPTION = `Use this tool when the student has
 `;
 
 /**
+ * Tool description for `show_question_assets`.
+ *
+ * Calls the figure-display surface for a v6 pair. The frontend
+ * renders a tabbed panel — *Énoncé*, *Corrigé* (active-recall gated,
+ * matching the corrigé-text gate on Stepwise Cards), *Exam complet*
+ * — with click-to-zoom on each figure. The agent's job is to decide
+ * *when* the student needs to look at the original page; the
+ * panel handles every visual detail downstream.
+ *
+ * The intent is identical to the established `emit_*` pattern: the
+ * agent decides when to invoke the dedicated UI surface instead of
+ * inlining markdown images. We prefer this over autoplay-style
+ * thumbnails on every search hit because (a) the chip's passive
+ * thumbnails (rendered by `PastPaperChip`) already cover that case
+ * and (b) inline `![alt](url)` images mid-prose look glued-on and
+ * can't carry the recall gate.
+ */
+const SHOW_QUESTION_ASSETS_TOOL_DESCRIPTION = `Use this tool when the student wants to see the original énoncé / corrigé / exam page for a known Bac question pair, or when a figure (graph, schema, free-body diagram, table) is the proof you cannot replace with prose. The frontend renders a dedicated panel with tabs — *Énoncé* (always open), *Corrigé* (gated behind a "Reveal" button to keep the active-recall pattern), *Exam complet* — and click-to-zoom for each figure.
+
+## When to Use This Tool
+1. The student literally asks: "montre-moi l'énoncé / le corrigé / l'épreuve / la figure / le schéma", "show me the original", "open exercice 4", "ouvre la page", "je veux voir le sujet".
+2. Your prose is referencing a figure that the OCR'd text cannot describe (a graph axis, a circuit schematic, a free-body sketch, a tableau de variations rendered as an image, a 3-D body for kinematics) — surface it as proof rather than describing the figure in words.
+3. The student is reviewing a corrigé and the visual layout (alignment of equations, geometric figure used in the proof) carries information the LaTeX alone cannot.
+4. The student is comparing exercise N énoncé to exercise N corrigé — pass \`side: "both"\` so both tabs are pre-loaded.
+
+## When NOT to Use This Tool
+1. The search-result \`PastPaperChip\` already renders an inline thumbnail for hits with \`has_figure_enonce: true\`. If the student is just browsing search results, the chip thumbnail is enough — calling this tool on top is redundant.
+2. \`has_figure_enonce: false\` AND \`has_figure_corrige: false\` on the pair — there are no figures to show, the panel would render an empty state, and the student would be confused.
+3. The student's question is purely about concept / theory / vocabulary. No figure adds value.
+4. You are about to author the worked solution — use \`emit_solution_steps\`. The card stack is the right surface for showing the steps; an image of the corrigé alongside it is overkill.
+
+## How to Call
+- \`pair_id\` — the canonical handle (e.g. \`"math-2017-controle-sciences-ex:ex_4:q_1.a"\`). Get it from \`search_questions\` / \`find_similar_questions\` / \`list_exam_questions\` / \`get_question_pair\`.
+- \`side\` (optional) — which tab to open first:
+  * \`"enonce"\` (default) — open the *Énoncé* tab; the corrigé is still reachable via the gate.
+  * \`"corrige"\` — open the *Corrigé* tab pre-revealed (use sparingly: only when the student has explicitly asked for the corrigé). The active-recall gate still renders on the panel; pre-opening just defaults the tab to corrigé.
+  * \`"both"\` — render the panel with two side-by-side cards (énoncé + corrigé, corrigé still gated). Use when the student is comparing the two.
+  * \`"exam_full"\` — default to the full-exam view (énoncé page + corrigé page, scrollable). Use when the student asks to "see the whole exam page" or to read the surrounding question for context.
+
+## Important Notes
+- Do NOT inline \`![alt](url)\` markdown images in your prose. The panel is the canonical surface. Inline images break the layout and skip the recall gate.
+- Do NOT call this on every search match. \`PastPaperChip\` already shows a thumbnail-on-hit for figured pairs.
+- The panel reads \`has_figure_enonce\` / \`has_figure_corrige\` from the pair payload and renders gracefully when one side has no figure (the tab is hidden, not greyed-out).
+- Match the student's language in any framing prose around the panel. The panel labels are FR by default.
+`;
+
+/**
  * Canonical Tunisian Bac **section** (a.k.a. "track") values as they
  * appear in the v6 Qdrant `track` / `filiere` payload field. Exposed
  * as a typed enum to every tool that filters by section, so the model
@@ -290,20 +337,22 @@ export class AgentToolsService {
   ) {}
 
   /**
-   * Public CDN base URL for image relpaths returned by the agent.
-   * Optional — when unset, image fields fall back to raw relpath
-   * strings so the frontend can compose its own URL or display a
-   * "no asset" state. Set as `IMAGE_CDN_BASE` (e.g. Cloudflare R2,
-   * Bunny, or any static-asset host).
+   * Public CDN base URL for v6 image relpaths. Set as `R2_PUBLIC_BASE`
+   * (the v6 ingest stores relpaths against a Cloudflare R2 public
+   * bucket; the convention is to namespace the bucket under
+   * `…r2.dev/ocr_omni`). When unset, image URL fields fall back to
+   * raw relpath strings so the frontend can either compose its own
+   * URL or render a "no asset" placeholder without crashing.
    */
   private get imageCdnBase(): string | undefined {
-    return this.config.get<string>('IMAGE_CDN_BASE');
+    return this.config.get<string>('R2_PUBLIC_BASE');
   }
 
   getAll(): StructuredToolInterface[] {
     return [
       this.searchQuestionsTool(),
       this.getQuestionPairTool(),
+      this.showQuestionAssetsTool(),
       this.findSimilarQuestionsTool(),
       this.countQuestionsTool(),
       this.listChaptersTool(),
@@ -735,6 +784,107 @@ export class AgentToolsService {
               'The pair_id, e.g. "math-2017-controle-informatique:ex_4:q_1.c". ' +
                 'Pair ids returned by search_questions / find_similar_questions / ' +
                 'list_exam_questions are the canonical handle.',
+            ),
+        }),
+      },
+    );
+  }
+
+  // ---- show_question_assets --------------------------------------------
+
+  /**
+   * Surface the four v6 image relpaths for a known pair (énoncé +
+   * corrigé exercise figures, plus the full-exam énoncé/corrigé
+   * pages) as fully-qualified asset URLs. The agent decides *when*;
+   * the frontend `<QuestionAssetsBlock>` decides *how* (tabs, recall
+   * gate on the corrigé side, click-to-zoom). We deliberately keep
+   * the response minimal — just enough metadata for the panel
+   * header (matière / year / session / exercise) and the four URLs
+   * — so the LLM doesn't accidentally repeat the question text in
+   * prose alongside the panel.
+   *
+   * The mandatory `critic_label='correct' AND under_gate=false`
+   * filter is enforced inside `QdrantClientProvider.getByPairId`,
+   * so a quarantined pair is invisible here even if the agent
+   * fabricates its id.
+   */
+  private showQuestionAssetsTool(): StructuredToolInterface {
+    return tool(
+      async ({ pair_id, side }) => {
+        try {
+          const point = await this.qdrant.getByPairId(pair_id);
+          if (!point) {
+            return `No question pair found for pair_id="${pair_id}".`;
+          }
+          const payload = (point.payload ?? {}) as Record<string, unknown>;
+          const cdnBase = this.imageCdnBase;
+          const images = {
+            exercise_enonce: buildImageUrl(
+              payload.exercise_enonce_image_relpath,
+              cdnBase,
+            ),
+            exercise_corrige: buildImageUrl(
+              payload.exercise_corrige_image_relpath,
+              cdnBase,
+            ),
+            exam_full_enonce: buildImageUrl(
+              payload.exam_full_enonce_relpath,
+              cdnBase,
+            ),
+            exam_full_corrige: buildImageUrl(
+              payload.exam_full_corrige_relpath,
+              cdnBase,
+            ),
+          };
+          const hasAnyFigure =
+            payload.has_figure_enonce === true ||
+            payload.has_figure_corrige === true;
+          return JSON.stringify({
+            pair_id: payload.pair_id_logical ?? payload.pair_id ?? pair_id,
+            exam: payload.exam ?? null,
+            exam_id: payload.exam_id ?? null,
+            year: payload.year ?? payload.exam_year ?? null,
+            session: payload.session ?? null,
+            matiere: payload.matiere ?? null,
+            track: payload.track ?? payload.filiere ?? null,
+            exercise_number: payload.exercise_number ?? null,
+            question_number: payload.question_number ?? null,
+            chapter: payload.chapter ?? null,
+            has_figure_enonce: payload.has_figure_enonce ?? false,
+            has_figure_corrige: payload.has_figure_corrige ?? false,
+            n_enonce_figures: payload.n_enonce_figures ?? 0,
+            n_corrige_figures: payload.n_corrige_figures ?? 0,
+            source_pages_enonce: payload.source_pages_enonce ?? [],
+            source_pages_corrige: payload.source_pages_corrige ?? [],
+            has_any_figure: hasAnyFigure,
+            default_side: side ?? 'enonce',
+            images,
+          });
+        } catch (err) {
+          this.logger.warn(`show_question_assets failed: ${String(err)}`);
+          return `Error loading question assets: ${(err as Error).message}`;
+        }
+      },
+      {
+        name: 'show_question_assets',
+        description: SHOW_QUESTION_ASSETS_TOOL_DESCRIPTION,
+        schema: z.object({
+          pair_id: z
+            .string()
+            .describe(
+              'The pair_id (canonical handle) — e.g. ' +
+                '"math-2017-controle-sciences-ex:ex_4:q_1.a". Get it from ' +
+                'search_questions / find_similar_questions / list_exam_questions / ' +
+                'get_question_pair output.',
+            ),
+          side: z
+            .enum(['enonce', 'corrige', 'both', 'exam_full'])
+            .optional()
+            .describe(
+              'Which tab the panel opens to first. Default "enonce". ' +
+                '"corrige" pre-opens the corrigé tab (the active-recall reveal ' +
+                'gate still renders). "both" places énoncé + corrigé side-by-side. ' +
+                '"exam_full" defaults to the full-exam page view.',
             ),
         }),
       },
@@ -1596,10 +1746,10 @@ export class AgentToolsService {
 
 /**
  * Compose a public asset URL from a v6 image relpath. When
- * `cdnBase` is set (typically `IMAGE_CDN_BASE` env var pointing at
- * Cloudflare R2 / Bunny / S3), `relpath` is appended; otherwise we
- * return the raw relpath so the frontend can compose its own URL or
- * fall back to a "no asset" state without crashing.
+ * `cdnBase` is set (typically `R2_PUBLIC_BASE` env var pointing at
+ * the public Cloudflare R2 bucket), `relpath` is appended; otherwise
+ * we return the raw relpath so the frontend can compose its own URL
+ * or fall back to a "no asset" state without crashing.
  */
 function buildImageUrl(
   relpath: unknown,

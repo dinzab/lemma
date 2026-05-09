@@ -48,8 +48,24 @@ export function PastPaperChip({ part }: PastPaperChipProps) {
   const exerciseLine = formatExerciseLine(top);
   const hasQuestion =
     typeof top.question_text === "string" && top.question_text.trim().length > 0;
-  const figureUrl =
-    top.has_figure_enonce === true
+  // v6+ payloads ship per-figure entries on `figures.enonce` (with
+  // captions). When present, render the full strip so a search hit
+  // with multiple énoncé figures shows all of them, each captioned
+  // for hover/screen-reader users. When absent (older payloads), fall
+  // back to the single per-exercise stitch via `images.exercise_enonce`,
+  // gated by the `figures.enonce`/`has_figure_enonce` truth — see the
+  // payload doc on `PaperMatch`.
+  const enonceFigures = Array.isArray(top.figures?.enonce)
+    ? top.figures!.enonce.filter((f) => typeof f.url === "string" && f.url.length > 0)
+    : [];
+  const fallbackFigureUrl =
+    enonceFigures.length === 0 &&
+    (top.has_figure_enonce === true ||
+      // Some pre-figures payloads still set has_figure_enonce=true; we
+      // also accept the case where no boolean is present but the
+      // exercise stitch URL is — strictly better than rendering nothing
+      // when the chip is meant to be a passive thumbnail.
+      typeof top.images?.exercise_enonce === "string")
       ? top.images?.exercise_enonce ?? null
       : null;
   const figureAlt = formatFigureAlt(top);
@@ -93,9 +109,29 @@ export function PastPaperChip({ part }: PastPaperChipProps) {
             </p>
           )}
 
-          {figureUrl && (
+          {enonceFigures.length > 0 && (
+            <div
+              className="mt-2 flex flex-wrap gap-1.5"
+              aria-label="Figures de l'énoncé"
+            >
+              {enonceFigures.map((fig, idx) => (
+                <FigureThumb
+                  key={`${fig.label}-${idx}`}
+                  url={fig.url ?? null}
+                  alt={`${figureAlt} · ${fig.label}`}
+                  caption={fig.caption}
+                  size="sm"
+                />
+              ))}
+            </div>
+          )}
+          {enonceFigures.length === 0 && fallbackFigureUrl && (
             <div className="mt-2">
-              <FigureThumb url={figureUrl} alt={figureAlt} size="sm" />
+              <FigureThumb
+                url={fallbackFigureUrl}
+                alt={figureAlt}
+                size="sm"
+              />
             </div>
           )}
 
@@ -162,11 +198,10 @@ interface PaperMatch {
   question_text?: string;
   score?: number;
   /**
-   * v6 fields. `has_figure_enonce` gates whether we render the
-   * passive thumbnail at all — the relpath is populated for every
-   * v6 pair (it points at the rendered exercise crop) but most
-   * exercises are text-only, so we'd be advertising a figure where
-   * there isn't one.
+   * v6 boolean flags. The backend recomputes these from the figure
+   * arrays so they're never stale, but we still keep them for
+   * back-compat with older payloads that arrived through long-lived
+   * conversation state.
    */
   has_figure_enonce?: boolean | null;
   has_figure_corrige?: boolean | null;
@@ -176,6 +211,27 @@ interface PaperMatch {
     exam_full_enonce?: string | null;
     exam_full_corrige?: string | null;
   };
+  /**
+   * Per-figure entries shipped from the backend's `formatPairForLLM`
+   * (one per scanned figure on each side). `caption` is the
+   * LLM-generated French description of the figure (truncated for
+   * non-`full` callers); `url` is the public R2 URL.
+   *
+   * The chip prefers this strip over the legacy single-thumbnail
+   * fallback because (a) one-figure exercises and ten-figure
+   * exercises now look correct, and (b) the captions feed
+   * accessibility tooling.
+   */
+  figures?: {
+    enonce?: PaperFigureEntry[] | null;
+    corrige?: PaperFigureEntry[] | null;
+  };
+}
+
+interface PaperFigureEntry {
+  label: string;
+  caption: string;
+  url: string | null;
 }
 
 interface SearchQuestionsOutput {

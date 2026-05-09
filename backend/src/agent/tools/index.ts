@@ -157,14 +157,14 @@ const SHOW_QUESTION_ASSETS_TOOL_DESCRIPTION = `Use this tool when the student wa
 
 ## When to Use This Tool
 1. The student literally asks: "montre-moi l'énoncé / le corrigé / l'épreuve / la figure / le schéma", "show me the original", "open exercice 4", "ouvre la page", "je veux voir le sujet".
-2. Your prose is referencing a figure that the OCR'd text cannot describe (a graph axis, a circuit schematic, a free-body sketch, a tableau de variations rendered as an image, a 3-D body for kinematics) — surface it as proof rather than describing the figure in words.
+2. Your prose is referencing a figure that the OCR'd text cannot describe (a graph axis, a circuit schematic, a free-body sketch, a tableau de variations rendered as an image, a 3-D body for kinematics) — surface it as proof rather than describing the figure in words. **Note**: every search hit already carries \`figures.enonce[].caption\` / \`figures.corrige[].caption\` (LLM-generated French captions of each figure). Use those captions to *reason about* the figure without calling this tool; only call show_question_assets when the student needs to *see* the visual itself.
 3. The student is reviewing a corrigé and the visual layout (alignment of equations, geometric figure used in the proof) carries information the LaTeX alone cannot.
 4. The student is comparing exercise N énoncé to exercise N corrigé — pass \`side: "both"\` so both tabs are pre-loaded.
 
 ## When NOT to Use This Tool
-1. The search-result \`PastPaperChip\` already renders an inline thumbnail for hits with \`has_figure_enonce: true\`. If the student is just browsing search results, the chip thumbnail is enough — calling this tool on top is redundant.
-2. \`has_figure_enonce: false\` AND \`has_figure_corrige: false\` on the pair — there are no figures to show, the panel would render an empty state, and the student would be confused.
-3. The student's question is purely about concept / theory / vocabulary. No figure adds value.
+1. The search-result \`PastPaperChip\` already renders an inline thumbnail strip for every entry in \`figures.enonce\`. If the student is just browsing search results, the chip thumbnails are enough — calling this tool on top is redundant.
+2. The pair has \`figures.enonce.length === 0\` AND \`figures.corrige.length === 0\` AND no per-exercise stitched image — there is nothing to show, the panel would render an empty state, and the student would be confused.
+3. The student's question is purely about concept / theory / vocabulary, OR the figure caption (in \`figures.*[].caption\`) already conveys everything the figure conveys. No need to render the visual.
 4. You are about to author the worked solution — use \`emit_solution_steps\`. The card stack is the right surface for showing the steps; an image of the corrigé alongside it is overkill.
 
 ## How to Call
@@ -177,8 +177,8 @@ const SHOW_QUESTION_ASSETS_TOOL_DESCRIPTION = `Use this tool when the student wa
 
 ## Important Notes
 - Do NOT inline \`![alt](url)\` markdown images in your prose. The panel is the canonical surface. Inline images break the layout and skip the recall gate.
-- Do NOT call this on every search match. \`PastPaperChip\` already shows a thumbnail-on-hit for figured pairs.
-- The panel reads \`has_figure_enonce\` / \`has_figure_corrige\` from the pair payload and renders gracefully when one side has no figure (the tab is hidden, not greyed-out).
+- Do NOT call this on every search match. \`PastPaperChip\` already shows a thumbnail strip for figured pairs.
+- The panel reads the per-figure arrays \`figures.enonce\` / \`figures.corrige\` from the pair payload (the canonical source of truth) and renders gracefully when one side has no figure (the tab is hidden, not greyed-out).
 - Match the student's language in any framing prose around the panel. The panel labels are FR by default.
 `;
 
@@ -636,16 +636,31 @@ export class AgentToolsService {
             return JSON.stringify({ results: [] });
           }
 
+          // We need a few extra reranked passages so the post-filter
+          // (figures_required) doesn't starve the response. The cap
+          // is bounded by the recall fan-out anyway.
+          const rerankTopK =
+            args.figures_required && args.figures_required !== 'any'
+              ? Math.min(
+                  AgentToolsService.RECALL_FANOUT,
+                  Math.max(limit * 3, limit),
+                )
+              : limit;
           const reranked = await this.reranker.rerank({
             query: args.query,
             passages: candidates,
             getText: (p) => formatRerankPassage(p),
-            topK: limit,
+            topK: rerankTopK,
           });
+
+          const filtered = applyFiguresRequiredFilter(
+            reranked,
+            args.figures_required,
+          ).slice(0, limit);
 
           const cdnBase = this.imageCdnBase;
           return JSON.stringify({
-            results: reranked.map((p) => formatPairForLLM(p, { cdnBase })),
+            results: filtered.map((p) => formatPairForLLM(p, { cdnBase })),
           });
         } catch (err) {
           this.logger.warn(`search_questions failed: ${String(err)}`);
@@ -659,7 +674,11 @@ export class AgentToolsService {
           'Embeds the query, retrieves candidates from Qdrant with the ' +
           'requested metadata filters, and reranks with a cross-encoder. ' +
           'Returns past exam questions matching the query. Results always ' +
-          'have critic_label="correct" and are not under quality gate.',
+          'have critic_label="correct" and are not under quality gate. ' +
+          'Each result carries `figures.enonce[]` and `figures.corrige[]` ' +
+          'arrays of `{label, caption, url}` — the captions are ' +
+          'LLM-generated French descriptions of each figure, useful to ' +
+          'reason about visual content without calling show_question_assets.',
         schema: z.object({
           query: z
             .string()
@@ -755,7 +774,27 @@ export class AgentToolsService {
             .boolean()
             .optional()
             .describe(
-              'If true, only return questions that require a figure/diagram.',
+              'If true, only return questions whose author tagged them as ' +
+                '"requires a figure to solve". This filters on the upstream ' +
+                '`requires_figure` payload flag (whether the question is ' +
+                'unsolvable without seeing a figure), NOT on whether figures ' +
+                'happen to exist in our corpus. To filter by actual figure ' +
+                'availability, use `figures_required` instead.',
+            ),
+          figures_required: z
+            .enum(['enonce', 'corrige', 'either', 'none', 'any'])
+            .optional()
+            .describe(
+              'Filter results by per-figure ARRAY availability (the ' +
+                'canonical source of truth for figures, computed from ' +
+                '`figures.enonce` / `figures.corrige` array length). Values: ' +
+                '`enonce` requires ≥1 énoncé figure; `corrige` requires ≥1 ' +
+                'corrigé figure; `either` requires ≥1 figure on either side; ' +
+                '`none` requires zero figures on both sides (useful when the ' +
+                'student wants a text-only practice problem); `any` (default) ' +
+                'applies no figure filter. Prefer this over `requires_figure` ' +
+                'when the student asks "montre-moi un exo avec un schéma" / ' +
+                '"je veux un exercice avec une figure".',
             ),
           limit: z
             .number()
@@ -858,9 +897,18 @@ export class AgentToolsService {
               cdnBase,
             ),
           };
+          // Always read per-figure arrays as the source of truth
+          // — the legacy `has_figure_*` booleans went stale on the
+          // inverse side after the May 9 figures injection (~600
+          // pairs have populated arrays but `has_figure_*=false`).
+          const figures = formatFiguresForLLM(payload, cdnBase, {
+            full: true,
+          });
           const hasAnyFigure =
-            payload.has_figure_enonce === true ||
-            payload.has_figure_corrige === true;
+            figures.enonce.length > 0 ||
+            figures.corrige.length > 0 ||
+            images.exercise_enonce !== null ||
+            images.exercise_corrige !== null;
           return JSON.stringify({
             pair_id: payload.pair_id_logical ?? payload.pair_id ?? pair_id,
             exam: payload.exam ?? null,
@@ -872,15 +920,16 @@ export class AgentToolsService {
             exercise_number: payload.exercise_number ?? null,
             question_number: payload.question_number ?? null,
             chapter: payload.chapter ?? null,
-            has_figure_enonce: payload.has_figure_enonce ?? false,
-            has_figure_corrige: payload.has_figure_corrige ?? false,
-            n_enonce_figures: payload.n_enonce_figures ?? 0,
-            n_corrige_figures: payload.n_corrige_figures ?? 0,
+            has_figure_enonce: figures.enonce.length > 0,
+            has_figure_corrige: figures.corrige.length > 0,
+            n_enonce_figures: figures.enonce.length,
+            n_corrige_figures: figures.corrige.length,
             source_pages_enonce: payload.source_pages_enonce ?? [],
             source_pages_corrige: payload.source_pages_corrige ?? [],
             has_any_figure: hasAnyFigure,
             default_side: side ?? 'enonce',
             images,
+            figures,
           });
         } catch (err) {
           this.logger.warn(`show_question_assets failed: ${String(err)}`);
@@ -1875,6 +1924,109 @@ export function buildImageUrl(
 }
 
 /**
+ * One entry in the v6 `enonce_figures` / `corrige_figures` payload
+ * arrays. Each Pair carries 0..N figure entries per side; entries are
+ * an LLM-generated French caption + a relative path inside the public
+ * R2 bucket (the prefix is set at config time via `R2_PUBLIC_BASE`,
+ * see `buildImageUrl`).
+ *
+ * Captions are typically 100–600 chars; the corpus pipeline truncates
+ * them at 600 chars on ingest. We treat them as opaque strings here.
+ */
+export interface FigureEntry {
+  label: string;
+  description: string;
+  relpath: string;
+}
+
+/**
+ * Read the `enonce_figures` or `corrige_figures` array off a v6
+ * Qdrant payload, defensively. Tolerates missing fields, wrong types,
+ * and malformed entries — the only contract is that the returned
+ * array contains valid `FigureEntry` objects, with all three string
+ * fields populated. Anything else is silently dropped.
+ *
+ * The arrays were added on May 9 2026 in the P1 figures fix; older
+ * payloads from the cutover window may omit them, in which case this
+ * returns `[]`. Callers must therefore not infer "no figure exists"
+ * from a missing field — they must additionally check the four
+ * `*_image_relpath` keys for the legacy per-exercise stitched image.
+ */
+export function readFigureEntries(
+  payload: unknown,
+  side: 'enonce' | 'corrige',
+): FigureEntry[] {
+  const key = side === 'enonce' ? 'enonce_figures' : 'corrige_figures';
+  const raw =
+    payload &&
+    typeof payload === 'object' &&
+    (payload as Record<string, unknown>)[key];
+  if (!Array.isArray(raw)) return [];
+  const out: FigureEntry[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const obj = item as Record<string, unknown>;
+    const label = obj.label;
+    const description = obj.description;
+    const relpath = obj.relpath;
+    if (
+      typeof label !== 'string' ||
+      typeof description !== 'string' ||
+      typeof relpath !== 'string' ||
+      relpath.length === 0
+    ) {
+      continue;
+    }
+    out.push({ label, description, relpath });
+  }
+  return out;
+}
+
+/** Max chars per caption surfaced to the LLM in non-`full` tool output. */
+const FIGURE_CAPTION_PREVIEW_CHARS = 240;
+
+/** Max chars of caption text appended PER SIDE to the reranker passage. */
+const FIGURE_PASSAGE_CHARS_PER_SIDE = 600;
+
+/**
+ * One LLM-facing figure record: the caption plus a fully-qualified
+ * public URL ready to paste into a Streamdown image or React `<img>`.
+ */
+export interface FormattedFigure {
+  label: string;
+  caption: string;
+  url: string | null;
+}
+
+/**
+ * Translate the per-side figure entries into the
+ * `{label, caption, url}` shape consumed by the agent and the
+ * frontend chips. When `full=false` the captions are truncated to
+ * {@link FIGURE_CAPTION_PREVIEW_CHARS} so the search-result payload
+ * stays compact; `full=true` keeps the full caption (used by
+ * `get_question_pair` and `show_question_assets` where the agent /
+ * student is committed to one specific pair).
+ */
+export function formatFiguresForLLM(
+  payload: unknown,
+  cdnBase: string | undefined,
+  opts?: { full?: boolean },
+): { enonce: FormattedFigure[]; corrige: FormattedFigure[] } {
+  const map = (entries: FigureEntry[]): FormattedFigure[] =>
+    entries.map((f) => ({
+      label: f.label,
+      caption: opts?.full
+        ? f.description
+        : truncate(f.description, FIGURE_CAPTION_PREVIEW_CHARS),
+      url: buildImageUrl(f.relpath, cdnBase),
+    }));
+  return {
+    enonce: map(readFigureEntries(payload, 'enonce')),
+    corrige: map(readFigureEntries(payload, 'corrige')),
+  };
+}
+
+/**
  * Translate a Qdrant v6 point into the JSON the agent (and downstream
  * frontend) consumes. Surfaces both legacy v1-named fields (kept for
  * back-compat with any in-flight conversation state) AND v6-native
@@ -1885,8 +2037,17 @@ export function buildImageUrl(
  * `pair_id` is the canonical handle the agent passes around between
  * tool calls. v6 stores it as `pair_id_logical`; we also fall back to
  * the v1 `pair_id` payload key for safety during the cutover window.
+ *
+ * The `enonce_figures` / `corrige_figures` arrays are surfaced as
+ * `figures.{enonce,corrige}[].{label,caption,url}` — caption text is
+ * truncated unless `opts.full` is true. The `has_figure_*` /
+ * `n_*_figures` fields are *recomputed from the arrays* so callers
+ * never see the stale boolean values that survive in the payload
+ * for ~600 pairs (the May 9 figures injection populated arrays
+ * without rewriting the legacy booleans, so trusting them would hide
+ * those pairs from the panel / chip).
  */
-function formatPairForLLM(
+export function formatPairForLLM(
   point: QdrantPoint,
   opts?: { full?: boolean; cdnBase?: string },
 ): Record<string, unknown> {
@@ -1896,6 +2057,9 @@ function formatPairForLLM(
   const cap = AgentToolsService['TEXT_PREVIEW_CHARS'] as number;
   const cdnBase = opts?.cdnBase;
   const pairId = payload.pair_id_logical ?? payload.pair_id ?? null;
+  const figures = formatFiguresForLLM(payload, cdnBase, {
+    full: opts?.full,
+  });
   return {
     pair_id: pairId,
     matiere: payload.matiere ?? null,
@@ -1913,10 +2077,12 @@ function formatPairForLLM(
     answer_format: payload.answer_format ?? null,
     requires_figure: payload.requires_figure ?? null,
     has_answer: payload.has_answer ?? null,
-    has_figure_enonce: payload.has_figure_enonce ?? null,
-    has_figure_corrige: payload.has_figure_corrige ?? null,
-    n_enonce_figures: payload.n_enonce_figures ?? null,
-    n_corrige_figures: payload.n_corrige_figures ?? null,
+    // Recomputed from the arrays — never read the stale payload
+    // booleans here; see component-level comment.
+    has_figure_enonce: figures.enonce.length > 0,
+    has_figure_corrige: figures.corrige.length > 0,
+    n_enonce_figures: figures.enonce.length,
+    n_corrige_figures: figures.corrige.length,
     source_pages_enonce: payload.source_pages_enonce ?? [],
     source_pages_corrige: payload.source_pages_corrige ?? [],
     topics: payload.topics ?? [],
@@ -1941,14 +2107,96 @@ function formatPairForLLM(
         cdnBase,
       ),
     },
+    figures,
     score: typeof point.score === 'number' ? point.score : undefined,
   };
 }
 
-function formatRerankPassage(point: QdrantPoint): string {
+/**
+ * Build the text passage shown to the cross-encoder reranker for a
+ * single Qdrant point. Includes the question, the answer (so the
+ * reranker can score against either one), and — when present — the
+ * figure captions joined together. The caption block is what lets a
+ * query like `"circuit RC charge condensateur"` rerank a pair higher
+ * even when the énoncé text doesn't mention either word but the
+ * figure caption does.
+ *
+ * Per-side caption text is capped at
+ * {@link FIGURE_PASSAGE_CHARS_PER_SIDE} so a single figure-heavy pair
+ * can't dominate the passage and overpower the question/answer
+ * signal.
+ */
+export function formatRerankPassage(point: QdrantPoint): string {
   const q = readStringPayload(point, 'question_text') ?? '';
   const a = readStringPayload(point, 'answer_text') ?? '';
-  return `Question: ${q}\nAnswer: ${a}`;
+  const enonceCaptions = joinCaptions(
+    readFigureEntries(point.payload, 'enonce'),
+    FIGURE_PASSAGE_CHARS_PER_SIDE,
+  );
+  const corrigeCaptions = joinCaptions(
+    readFigureEntries(point.payload, 'corrige'),
+    FIGURE_PASSAGE_CHARS_PER_SIDE,
+  );
+  const lines = [`Question: ${q}`, `Answer: ${a}`];
+  if (enonceCaptions) lines.push(`Figures énoncé: ${enonceCaptions}`);
+  if (corrigeCaptions) lines.push(`Figures corrigé: ${corrigeCaptions}`);
+  return lines.join('\n');
+}
+
+/**
+ * Side-aware figure-availability post-filter for `search_questions`.
+ *
+ * Applied AFTER rerank because Qdrant filters can't reliably express
+ * "this array payload field is non-empty" on our schema (the `is_empty`
+ * operator isn't part of `QdrantCondition`, and the legacy
+ * `has_figure_*` booleans are stale on ~600 pairs after the May 9
+ * figures injection — a Qdrant-side filter on those would silently
+ * hide pairs that actually have figures). Post-filtering on the
+ * authoritative arrays guarantees the agent's `figures_required`
+ * promise is kept exactly.
+ */
+function applyFiguresRequiredFilter(
+  points: QdrantPoint[],
+  required: 'enonce' | 'corrige' | 'either' | 'none' | 'any' | undefined,
+): QdrantPoint[] {
+  if (!required || required === 'any') return points;
+  return points.filter((p) => {
+    const enonceLen = readFigureEntries(p.payload, 'enonce').length;
+    const corrigeLen = readFigureEntries(p.payload, 'corrige').length;
+    switch (required) {
+      case 'enonce':
+        return enonceLen > 0;
+      case 'corrige':
+        return corrigeLen > 0;
+      case 'either':
+        return enonceLen > 0 || corrigeLen > 0;
+      case 'none':
+        return enonceLen === 0 && corrigeLen === 0;
+      default:
+        return true;
+    }
+  });
+}
+
+function joinCaptions(entries: FigureEntry[], maxChars: number): string {
+  if (entries.length === 0) return '';
+  const parts: string[] = [];
+  let used = 0;
+  for (const e of entries) {
+    const desc = e.description.trim();
+    if (!desc) continue;
+    const piece = `[${e.label}] ${desc}`;
+    const remaining = maxChars - used;
+    if (remaining <= 0) break;
+    if (piece.length <= remaining) {
+      parts.push(piece);
+      used += piece.length + 2; // +2 for the joining `; `
+    } else {
+      parts.push(`${piece.slice(0, Math.max(0, remaining - 1))}…`);
+      break;
+    }
+  }
+  return parts.join('; ');
 }
 
 function readStringPayload(p: QdrantPoint, key: string): string | undefined {

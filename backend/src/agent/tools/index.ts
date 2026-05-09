@@ -340,9 +340,13 @@ export class AgentToolsService {
    * Public CDN base URL for v6 image relpaths. Set as `R2_PUBLIC_BASE`
    * (the v6 ingest stores relpaths against a Cloudflare R2 public
    * bucket; the convention is to namespace the bucket under
-   * `…r2.dev/ocr_omni`). When unset, image URL fields fall back to
-   * raw relpath strings so the frontend can either compose its own
-   * URL or render a "no asset" placeholder without crashing.
+   * `…r2.dev/ocr_omni`). Either the canonical form
+   * `…r2.dev/ocr_omni` or the bare bucket origin `…r2.dev` is
+   * accepted — `buildImageUrl` ensures the final URL contains exactly
+   * one `ocr_omni/` segment regardless of how the env is shaped. When
+   * unset, image URL fields fall back to raw relpath strings so the
+   * frontend can either compose its own URL or render a "no asset"
+   * placeholder without crashing.
    */
   private get imageCdnBase(): string | undefined {
     return this.config.get<string>('R2_PUBLIC_BASE');
@@ -1804,19 +1808,55 @@ export class AgentToolsService {
 // ---- formatting helpers (module-private) -------------------------------
 
 /**
+ * v6 R2 layout: every figure asset is namespaced under an `ocr_omni/`
+ * directory inside the public bucket. The Qdrant payloads store
+ * `*_relpath` strings WITHOUT that prefix (the convention is to hold
+ * the prefix at config time), so the URL builder is responsible for
+ * inserting it.
+ */
+const R2_BUCKET_PREFIX = 'ocr_omni';
+
+/**
  * Compose a public asset URL from a v6 image relpath. When
  * `cdnBase` is set (typically `R2_PUBLIC_BASE` env var pointing at
  * the public Cloudflare R2 bucket), `relpath` is appended; otherwise
  * we return the raw relpath so the frontend can compose its own URL
  * or fall back to a "no asset" state without crashing.
+ *
+ * The function is idempotent on the `ocr_omni/` segment so all three
+ * configuration shapes resolve to the same URL — the canonical
+ * `…r2.dev/ocr_omni`, the bare bucket origin `…r2.dev`, and the (rare)
+ * relpath that already includes the prefix:
+ *
+ *   buildImageUrl('a/b.png', 'https://x.r2.dev/ocr_omni')
+ *     → 'https://x.r2.dev/ocr_omni/a/b.png'
+ *   buildImageUrl('a/b.png', 'https://x.r2.dev')
+ *     → 'https://x.r2.dev/ocr_omni/a/b.png'   ← was 404 before this fix
+ *   buildImageUrl('ocr_omni/a/b.png', 'https://x.r2.dev')
+ *     → 'https://x.r2.dev/ocr_omni/a/b.png'
+ *
+ * Without this normalisation a deployment that set `R2_PUBLIC_BASE`
+ * to the bare bucket origin (a subtle config drift — RAILWAY.md
+ * documents the canonical form but the env can drift) would ship
+ * 404-ing image URLs to the frontend, which then renders every
+ * figure as "figure indisponible".
  */
-function buildImageUrl(
+export function buildImageUrl(
   relpath: unknown,
   cdnBase: string | undefined,
 ): string | null {
   if (typeof relpath !== 'string' || relpath.length === 0) return null;
-  if (!cdnBase) return relpath;
-  return `${cdnBase.replace(/\/+$/, '')}/${relpath.replace(/^\/+/, '')}`;
+  const trimmedRel = relpath.replace(/^\/+/, '');
+  if (!cdnBase) return trimmedRel;
+  const trimmedBase = cdnBase.replace(/\/+$/, '');
+  const baseHasPrefix =
+    trimmedBase.endsWith(`/${R2_BUCKET_PREFIX}`) ||
+    trimmedBase === R2_BUCKET_PREFIX;
+  const relHasPrefix = trimmedRel.startsWith(`${R2_BUCKET_PREFIX}/`);
+  if (baseHasPrefix || relHasPrefix) {
+    return `${trimmedBase}/${trimmedRel}`;
+  }
+  return `${trimmedBase}/${R2_BUCKET_PREFIX}/${trimmedRel}`;
 }
 
 /**

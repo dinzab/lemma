@@ -32,6 +32,7 @@ const TOOL_LABELS: Record<string, string> = {
   emit_solution_steps: "Laying out the worked solution",
   list_sections: "Listing Bac sections",
   list_exam_questions: "Listing the questions in this exam",
+  show_question_assets: "Opening the original page",
 };
 
 /**

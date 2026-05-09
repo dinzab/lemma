@@ -5,6 +5,7 @@ import { ChevronDown, ScrollText } from "lucide-react";
 import type { DynamicToolUIPart, ToolUIPart } from "ai";
 
 import { cn } from "@/lib/utils";
+import { FigureThumb } from "@/components/chat/FigureThumb";
 
 export type LemmaSearchQuestionsToolPart = DynamicToolUIPart | ToolUIPart;
 
@@ -47,6 +48,11 @@ export function PastPaperChip({ part }: PastPaperChipProps) {
   const exerciseLine = formatExerciseLine(top);
   const hasQuestion =
     typeof top.question_text === "string" && top.question_text.trim().length > 0;
+  const figureUrl =
+    top.has_figure_enonce === true
+      ? top.images?.exercise_enonce ?? null
+      : null;
+  const figureAlt = formatFigureAlt(top);
 
   return (
     <aside
@@ -85,6 +91,12 @@ export function PastPaperChip({ part }: PastPaperChipProps) {
               {top.chapter}
               {exerciseLine ? ` · ${exerciseLine}` : ""}
             </p>
+          )}
+
+          {figureUrl && (
+            <div className="mt-2">
+              <FigureThumb url={figureUrl} alt={figureAlt} size="sm" />
+            </div>
           )}
 
           {hasQuestion && (
@@ -149,6 +161,21 @@ interface PaperMatch {
   question_number?: string | number;
   question_text?: string;
   score?: number;
+  /**
+   * v6 fields. `has_figure_enonce` gates whether we render the
+   * passive thumbnail at all — the relpath is populated for every
+   * v6 pair (it points at the rendered exercise crop) but most
+   * exercises are text-only, so we'd be advertising a figure where
+   * there isn't one.
+   */
+  has_figure_enonce?: boolean | null;
+  has_figure_corrige?: boolean | null;
+  images?: {
+    exercise_enonce?: string | null;
+    exercise_corrige?: string | null;
+    exam_full_enonce?: string | null;
+    exam_full_corrige?: string | null;
+  };
 }
 
 interface SearchQuestionsOutput {
@@ -208,4 +235,16 @@ function formatExerciseLine(top: PaperMatch): string {
     parts.push(`Q.${top.question_number}`);
   }
   return parts.join(" · ");
+}
+
+function formatFigureAlt(top: PaperMatch): string {
+  const fragments: string[] = ["Énoncé"];
+  if (typeof top.year === "number") fragments.push(`BAC ${top.year}`);
+  if (typeof top.session === "string" && top.session.trim()) {
+    fragments.push(top.session);
+  }
+  if (top.exercise_number !== undefined && top.exercise_number !== null) {
+    fragments.push(`Exercice ${top.exercise_number}`);
+  }
+  return fragments.join(" · ");
 }

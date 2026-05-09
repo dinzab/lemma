@@ -14,6 +14,12 @@ import { EmbeddingsClient } from './embeddings.client';
 import { RerankerClient } from './reranker.client';
 import { AnalogiesClient } from './analogies.client';
 import { PatternsClient } from './patterns.client';
+import {
+  VisionService,
+  type FigureFocus,
+  type VisionAnalysisResult,
+} from '../vision.service';
+import { FigurePerceptionCacheService } from '../figure-perception-cache.service';
 
 /**
  * Description for the write_todos planning tool. Mirrors the public
@@ -182,6 +188,71 @@ const SHOW_QUESTION_ASSETS_TOOL_DESCRIPTION = `Use this tool when the student wa
 - Match the student's language in any framing prose around the panel. The panel labels are FR by default.
 `;
 
+const INSPECT_FIGURE_TOOL_DESCRIPTION = `Use this tool when **you** (the agent) need to actually *see* a figure — not when the student wants to see it (that's \`show_question_assets\`). The result is a structured perception payload (free-form analysis, axes, values, topology, OCR'd text, count, confidence) you can reason over privately before answering. Captions ship in every search hit and cover most cases; \`inspect_figure\` is the **escape hatch** for when the caption doesn't.
+
+## When to Use This Tool
+1. The student asks you to *read* something off a figure that the caption doesn't state explicitly — "que vaut u(t=2) ?", "combien de forces sont dessinées ?", "le condensateur est en série ou en parallèle ?", "quelle est l'asymptote sur le graphe ?".
+2. Your answer hinges on a specific visual detail (axis range, branch topology, vector direction, the *value* of an embedded number, an OCR'd legend label) that the caption does not state explicitly.
+3. Your hypothesis from the énoncé text disagrees with what the caption says — call \`inspect_figure\` to break the tie before answering. Do NOT silently pick one side.
+4. You are about to commit to a numeric answer that depends on reading a value from a graph. Verify before you assert.
+
+## When NOT to Use This Tool
+1. The caption (\`figures.{enonce,corrige}[].caption\`) already answers the question. Reading the caption is free; calling this tool is not.
+2. The turn is purely conceptual / vocabulary / theory — no figure-grounded claim. The vision pass adds latency for no benefit.
+3. You already inspected this figure in this turn (the same figure with the same focus + question is cached, so a re-call is fast — but you should not need to). Re-call only with a *different* focus if the first pass missed.
+4. You don't have a specific question about the figure. \`inspect_figure\` works much better when grounded in a concrete question; calling it with no \`question\` is allowed but produces a generic description.
+5. The student wants to *see* the figure themselves — call \`show_question_assets\` instead, which renders the dedicated panel.
+
+## How to Call
+- \`pair_id\` — the canonical pair handle from \`search_questions\` / \`get_question_pair\` etc.
+- \`side\` — \`"enonce"\` or \`"corrige"\`. The corrigé side is fair game when the student is past the active-recall gate (e.g. reviewing a worked solution).
+- \`figure\` — either a label like \`"figure 1"\` (the labels match \`figures.*[].label\` in search-result payloads) or \`"all"\` to inspect every figure on the side. Defaults to \`"all"\` — pick a single label whenever you can to save tokens.
+- \`focus\` (optional) — steers the structured fields the model populates:
+  * \`"general"\` (default) — short overall description; populates \`axes\` if the figure is a graph.
+  * \`"axes"\` — read axes labels + ranges precisely.
+  * \`"values"\` — read notable (x, y) readings off the curve.
+  * \`"topology"\` — classify the circuit / mechanical setup / ER cardinality.
+  * \`"text"\` — OCR the in-figure annotations.
+  * \`"count"\` — count the requested elements (vectors, capacitors, peaks…).
+- \`question\` (optional, **strongly recommended**) — the natural-language question you want answered. Grounding the call in your concrete question dramatically improves the perception. Examples: "Le circuit est-il série ou parallèle ?", "Quelle est la valeur de u(t) à t=2s ?", "Combien de vecteurs forces sont dessinés ?".
+
+## Output
+The tool returns one entry per figure inspected:
+
+\`\`\`
+{
+  "figures": [
+    {
+      "label": "figure 1",
+      "url": "https://pub-...r2.dev/...",
+      "caption_short": "<first 240 chars of the existing French caption>",
+      "perception": {
+        "analysis": "<1–4 phrases en français>",
+        "axes": null | { x, y, x_range, y_range },
+        "values": null | [{ x, y }],
+        "topology": null | "RC_series" | …,
+        "text_ocr": null | ["…"],
+        "count": null | <int>,
+        "confidence": 0..1
+      },
+      "cache_hit": <bool>
+    }
+  ],
+  "model": "<model id>",
+  "inspected_count": <int>,
+  "cached_count": <int>
+}
+\`\`\`
+
+Read \`perception.confidence\` before quoting a numeric value verbatim. If \`confidence < 0.5\` and the answer matters, hedge ("d'après la lecture du graphe, environ …") rather than asserting.
+
+## Important Notes
+- The vision pass adds ~1–3 s of latency. Worth it for a verified answer; not worth it for a conceptual turn.
+- Results are cached by \`(relpath, focus, question)\` — repeating the same call is essentially free.
+- Per-thread soft budget: ~5 inspections / minute. Beyond that, you'll get a \`limit_reached\` envelope back; either rely on captions or wait for the budget window to roll.
+- Do NOT mention the existence of this tool to the student; just answer the question. The frontend may surface a "🔍 figure inspected" pill on its own.
+`;
+
 /**
  * Canonical Tunisian Bac **section** (a.k.a. "track") values as they
  * appear in the v6 Qdrant `track` / `filiere` payload field. Exposed
@@ -326,6 +397,20 @@ export class AgentToolsService {
    *  largest exam in the corpus has ~30 sub-questions, so 200 is safe. */
   private static readonly LIST_EXAM_QUESTIONS_SCROLL_CAP = 200;
 
+  /**
+   * Soft per-thread budget for `inspect_figure`. We track a sliding
+   * window of timestamps per thread; when more than {@link INSPECT_FIGURE_BUDGET_MAX}
+   * calls land inside {@link INSPECT_FIGURE_BUDGET_WINDOW_MS} we return
+   * a `limit_reached` envelope instead of calling the vision API.
+   *
+   * The map is bounded by `INSPECT_FIGURE_BUDGET_MAX_THREADS`; cold threads
+   * are evicted lazily on miss to keep the footprint small.
+   */
+  private static readonly INSPECT_FIGURE_BUDGET_MAX = 5;
+  private static readonly INSPECT_FIGURE_BUDGET_WINDOW_MS = 60_000;
+  private static readonly INSPECT_FIGURE_BUDGET_MAX_THREADS = 1024;
+  private readonly inspectFigureCalls = new Map<string, number[]>();
+
   constructor(
     private readonly qdrant: QdrantClientProvider,
     private readonly neo4j: Neo4jClientProvider,
@@ -333,6 +418,8 @@ export class AgentToolsService {
     private readonly reranker: RerankerClient,
     private readonly analogies: AnalogiesClient,
     private readonly patterns: PatternsClient,
+    private readonly vision: VisionService,
+    private readonly perceptionCache: FigurePerceptionCacheService,
     private readonly config: ConfigService,
   ) {}
 
@@ -357,6 +444,7 @@ export class AgentToolsService {
       this.searchQuestionsTool(),
       this.getQuestionPairTool(),
       this.showQuestionAssetsTool(),
+      this.inspectFigureTool(),
       this.findSimilarQuestionsTool(),
       this.countQuestionsTool(),
       this.listChaptersTool(),
@@ -960,6 +1048,326 @@ export class AgentToolsService {
         }),
       },
     );
+  }
+
+  // ---- inspect_figure --------------------------------------------------
+
+  /**
+   * Vision escape hatch — let the agent *see* a figure when the
+   * existing French caption isn't specific enough.
+   *
+   * Why this exists:
+   *   Every search hit ships an LLM-generated French caption per
+   *   figure (~240 chars in search results, full text in
+   *   `show_question_assets`). Captions are great for breadth ("this
+   *   exercise is about a circuit RC") but lossy for specifics ("the
+   *   value of u(t) at t=2 s is ≈3.7 V"). When the answer hinges on
+   *   a specific visual reading, the agent calls `inspect_figure`
+   *   and gets a structured perception payload back from a vision
+   *   LLM (NIM-hosted Llama 3.2 90B Vision by default).
+   *
+   * Cost discipline:
+   *   - Postgres-backed cache keyed on `(relpath, focus, normalised_question)`
+   *     so repeated calls cost ~0. The popular figures get inspected
+   *     once corpus-wide and the entire org benefits.
+   *   - Soft per-thread sliding-window budget
+   *     ({@link AgentToolsService.INSPECT_FIGURE_BUDGET_MAX} calls per
+   *     {@link AgentToolsService.INSPECT_FIGURE_BUDGET_WINDOW_MS} ms) — the
+   *     system prompt tells the agent to call sparingly; this is the
+   *     belt to the prompt's suspenders.
+   *
+   * Failure mode:
+   *   If the vision call fails (HTTP error, timeout, missing API key)
+   *   the response still has the right shape; the per-figure
+   *   `perception` carries `confidence=0` and an explanatory
+   *   `analysis` string. The agent can fall back to the caption
+   *   without crashing the turn.
+   */
+  private inspectFigureTool(): StructuredToolInterface {
+    return tool(
+      async (
+        { pair_id, side, figure, focus, question },
+        runConfig?: { configurable?: { thread_id?: string } },
+      ) => {
+        const requestedFocus: FigureFocus = focus ?? 'general';
+        const figureSelector = (figure ?? 'all').trim();
+
+        try {
+          const point = await this.qdrant.getByPairId(pair_id);
+          if (!point) {
+            return JSON.stringify({
+              error: `No question pair found for pair_id="${pair_id}".`,
+              figures: [],
+              inspected_count: 0,
+              cached_count: 0,
+            });
+          }
+
+          const cdnBase = this.imageCdnBase;
+          // Reuse `formatFiguresForLLM` to get the canonical
+          // (label, caption, url) shape — keeps caption truncation
+          // aligned with what the agent sees in search results.
+          const allFigures = formatFiguresForLLM(point.payload, cdnBase, {
+            full: false,
+          });
+          const sideFigures = allFigures[side];
+          if (sideFigures.length === 0) {
+            return JSON.stringify({
+              error: `No figures on side="${side}" for pair_id="${pair_id}".`,
+              figures: [],
+              inspected_count: 0,
+              cached_count: 0,
+            });
+          }
+
+          const targets = filterFiguresBySelector(sideFigures, figureSelector);
+          if (targets.length === 0) {
+            return JSON.stringify({
+              error:
+                `figure="${figureSelector}" not found on side="${side}". ` +
+                `Available labels: ${sideFigures
+                  .map((f) => f.label)
+                  .join(', ')}.`,
+              figures: [],
+              inspected_count: 0,
+              cached_count: 0,
+            });
+          }
+
+          const threadId = runConfig?.configurable?.thread_id ?? 'unknown';
+          const remaining = this.checkInspectFigureBudget(threadId);
+          if (remaining <= 0) {
+            return JSON.stringify({
+              error: 'limit_reached',
+              note:
+                'Soft per-thread inspect_figure budget exhausted ' +
+                `(max ${AgentToolsService.INSPECT_FIGURE_BUDGET_MAX} per ` +
+                `${AgentToolsService.INSPECT_FIGURE_BUDGET_WINDOW_MS / 1000}s). ` +
+                'Fall back to figures.*[].caption for this turn or wait for the window to roll.',
+              figures: [],
+              inspected_count: 0,
+              cached_count: 0,
+            });
+          }
+
+          // We honour `remaining` calls, even if the agent asked for
+          // more figures. The remainder are returned with
+          // `perception=null` + `truncated=true` so the agent knows
+          // it didn't get a full pass.
+          const toInspect = targets.slice(0, remaining);
+          const skipped = targets.slice(remaining);
+
+          const inspected: InspectFigureEntry[] = [];
+          let cachedCount = 0;
+          let model = '';
+
+          for (const fig of toInspect) {
+            const relpath = readRelpathForLabel(point.payload, side, fig.label);
+            const result = await this.runInspectFigure({
+              threadId,
+              relpath,
+              url: fig.url,
+              caption: fig.caption,
+              focus: requestedFocus,
+              question,
+            });
+            if (result.cacheHit) cachedCount += 1;
+            if (result.model && !model) model = result.model;
+            inspected.push({
+              label: fig.label,
+              url: fig.url,
+              caption_short: fig.caption,
+              perception: result.analysis.analysis ? result.analysis : null,
+              cache_hit: result.cacheHit,
+            });
+          }
+          for (const fig of skipped) {
+            inspected.push({
+              label: fig.label,
+              url: fig.url,
+              caption_short: fig.caption,
+              perception: null,
+              cache_hit: false,
+              truncated: true,
+            });
+          }
+
+          return JSON.stringify({
+            pair_id: pair_id,
+            side,
+            focus: requestedFocus,
+            question: question ?? null,
+            figures: inspected,
+            model: model || null,
+            inspected_count: toInspect.length,
+            cached_count: cachedCount,
+            truncated: skipped.length > 0,
+          });
+        } catch (err) {
+          this.logger.warn(`inspect_figure failed: ${String(err)}`);
+          return JSON.stringify({
+            error: `inspect_figure failed: ${(err as Error).message}`,
+            figures: [],
+            inspected_count: 0,
+            cached_count: 0,
+          });
+        }
+      },
+      {
+        name: 'inspect_figure',
+        description: INSPECT_FIGURE_TOOL_DESCRIPTION,
+        schema: z.object({
+          pair_id: z
+            .string()
+            .describe(
+              'Canonical pair handle from search_questions / get_question_pair / etc., ' +
+                'e.g. "math-2017-controle-sciences-ex:ex_4:q_1.a".',
+            ),
+          side: z
+            .enum(['enonce', 'corrige'])
+            .describe(
+              'Which side of the pair to inspect. "corrige" is fair game when ' +
+                'the student is past the active-recall gate.',
+            ),
+          figure: z
+            .string()
+            .optional()
+            .describe(
+              'Either a figure label like "figure 1" (matching ' +
+                'figures.*[].label in search-result payloads) or "all". ' +
+                'Defaults to "all". Prefer specific labels to save tokens.',
+            ),
+          focus: z
+            .enum(['general', 'axes', 'values', 'topology', 'text', 'count'])
+            .optional()
+            .describe(
+              'Steers the structured fields the model populates. Default "general".',
+            ),
+          question: z
+            .string()
+            .optional()
+            .describe(
+              'Natural-language question to ground the perception in. ' +
+                'Strongly recommended — un-grounded calls produce generic descriptions.',
+            ),
+        }),
+      },
+    );
+  }
+
+  /**
+   * Check + record a call against the per-thread sliding-window budget.
+   * Returns the number of inspections still permitted in this window
+   * (0 ⇒ over budget). The current call is *not* yet recorded; it
+   * gets recorded inside {@link runInspectFigure} only on cache miss
+   * (cache hits are free and don't count).
+   */
+  private checkInspectFigureBudget(threadId: string): number {
+    const now = Date.now();
+    const windowStart = now - AgentToolsService.INSPECT_FIGURE_BUDGET_WINDOW_MS;
+    let stamps = this.inspectFigureCalls.get(threadId);
+    if (stamps) {
+      // Drop any timestamps that have rolled out of the window.
+      stamps = stamps.filter((t) => t >= windowStart);
+      if (stamps.length === 0) {
+        this.inspectFigureCalls.delete(threadId);
+      } else {
+        this.inspectFigureCalls.set(threadId, stamps);
+      }
+    }
+    const used = stamps?.length ?? 0;
+    return Math.max(0, AgentToolsService.INSPECT_FIGURE_BUDGET_MAX - used);
+  }
+
+  private recordInspectFigureCall(threadId: string): void {
+    const now = Date.now();
+    const arr = this.inspectFigureCalls.get(threadId) ?? [];
+    arr.push(now);
+    this.inspectFigureCalls.set(threadId, arr);
+    // Lazy LRU eviction so the map can't grow unbounded across the
+    // process lifetime when many threads call once each.
+    if (
+      this.inspectFigureCalls.size >
+      AgentToolsService.INSPECT_FIGURE_BUDGET_MAX_THREADS
+    ) {
+      const oldest = this.inspectFigureCalls.keys().next().value;
+      if (oldest !== undefined && oldest !== threadId) {
+        this.inspectFigureCalls.delete(oldest);
+      }
+    }
+  }
+
+  /**
+   * Cache-aware single-figure inspection. Looks up the cache first;
+   * falls through to {@link VisionService.analyzeFigure} on miss and
+   * persists the result. Returns the analysis along with whether the
+   * call hit the cache (so the tool envelope can report it back to
+   * the agent).
+   */
+  private async runInspectFigure(opts: {
+    threadId: string;
+    relpath: string | null;
+    url: string | null;
+    caption: string;
+    focus: FigureFocus;
+    question?: string;
+  }): Promise<{
+    analysis: VisionAnalysisResult['analysis'];
+    model: string;
+    cacheHit: boolean;
+  }> {
+    if (!opts.relpath || !opts.url) {
+      return {
+        analysis: {
+          analysis:
+            'Vision non disponible (aucune URL pour cette figure dans la payload).',
+          axes: null,
+          values: null,
+          topology: null,
+          text_ocr: null,
+          count: null,
+          confidence: 0,
+        },
+        model: '',
+        cacheHit: false,
+      };
+    }
+
+    const cacheKey = {
+      relpath: opts.relpath,
+      focus: opts.focus,
+      question: opts.question,
+    };
+    const cached = await this.perceptionCache.get(cacheKey);
+    if (cached) {
+      return {
+        analysis: cached.analysis,
+        model: cached.model,
+        cacheHit: true,
+      };
+    }
+
+    // Cache miss → spend a slot from the per-thread budget, then call
+    // the vision API. We record before the call so a slow/abusive run
+    // can't sneak past the budget by being concurrent.
+    this.recordInspectFigureCall(opts.threadId);
+
+    const result = await this.vision.analyzeFigure({
+      imageUrl: opts.url,
+      caption: opts.caption,
+      focus: opts.focus,
+      question: opts.question,
+    });
+    if (result.structured && result.analysis.confidence !== 0) {
+      // Only memoise non-stub responses so a transient failure
+      // doesn't poison the cache.
+      await this.perceptionCache.put(cacheKey, result.analysis, result.model);
+    }
+    return {
+      analysis: result.analysis,
+      model: result.model,
+      cacheHit: false,
+    };
   }
 
   // ---- find_similar_questions ------------------------------------------
@@ -2197,6 +2605,66 @@ function joinCaptions(entries: FigureEntry[], maxChars: number): string {
     }
   }
   return parts.join('; ');
+}
+
+/**
+ * One entry in the `inspect_figure` tool response. Mirrors the
+ * frontend-visible perception envelope so the agent can pattern-match
+ * fields directly off the tool output. `truncated=true` flags figures
+ * the per-thread budget pushed into "next window" without inspecting.
+ */
+interface InspectFigureEntry {
+  label: string;
+  url: string | null;
+  caption_short: string;
+  perception: VisionAnalysisResult['analysis'] | null;
+  cache_hit: boolean;
+  truncated?: boolean;
+}
+
+/**
+ * Resolve a `figure` selector to the formatted figures it targets.
+ * Accepts:
+ *   - `"all"` / empty / unknown → return all figures on the side
+ *   - `"figure 1"` / `"figure_1"` / `"f1"` → label match (case-insensitive,
+ *     space/underscore-insensitive)
+ *   - a positive integer → 1-based index into the side's figures
+ */
+function filterFiguresBySelector(
+  figures: FormattedFigure[],
+  selector: string,
+): FormattedFigure[] {
+  const norm = selector.toLowerCase().replace(/[\s_]/g, '');
+  if (norm === '' || norm === 'all') return figures;
+  // Numeric selector → 1-based index
+  if (/^\d+$/.test(norm)) {
+    const i = Number.parseInt(norm, 10) - 1;
+    return i >= 0 && i < figures.length ? [figures[i]] : [];
+  }
+  const match = figures.find(
+    (f) => f.label.toLowerCase().replace(/[\s_]/g, '') === norm,
+  );
+  return match ? [match] : [];
+}
+
+/**
+ * Look up the storage relpath for a figure label on a given side.
+ * The cache is keyed on relpath so we must read it from the canonical
+ * payload entries, NOT from the URL (which has the CDN base baked in
+ * and is environment-specific).
+ */
+function readRelpathForLabel(
+  payload: unknown,
+  side: 'enonce' | 'corrige',
+  label: string,
+): string | null {
+  const norm = label.toLowerCase().replace(/[\s_]/g, '');
+  for (const e of readFigureEntries(payload, side)) {
+    if (e.label.toLowerCase().replace(/[\s_]/g, '') === norm) {
+      return e.relpath;
+    }
+  }
+  return null;
 }
 
 function readStringPayload(p: QdrantPoint, key: string): string | undefined {

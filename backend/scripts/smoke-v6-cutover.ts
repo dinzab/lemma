@@ -19,6 +19,8 @@ import { EmbeddingsClient } from '../src/agent/tools/embeddings.client';
 import { RerankerClient } from '../src/agent/tools/reranker.client';
 import { AnalogiesClient } from '../src/agent/tools/analogies.client';
 import { PatternsClient } from '../src/agent/tools/patterns.client';
+import { VisionService } from '../src/agent/vision.service';
+import { FigurePerceptionCacheService } from '../src/agent/figure-perception-cache.service';
 import type { StructuredToolInterface } from '@langchain/core/tools';
 
 interface SmokeResult {
@@ -52,6 +54,9 @@ async function main() {
   void analogies;
   void patterns;
 
+  const vision = new VisionService(config);
+  const perceptionCache = new FigurePerceptionCacheService(config);
+  await perceptionCache.onModuleInit();
   const service = new AgentToolsService(
     qdrant,
     neo4j,
@@ -59,6 +64,8 @@ async function main() {
     reranker,
     analogies,
     patterns,
+    vision,
+    perceptionCache,
     config,
   );
   const tools = service.getAll();

@@ -38,11 +38,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { useMemo, useState, type ComponentType } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { cn } from "@/lib/utils";
 import { UserProvider, useUser } from "@/context/user-context";
 import { ThreadsProvider, useThreads } from "@/context/threads-context";
 import { deleteThread, renameThread, type Thread } from "@/lib/api/threads";
+import { groupThreadsByRecency } from "@/lib/group-threads";
 import { toast } from "sonner";
 
 interface SidebarContentProps {
@@ -95,33 +96,164 @@ function NavRow({ icon: Icon, label, href, active, onClick, badge }: NavRowProps
 
 interface SectionHeaderProps {
   label: string;
-  open: boolean;
-  onToggle: () => void;
+  count?: number;
   trailing?: React.ReactNode;
 }
 
-function SectionHeader({ label, open, onToggle, trailing }: SectionHeaderProps) {
+/**
+ * Section header that lives inside a `<Collapsible>`. The chevron's rotation
+ * is driven entirely by Radix's `data-state` attribute on the trigger button
+ * (via the `group` class), so the parent doesn't need to mirror open/close
+ * state — each `<Collapsible>` can stay uncontrolled.
+ */
+function SectionHeader({ label, count, trailing }: SectionHeaderProps) {
   return (
-    <div className="group flex items-center gap-1 px-3 pb-1 pt-1.5">
+    <div className="group/section flex items-center gap-1 px-3 pb-1 pt-1.5">
       <CollapsibleTrigger asChild>
         <button
           type="button"
-          onClick={onToggle}
-          className="flex flex-1 items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
+          className="group flex flex-1 items-center gap-1.5 text-[11px] font-medium uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
         >
-          <ChevronDown
-            className={cn(
-              "h-3 w-3 transition-transform",
-              open ? "rotate-0" : "-rotate-90",
-            )}
-          />
+          <ChevronDown className="h-3 w-3 transition-transform group-data-[state=closed]:-rotate-90" />
           <span className="truncate">{label}</span>
+          {typeof count === "number" && count > 0 && (
+            <span className="ml-1 rounded-full bg-sidebar-accent/60 px-1.5 py-0.5 text-[9px] font-semibold normal-case tracking-normal text-muted-foreground">
+              {count}
+            </span>
+          )}
         </button>
       </CollapsibleTrigger>
       {trailing && (
-        <div className="opacity-0 transition-opacity group-hover:opacity-100">
+        <div className="opacity-0 transition-opacity group-hover/section:opacity-100">
           {trailing}
         </div>
+      )}
+    </div>
+  );
+}
+
+interface ThreadRowProps {
+  chat: Thread;
+  isActive: boolean;
+  isMenuOpen: boolean;
+  onMenuOpenChange: (open: boolean) => void;
+  onRename: (chat: Thread) => void;
+  onDelete: (chat: Thread) => void;
+}
+
+function ThreadRow({
+  chat,
+  isActive,
+  isMenuOpen,
+  onMenuOpenChange,
+  onRename,
+  onDelete,
+}: ThreadRowProps) {
+  return (
+    <div
+      className={cn(
+        "group relative flex items-center rounded-lg text-sm transition-colors",
+        isActive
+          ? "bg-sidebar-accent text-sidebar-foreground font-semibold"
+          : "text-sidebar-foreground/85 hover:bg-sidebar-accent/70",
+      )}
+    >
+      <Link
+        href={`/c/${chat.id}`}
+        className="flex min-w-0 flex-1 items-center gap-3 px-3 py-1.5"
+      >
+        <MessageSquare
+          className={cn(
+            "h-4 w-4 shrink-0",
+            isActive ? "text-primary" : "text-muted-foreground",
+          )}
+        />
+        <span className="truncate">{chat.title}</span>
+      </Link>
+
+      <DropdownMenu open={isMenuOpen} onOpenChange={onMenuOpenChange}>
+        <DropdownMenuTrigger asChild>
+          <button
+            className="mr-1 flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-background/50 hover:text-foreground group-hover:opacity-100 data-[state=open]:opacity-100"
+            aria-label="Chat actions"
+          >
+            <MoreHorizontal className="h-3.5 w-3.5" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-40">
+          <DropdownMenuItem
+            className="cursor-pointer gap-2"
+            onClick={() => onRename(chat)}
+          >
+            <Pencil className="h-4 w-4" />
+            Rename
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            className="cursor-pointer gap-2 text-destructive focus:text-destructive"
+            onClick={() => onDelete(chat)}
+          >
+            <Trash2 className="h-4 w-4" />
+            Delete
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
+  );
+}
+
+interface InfiniteSentinelProps {
+  onIntersect: () => void;
+  enabled: boolean;
+  isLoadingMore: boolean;
+}
+
+/**
+ * Triggers `onIntersect` when scrolled into view inside the sidebar's Radix
+ * ScrollArea viewport. Resolves the viewport at runtime via `closest()` so
+ * `IntersectionObserver` correctly observes the *inner* scroller — using the
+ * default document root would fire spuriously because the ScrollArea uses
+ * `overflow: hidden` rather than the document scroller.
+ */
+function InfiniteSentinel({ onIntersect, enabled, isLoadingMore }: InfiniteSentinelProps) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const onIntersectRef = useRef(onIntersect);
+
+  // Keep the latest callback in a ref so the IntersectionObserver effect below
+  // can stay stable on `[enabled]` only — re-creating the observer on every
+  // `loadMore` identity change would tear down/setup constantly.
+  useEffect(() => {
+    onIntersectRef.current = onIntersect;
+  }, [onIntersect]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    const node = ref.current;
+    if (!node) return;
+
+    const viewport =
+      (node.closest('[data-slot="scroll-area-viewport"]') as HTMLElement | null) ?? null;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) onIntersectRef.current();
+        }
+      },
+      { root: viewport, rootMargin: "200px" },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [enabled]);
+
+  return (
+    <div ref={ref} className="flex h-8 items-center justify-center px-3 text-xs text-muted-foreground">
+      {isLoadingMore ? (
+        <span className="flex items-center gap-2">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          Loading more
+        </span>
+      ) : (
+        <span className="opacity-0">.</span>
       )}
     </div>
   );
@@ -130,11 +262,18 @@ function SectionHeader({ label, open, onToggle, trailing }: SectionHeaderProps) 
 const SidebarContent = ({ setIsSidebarOpen }: SidebarContentProps) => {
   const { setTheme, theme } = useTheme();
   const { userDetails, loading } = useUser();
-  const { threads, isLoading: isLoadingThreads, applyRename, removeThread } = useThreads();
+  const {
+    threads,
+    isLoading: isLoadingThreads,
+    isLoadingMore,
+    hasMore,
+    loadMore,
+    applyRename,
+    removeThread,
+  } = useThreads();
   const pathname = usePathname();
   const router = useRouter();
   const [activeMenuId, setActiveMenuId] = useState<string | null>(null);
-  const [chatsOpen, setChatsOpen] = useState(true);
 
   const getInitials = (name: string) => {
     if (!name) return "U";
@@ -153,6 +292,7 @@ const SidebarContent = ({ setIsSidebarOpen }: SidebarContentProps) => {
     () => (pathname?.startsWith("/c/") ? pathname.split("/")[2] : null),
     [pathname],
   );
+  const threadGroups = useMemo(() => groupThreadsByRecency(threads), [threads]);
   const currentTheme = theme === "dark" ? "dark" : "light";
   const onHome = pathname === "/new";
 
@@ -215,88 +355,49 @@ const SidebarContent = ({ setIsSidebarOpen }: SidebarContentProps) => {
       {/* Scrollable sections */}
       <ScrollArea className="mt-3 min-h-0 flex-1 px-2">
         <div className="flex flex-col gap-1">
-          {/* Your chats (real threads) */}
-          <Collapsible open={chatsOpen} onOpenChange={setChatsOpen}>
-            <SectionHeader
-              label="Your chats"
-              open={chatsOpen}
-              onToggle={() => setChatsOpen((v) => !v)}
-            />
-            <CollapsibleContent>
-              <div className="flex flex-col gap-0.5">
-                {isLoadingThreads && (
-                  <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    Loading chats
-                  </div>
-                )}
+          {isLoadingThreads && threadGroups.length === 0 && (
+            <div className="flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              Loading chats
+            </div>
+          )}
 
-                {!isLoadingThreads && threads.length === 0 && (
-                  <p className="px-3 py-2 text-xs leading-relaxed text-muted-foreground/80">
-                    Your conversations will appear here after the first message.
-                  </p>
-                )}
+          {!isLoadingThreads && threads.length === 0 && (
+            <p className="px-3 py-2 text-xs leading-relaxed text-muted-foreground/80">
+              Your conversations will appear here after the first message.
+            </p>
+          )}
 
-                {threads.map((chat) => {
-                  const isActive = activeThreadId === chat.id;
-                  return (
-                    <div
+          {threadGroups.map((group, idx) => (
+            <Collapsible key={group.id} defaultOpen={idx === 0}>
+              <SectionHeader label={group.label} count={group.threads.length} />
+              <CollapsibleContent>
+                <div className="flex flex-col gap-0.5">
+                  {group.threads.map((chat) => (
+                    <ThreadRow
                       key={chat.id}
-                      className={cn(
-                        "group relative flex items-center rounded-lg text-sm transition-colors",
-                        isActive
-                          ? "bg-sidebar-accent text-sidebar-foreground font-semibold"
-                          : "text-sidebar-foreground/85 hover:bg-sidebar-accent/70",
-                      )}
-                    >
-                      <Link
-                        href={`/c/${chat.id}`}
-                        className="flex min-w-0 flex-1 items-center gap-3 px-3 py-1.5"
-                      >
-                        <MessageSquare
-                          className={cn(
-                            "h-4 w-4 shrink-0",
-                            isActive ? "text-primary" : "text-muted-foreground",
-                          )}
-                        />
-                        <span className="truncate">{chat.title}</span>
-                      </Link>
+                      chat={chat}
+                      isActive={activeThreadId === chat.id}
+                      isMenuOpen={activeMenuId === chat.id}
+                      onMenuOpenChange={(open) =>
+                        setActiveMenuId(open ? chat.id : null)
+                      }
+                      onRename={handleRenameThread}
+                      onDelete={handleDeleteThread}
+                    />
+                  ))}
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
+          ))}
 
-                      <DropdownMenu
-                        open={activeMenuId === chat.id}
-                        onOpenChange={(open) => setActiveMenuId(open ? chat.id : null)}
-                      >
-                        <DropdownMenuTrigger asChild>
-                          <button
-                            className="mr-1 flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-background/50 hover:text-foreground group-hover:opacity-100 data-[state=open]:opacity-100"
-                            aria-label="Chat actions"
-                          >
-                            <MoreHorizontal className="h-3.5 w-3.5" />
-                          </button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end" className="w-40">
-                          <DropdownMenuItem
-                            className="cursor-pointer gap-2"
-                            onClick={() => handleRenameThread(chat)}
-                          >
-                            <Pencil className="h-4 w-4" />
-                            Rename
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            className="cursor-pointer gap-2 text-destructive focus:text-destructive"
-                            onClick={() => handleDeleteThread(chat)}
-                          >
-                            <Trash2 className="h-4 w-4" />
-                            Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                  );
-                })}
-              </div>
-            </CollapsibleContent>
-          </Collapsible>
+          {hasMore && threads.length > 0 && (
+            <InfiniteSentinel
+              enabled={hasMore}
+              isLoadingMore={isLoadingMore}
+              onIntersect={loadMore}
+            />
+          )}
         </div>
       </ScrollArea>
 

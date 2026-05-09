@@ -8,9 +8,14 @@ import { ConfigService } from '@nestjs/config';
  * Calls the OpenAI-compatible NIM endpoint at
  *   ${NIM_EMBED_URL} (default: https://integrate.api.nvidia.com/v1/embeddings)
  * with `model = ${NIM_EMBED_MODEL}` (default `nvidia/llama-nemotron-embed-1b-v2`,
- * 1024 dims) and authenticates with the same `NVIDIA_API_KEY` the chat
- * model uses. The dimension is hard-coded against the existing Qdrant
+ * 1024 dims). The dimension is hard-coded against the existing Qdrant
  * collection — changing it means re-indexing the corpus.
+ *
+ * Auth: prefers the dedicated `NIM_EMBED_API_KEY` so the embedding key
+ * can be rotated / scoped independently of the chat-model key. Falls
+ * back to `NVIDIA_API_KEY` for backward compatibility with existing
+ * deployments. This decoupling matters: swapping the chat model's
+ * provider/key must not silently break embeddings (and therefore RAG).
  *
  * `input_type=query` is required by NVIDIA's embed-1b-v2 model so the
  * server-side normalisation matches the document side that was indexed
@@ -24,11 +29,13 @@ export class EmbeddingsClient {
 
   async embed(query: string): Promise<number[]> {
     const apiKey =
+      this.config.get<string>('NIM_EMBED_API_KEY') ??
       this.config.get<string>('NVIDIA_API_KEY') ??
       this.config.get<string>('NVIDEA_API_KEY');
     if (!apiKey) {
       throw new Error(
-        'NVIDIA_API_KEY is not set — required for embeddings (NIM stack).',
+        'No NIM embed API key set — configure NIM_EMBED_API_KEY ' +
+          '(preferred) or NVIDIA_API_KEY (legacy fallback).',
       );
     }
 

@@ -10,6 +10,12 @@ import { ConfigService } from '@nestjs/config';
  * `https://ai.api.nvidia.com/v1/retrieval/nvidia/reranking`)
  * Model: ${NIM_RERANK_MODEL} (default `nvidia/rerank-qa-mistral-4b`)
  *
+ * Auth: prefers the dedicated `NIM_RERANK_API_KEY` so the reranker key
+ * can be rotated / scoped independently of the chat-model key. Falls
+ * back to `NVIDIA_API_KEY` for backward compatibility with existing
+ * deployments. Same motivation as the embedding client: swapping the
+ * chat model provider/key should not silently break reranking.
+ *
  * The reranker is non-fatal — if it fails (HTTP error, model unavailable),
  * we log a warning and return the candidates in their original Qdrant
  * order. This preserves recall at the cost of a less-precise top-K, which
@@ -38,11 +44,13 @@ export class RerankerClient {
     if (opts.passages.length === 0) return [];
 
     const apiKey =
+      this.config.get<string>('NIM_RERANK_API_KEY') ??
       this.config.get<string>('NVIDIA_API_KEY') ??
       this.config.get<string>('NVIDEA_API_KEY');
     if (!apiKey) {
       this.logger.warn(
-        'NVIDIA_API_KEY not set — skipping rerank, returning passages as-is.',
+        'No NIM rerank API key set (NIM_RERANK_API_KEY or NVIDIA_API_KEY) — ' +
+          'skipping rerank, returning passages as-is.',
       );
       return opts.topK ? opts.passages.slice(0, opts.topK) : opts.passages;
     }

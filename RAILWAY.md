@@ -55,9 +55,21 @@ build time (as Docker build args, when declared with `ARG`) and at runtime.
 | `POSTGRES_URI`                    | no       | Falls back to `MemorySaver`. Use `${{Postgres.DATABASE_URL}}` to wire the add-on. |
 | `OPENAI_API_KEY`                  | chat     | Required only when chat is exercised (lazy-thrown).                               |
 | `OPENAI_MODEL_NAME`               | no       | Defaults to `gpt-4o-mini`.                                                         |
+| `MODEL_PROVIDER`                  | no       | `nvidia` (default) / `openrouter` / `openai`. Selects the chat-LLM backend.       |
+| `NVIDIA_API_KEY`                  | chat     | Used by the chat LLM when `MODEL_PROVIDER=nvidia`. Also a *fallback* for the NIM embed/rerank keys below; prefer the dedicated keys so chat can be rotated independently. |
+| `NVIDIA_BASE_URL`                 | no       | Defaults to `https://integrate.api.nvidia.com/v1`.                                |
+| `NVIDIA_MODEL_NAME`               | no       | Chat-LLM model id (e.g. `mistralai/mistral-small-4-119b-2603`).                   |
+| `NIM_EMBED_API_KEY`               | rag      | **Preferred** auth for the NIM embedding endpoint. Falls back to `NVIDIA_API_KEY` for back-compat. Set this so swapping the chat key doesn't break RAG. |
+| `NIM_EMBED_URL`                   | no       | Defaults to `https://integrate.api.nvidia.com/v1/embeddings`.                     |
+| `NIM_EMBED_MODEL`                 | no       | Defaults to `nvidia/llama-nemotron-embed-1b-v2`.                                  |
+| `NIM_EMBED_DIM`                   | no       | Embedding dimension; must match the live Qdrant collection (1024 for `bac_qa_pairs_nim_v1`, 2048 for `bac_qa_pairs_omni_v6`). |
+| `NIM_RERANK_API_KEY`              | rag      | **Preferred** auth for the NIM reranker. Falls back to `NVIDIA_API_KEY`. Set this so swapping the chat key doesn't disable reranking. |
+| `NIM_RERANK_URL`                  | no       | Defaults to `https://ai.api.nvidia.com/v1/retrieval/nvidia/reranking`.            |
+| `NIM_RERANK_MODEL`                | no       | Defaults to `nvidia/rerank-qa-mistral-4b`.                                        |
 | `EMBEDDING_MODEL`                 | no       | Optional embedding model override.                                                 |
 | `QDRANT_URL` / `QDRANT_API_KEY`   | no       | Optional vector store. Tools no-op when absent.                                   |
-| `QDRANT_COLLECTION_NAME`          | no       | Optional collection override.                                                      |
+| `QDRANT_COLLECTION` / `QDRANT_COLLECTION_NAME` | no | Optional collection override (defaults to `bac_qa_pairs_nim_v1`).             |
+| `QDRANT_DENSE_VECTOR_NAME`        | no       | Defaults to `dense`.                                                              |
 | `NEO4J_URI` / `NEO4J_USERNAME` / `NEO4J_PASSWORD` | no | Optional knowledge graph. Tools no-op when absent.                |
 | `PORT`                            | auto     | Injected by Railway.                                                              |
 

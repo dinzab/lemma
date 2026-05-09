@@ -706,8 +706,11 @@ export class AgentToolsService {
             .string()
             .optional()
             .describe(
-              'Specific exam_id, e.g. "2017_controle_informatique_math". ' +
-                'Format: {year}_{session}_{track}_{matiere}.',
+              'Specific exam handle. Canonical form is the hyphenated, ' +
+                'matiere-prefixed `exam_id` from list_exams (e.g. ' +
+                '"math-2017-controle-sciences-ex"). The legacy v1 ' +
+                'underscored form ("2017_controle_informatique_math") ' +
+                'is also accepted for backwards compatibility.',
             ),
           difficulty_min: z
             .number()
@@ -1038,18 +1041,25 @@ export class AgentToolsService {
           // between v1 and v6 in the actual exam corpus, so v1's graph
           // remains the right source of truth until the v6 ingest is
           // extended to write the missing relationship types.
+          // The v6 Neo4j ingest stamps `critic_label`/`under_gate` on Qdrant
+          // payloads but skipped them on Pair nodes — both are null on every
+          // v6 Pair. We therefore coalesce to the v1 "good" defaults so this
+          // filter still excludes any future flagged pair without dropping
+          // every v6 row on the floor. (Kept defensively even though v6's
+          // taxonomy graph today only contains v1 Pair nodes.)
           const cypher = matiere
             ? `
                 MATCH (p:Pair)-[:IN_CHAPTER]->(c:Chapter)
                 WHERE c.matiere = $matiere
-                  AND p.critic_label = 'correct'
-                  AND p.under_gate = false
+                  AND coalesce(p.critic_label, 'correct') = 'correct'
+                  AND coalesce(p.under_gate, false) = false
                 RETURN c.name AS chapter, c.matiere AS matiere, count(p) AS pair_count
                 ORDER BY pair_count DESC, chapter ASC
               `
             : `
                 MATCH (p:Pair)-[:IN_CHAPTER]->(c:Chapter)
-                WHERE p.critic_label = 'correct' AND p.under_gate = false
+                WHERE coalesce(p.critic_label, 'correct') = 'correct'
+                  AND coalesce(p.under_gate, false) = false
                 RETURN c.name AS chapter, c.matiere AS matiere, count(p) AS pair_count
                 ORDER BY matiere ASC, pair_count DESC, chapter ASC
               `;
@@ -1105,10 +1115,12 @@ export class AgentToolsService {
           session = this.neo4j.openSession();
           // See list_chapters: the v6 Neo4j ingest skipped the topic graph,
           // so filtering by ingest_version='omni_v6' would empty this list.
-          // Read the shared v1 topic taxonomy as the source of truth.
+          // Read the shared v1 topic taxonomy as the source of truth, and
+          // coalesce the gate columns so any future v6-shaped pair without
+          // the v1 critic/gate properties still passes the safety check.
           const where: string[] = [
-            "p.critic_label = 'correct'",
-            'p.under_gate = false',
+            "coalesce(p.critic_label, 'correct') = 'correct'",
+            'coalesce(p.under_gate, false) = false',
           ];
           const params: Record<string, unknown> = {
             limit: this.clampLimit(limit, 50, 200),
@@ -1218,11 +1230,19 @@ export class AgentToolsService {
           const whereClause = where.length
             ? `WHERE ${where.join(' AND ')}`
             : '';
+          // v6 Pair nodes carry `critic_label`/`under_gate` on the Qdrant
+          // payload but NOT on the Neo4j node — both properties are null
+          // on every v6 Pair. Filtering with strict equality therefore
+          // returned `pair_count = 0` for every v6 exam (the bug fixed in
+          // this revision). Coalescing to the "good" defaults treats null
+          // the same as v1's correct/open-gate state and still excludes
+          // any pair the pipeline later flags.
           const cypher = `
             MATCH (e:Exam)
             ${whereClause}
             OPTIONAL MATCH (p:Pair)-[:FROM_EXAM]->(e)
-              WHERE p.critic_label = 'correct' AND p.under_gate = false
+              WHERE coalesce(p.critic_label, 'correct') = 'correct'
+                AND coalesce(p.under_gate, false) = false
             WITH e, count(p) AS pair_count
             RETURN
               e.exam_id AS exam_id,
@@ -1320,9 +1340,16 @@ export class AgentToolsService {
           // section facet works across both slices, then normalise v1's
           // underscored values to v6's hyphenated form so the agent gets
           // one consistent set of section codes.
+          //
+          // The v6 Neo4j ingest left `critic_label`/`under_gate` null on
+          // Pair nodes (those properties live on Qdrant payloads in v6),
+          // so coalesce to the v1 "good" defaults — otherwise every v6
+          // row falls out of the count. v1 Pair nodes still set both
+          // properties, so genuinely flagged pairs are still excluded.
           const cypher = `
             MATCH (p:Pair)-[:FROM_EXAM]->(e:Exam)
-            WHERE p.critic_label = 'correct' AND p.under_gate = false
+            WHERE coalesce(p.critic_label, 'correct') = 'correct'
+              AND coalesce(p.under_gate, false) = false
               AND coalesce(e.filiere, e.track) IS NOT NULL
             WITH coalesce(e.filiere, e.track) AS section, p
             RETURN section, count(p) AS pair_count
@@ -1382,21 +1409,43 @@ export class AgentToolsService {
    * list, and the existing catalogue tools (list_chapters / list_exams)
    * stop one level above the per-question grain.
    *
-   * Implementation note: only `exam` is indexed in Qdrant
-   * (`exercise_number` is an unindexed payload field), so we scroll on
-   * `exam` and filter by `exercise_number` in Node. The largest exam in
-   * the corpus has < 30 sub-questions, well under the scroll cap.
+   * Implementation note: both `exam_id` and `exam` are keyword-indexed
+   * payload fields in Qdrant v6 (`exercise_number` is unindexed), so we
+   * scroll on the exam handle and filter by `exercise_number` in Node.
+   * The largest exam in the corpus has < 30 sub-questions, well under
+   * the scroll cap.
+   *
+   * Exam-handle compatibility: v6 surfaces TWO exam-shaped payload
+   * fields:
+   *   - `exam_id` — hyphenated, matiere-prefixed, e.g.
+   *     `"math-2017-controle-sciences-ex"`. Same value Neo4j Exam nodes
+   *     and `list_exams.exam_id` return, so it is the canonical form.
+   *   - `exam`    — legacy v1 underscored handle, e.g.
+   *     `"2017_controle_sciences_ex_math"`. Kept on v6 payloads for
+   *     backwards compatibility.
+   * We try `exam_id` first (the form `list_exams` now returns) and
+   * fall back to `exam` so any cached pre-cutover state — or an LLM
+   * that parroted an underscored id from older system-prompt examples —
+   * still resolves.
    */
   private listExamQuestionsTool(): StructuredToolInterface {
     return tool(
       async ({ exam, exercise_number, limit }) => {
         try {
-          const points = await this.qdrant.scrollByFilter({
+          let points = await this.qdrant.scrollByFilter({
             filter: {
-              must: [{ key: 'exam', match: { value: exam } }],
+              must: [{ key: 'exam_id', match: { value: exam } }],
             },
             limit: AgentToolsService.LIST_EXAM_QUESTIONS_SCROLL_CAP,
           });
+          if (points.length === 0) {
+            points = await this.qdrant.scrollByFilter({
+              filter: {
+                must: [{ key: 'exam', match: { value: exam } }],
+              },
+              limit: AgentToolsService.LIST_EXAM_QUESTIONS_SCROLL_CAP,
+            });
+          }
           let filtered = points;
           if (typeof exercise_number === 'number') {
             filtered = points.filter((p) => {
@@ -1443,16 +1492,19 @@ export class AgentToolsService {
           'all the sub-questions of Exercice 4", "déroule-moi tout ' +
           'l\'énoncé", "liste les questions de cet exercice" — a vector ' +
           'search returns top-K, not the full ordered structure. ' +
-          'Cheap (Qdrant scroll on the indexed `exam` field; no ' +
+          'Cheap (Qdrant scroll on the indexed `exam_id` field; no ' +
           'embeddings, no rerank).',
         schema: z.object({
           exam: z
             .string()
             .min(1)
             .describe(
-              'The exam_id (format `{year}_{session}_{track}_{matiere}`), ' +
-                'e.g. "2017_controle_informatique_math". Use list_exams ' +
-                'to discover valid ids when needed.',
+              'The exam handle. Canonical form is the hyphenated, ' +
+                'matiere-prefixed `exam_id` returned by list_exams ' +
+                '(e.g. "math-2017-controle-sciences-ex"). Legacy ' +
+                'underscored ids (e.g. "2017_controle_informatique_math") ' +
+                'are also accepted for backwards compatibility. Always ' +
+                'call list_exams first to discover the exact id.',
             ),
           exercise_number: z
             .number()
@@ -1716,7 +1768,14 @@ export class AgentToolsService {
       const track = normalizeSection(args.track);
       if (track) must.push({ key: 'track', match: { value: track } });
     }
-    if (args.exam) must.push({ key: 'exam', match: { value: args.exam } });
+    if (args.exam) {
+      // v6 hyphenated `exam_id` ("math-2017-controle-sciences-ex") and
+      // legacy v1 underscored `exam` ("2017_controle_informatique_math")
+      // are distinct payload fields. Pick by shape so callers passing
+      // either form land on the right index.
+      const examKey = args.exam.includes('-') ? 'exam_id' : 'exam';
+      must.push({ key: examKey, match: { value: args.exam } });
+    }
     if (args.bloom_level)
       must.push({ key: 'bloom_level', match: { value: args.bloom_level } });
     if (args.answer_format)

@@ -62,14 +62,15 @@ build time (as Docker build args, when declared with `ARG`) and at runtime.
 | `NIM_EMBED_API_KEY`               | rag      | **Preferred** auth for the NIM embedding endpoint. Falls back to `NVIDIA_API_KEY` for back-compat. Set this so swapping the chat key doesn't break RAG. |
 | `NIM_EMBED_URL`                   | no       | Defaults to `https://integrate.api.nvidia.com/v1/embeddings`.                     |
 | `NIM_EMBED_MODEL`                 | no       | Defaults to `nvidia/llama-nemotron-embed-1b-v2`.                                  |
-| `NIM_EMBED_DIM`                   | no       | Embedding dimension; must match the live Qdrant collection (1024 for `bac_qa_pairs_nim_v1`, 2048 for `bac_qa_pairs_omni_v6`). |
+| `NIM_EMBED_DIM`                   | no       | Embedding dimension; must match the live Qdrant collection. Defaults to **2048** to align with the v6 collection (`bac_qa_pairs_omni_v6`, llama-nemotron-embed-1b-v2). Set to `1024` only if you point `QDRANT_COLLECTION` back at the legacy v1 collection. Mismatch ⇒ silent recall collapse, NOT an error. |
 | `NIM_RERANK_API_KEY`              | rag      | **Preferred** auth for the NIM reranker. Falls back to `NVIDIA_API_KEY`. Set this so swapping the chat key doesn't disable reranking. |
 | `NIM_RERANK_URL`                  | no       | Defaults to `https://ai.api.nvidia.com/v1/retrieval/nvidia/reranking`.            |
 | `NIM_RERANK_MODEL`                | no       | Defaults to `nvidia/rerank-qa-mistral-4b`.                                        |
 | `EMBEDDING_MODEL`                 | no       | Optional embedding model override.                                                 |
 | `QDRANT_URL` / `QDRANT_API_KEY`   | no       | Optional vector store. Tools no-op when absent.                                   |
-| `QDRANT_COLLECTION` / `QDRANT_COLLECTION_NAME` | no | Optional collection override (defaults to `bac_qa_pairs_nim_v1`).             |
+| `QDRANT_COLLECTION` / `QDRANT_COLLECTION_NAME` | no | Optional collection override; defaults to `bac_qa_pairs_omni_v6` (v6 corpus: 302 exams, 8,412 pairs, 5 sections, 11 matières). The legacy v1 collection (`bac_qa_pairs_nim_v1`) is still readable if you point this at it AND set `NIM_EMBED_DIM=1024`. |
 | `QDRANT_DENSE_VECTOR_NAME`        | no       | Defaults to `dense`.                                                              |
+| `IMAGE_CDN_BASE`                  | no       | Public CDN base URL for v6 image relpaths (e.g. `https://assets.lemma.bac/omni-v6`). When set, the agent prepends it to `exercise_*_image_relpath` and `exam_full_*_relpath` so the frontend can render figures directly. When absent, raw relpaths are returned and the frontend must compose its own URL. |
 | `NEO4J_URI` / `NEO4J_USERNAME` / `NEO4J_PASSWORD` | no | Optional knowledge graph. Tools no-op when absent.                |
 | `PORT`                            | auto     | Injected by Railway.                                                              |
 

@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { tool } from '@langchain/core/tools';
 import type { StructuredToolInterface } from '@langchain/core/tools';
 import { z } from 'zod';
@@ -136,31 +137,45 @@ const EMIT_SOLUTION_STEPS_TOOL_DESCRIPTION = `Use this tool when the student has
 
 /**
  * Canonical Tunisian Bac **section** (a.k.a. "track") values as they
- * appear in the Qdrant `track` payload field. Exposed as a typed enum
- * to every tool that filters by section, so the model can't fabricate
- * a value like `"sciences"` (which doesn't exist — the right code is
- * `"sciences_ex"`). Mirrors the values returned by the Qdrant facet
- * on `track` (see `list_sections`).
+ * appear in the v6 Qdrant `track` / `filiere` payload field. Exposed
+ * as a typed enum to every tool that filters by section, so the model
+ * can't fabricate a value like `"sciences"` (which doesn't exist — the
+ * right code is `"sciences-ex"`). Mirrors the values returned by the
+ * Qdrant facet on `track` (see `list_sections`).
  *
  * Tunisian student-facing vocabulary mapping:
- *  - sciences_ex       = "section sciences expérimentales"
+ *  - sciences-ex       = "section sciences expérimentales"
  *                       (often shortened to "section science"
  *                       or just "sciences")
  *  - math              = "section mathématiques"
  *  - technique         = "section sciences techniques"
  *  - informatique      = "section sciences informatique"
- *  - economie_gestion  = "section économie et gestion"
+ *  - economie-gestion  = "section économie et gestion"
  *
  * NOTE: the *track* `math` (Bac section) and the *matière* `math`
  * (the maths subject) collide on the same word — when the student
  * just says "math", check the broader phrasing to disambiguate
  * ("la section math" → track; "un exercice de math" → matière).
+ *
+ * v6 cutover note: the v1 collection used underscored values
+ * (`sciences_ex`, `economie_gestion`); v6 uses hyphens
+ * (`sciences-ex`, `economie-gestion`). The agent and prompt are
+ * unified on v6's hyphenated form. Any caller still passing the
+ * legacy underscored form is normalised at the filter boundary
+ * (see {@link normalizeSection}).
  */
 const SECTION_ENUM = [
-  'sciences_ex',
+  'sciences-ex',
   'math',
   'technique',
   'informatique',
+  'economie-gestion',
+  // Legacy v1 underscored variants — accepted at the schema boundary
+  // and normalised to the hyphenated form before any data-store call
+  // (see {@link normalizeSection}). Without these, in-flight tool
+  // calls cached from a pre-v6 conversation state would fail Zod
+  // validation before they ever reach the normaliser.
+  'sciences_ex',
   'economie_gestion',
 ] as const;
 
@@ -171,13 +186,26 @@ const SECTION_ENUM = [
  * the canonical track value without rote memorisation.
  */
 const SECTION_DESCRIPTIONS: Record<string, string> = {
-  sciences_ex:
+  'sciences-ex':
     'Section sciences expérimentales (often shortened to "section science" or just "sciences").',
   math: 'Section mathématiques.',
   technique: 'Section sciences techniques.',
   informatique: 'Section sciences informatique.',
-  economie_gestion: 'Section économie et gestion.',
+  'economie-gestion': 'Section économie et gestion.',
 };
+
+/**
+ * Tolerate the legacy v1 section codes (underscored) by normalising to
+ * the v6 hyphenated form. Catches `sciences_ex` / `economie_gestion`
+ * from older agent tool calls cached in conversation state during the
+ * v1→v6 cutover, and the very common student-typed underscore form.
+ */
+function normalizeSection(track: string | undefined): string | undefined {
+  if (!track) return track;
+  if (track === 'sciences_ex') return 'sciences-ex';
+  if (track === 'economie_gestion') return 'economie-gestion';
+  return track;
+}
 
 /**
  * Domain-shaped tools the LLM binds against. Each verb mirrors how a
@@ -258,7 +286,19 @@ export class AgentToolsService {
     private readonly reranker: RerankerClient,
     private readonly analogies: AnalogiesClient,
     private readonly patterns: PatternsClient,
+    private readonly config: ConfigService,
   ) {}
+
+  /**
+   * Public CDN base URL for image relpaths returned by the agent.
+   * Optional — when unset, image fields fall back to raw relpath
+   * strings so the frontend can compose its own URL or display a
+   * "no asset" state. Set as `IMAGE_CDN_BASE` (e.g. Cloudflare R2,
+   * Bunny, or any static-asset host).
+   */
+  private get imageCdnBase(): string | undefined {
+    return this.config.get<string>('IMAGE_CDN_BASE');
+  }
 
   getAll(): StructuredToolInterface[] {
     return [
@@ -535,8 +575,9 @@ export class AgentToolsService {
             topK: limit,
           });
 
+          const cdnBase = this.imageCdnBase;
           return JSON.stringify({
-            results: reranked.map((p) => formatPairForLLM(p)),
+            results: reranked.map((p) => formatPairForLLM(p, { cdnBase })),
           });
         } catch (err) {
           this.logger.warn(`search_questions failed: ${String(err)}`);
@@ -602,9 +643,9 @@ export class AgentToolsService {
             .optional()
             .describe(
               'Bac **section** (also called "track"). One of the 5 ' +
-                'Tunisian Bac sections: sciences_ex (sciences expérimentales), ' +
+                'Tunisian Bac sections: sciences-ex (sciences expérimentales), ' +
                 'math (mathématiques), technique (sciences techniques), ' +
-                'informatique (sciences informatique), economie_gestion ' +
+                'informatique (sciences informatique), economie-gestion ' +
                 '(économie et gestion). Pass this whenever the student ' +
                 'names or implies a specific section — a request shaped like ' +
                 '"fel section science..." / "in section sciences..." / ' +
@@ -669,7 +710,12 @@ export class AgentToolsService {
           if (!point) {
             return `No question pair found for pair_id="${pair_id}".`;
           }
-          return JSON.stringify(formatPairForLLM(point, { full: true }));
+          return JSON.stringify(
+            formatPairForLLM(point, {
+              full: true,
+              cdnBase: this.imageCdnBase,
+            }),
+          );
         } catch (err) {
           this.logger.warn(`get_question_pair failed: ${String(err)}`);
           return `Error fetching question pair: ${(err as Error).message}`;
@@ -686,7 +732,9 @@ export class AgentToolsService {
           pair_id: z
             .string()
             .describe(
-              'The pair_id, e.g. "deepseek_v1__math__2017_controle_informatique_math__ex4__q1.c".',
+              'The pair_id, e.g. "math-2017-controle-informatique:ex_4:q_1.c". ' +
+                'Pair ids returned by search_questions / find_similar_questions / ' +
+                'list_exam_questions are the canonical handle.',
             ),
         }),
       },
@@ -713,10 +761,15 @@ export class AgentToolsService {
             limit: k + 1,
             filter,
           });
+          const cdnBase = this.imageCdnBase;
           const results = points
-            .filter((p) => readStringPayload(p, 'pair_id') !== pair_id)
+            .filter(
+              (p) =>
+                readStringPayload(p, 'pair_id_logical') !== pair_id &&
+                readStringPayload(p, 'pair_id') !== pair_id,
+            )
             .slice(0, k)
-            .map((p) => formatPairForLLM(p));
+            .map((p) => formatPairForLLM(p, { cdnBase }));
           return JSON.stringify({ seed: pair_id, results });
         } catch (err) {
           this.logger.warn(`find_similar_questions failed: ${String(err)}`);
@@ -802,8 +855,8 @@ export class AgentToolsService {
             .enum(SECTION_ENUM)
             .optional()
             .describe(
-              'Bac section / track. One of: sciences_ex, math, technique, ' +
-                'informatique, economie_gestion. Required whenever the ' +
+              'Bac section / track. One of: sciences-ex, math, technique, ' +
+                'informatique, economie-gestion. Required whenever the ' +
                 'student names or implies a specific Bac section.',
             ),
           exam: z.string().optional(),
@@ -825,6 +878,16 @@ export class AgentToolsService {
         let session: ReturnType<typeof this.neo4j.openSession> | undefined;
         try {
           session = this.neo4j.openSession();
+          // The chapter / topic / bloom / format taxonomy graph was only
+          // ingested for the legacy v1 slice. v6's Neo4j ingest only created
+          // (:Pair)-[:FROM_EXAM]->(:Exam), (:OF_MATIERE)->(:Matiere) and
+          // (:OF_EXERCISE)->(:Exercise) — there is no :IN_CHAPTER on v6 Pair
+          // nodes. We therefore intentionally do NOT filter by
+          // ingest_version='omni_v6' here: that would return an empty list
+          // and break catalogue discovery. The chapter taxonomy is shared
+          // between v1 and v6 in the actual exam corpus, so v1's graph
+          // remains the right source of truth until the v6 ingest is
+          // extended to write the missing relationship types.
           const cypher = matiere
             ? `
                 MATCH (p:Pair)-[:IN_CHAPTER]->(c:Chapter)
@@ -890,6 +953,9 @@ export class AgentToolsService {
         let session: ReturnType<typeof this.neo4j.openSession> | undefined;
         try {
           session = this.neo4j.openSession();
+          // See list_chapters: the v6 Neo4j ingest skipped the topic graph,
+          // so filtering by ingest_version='omni_v6' would empty this list.
+          // Read the shared v1 topic taxonomy as the source of truth.
           const where: string[] = [
             "p.critic_label = 'correct'",
             'p.under_gate = false',
@@ -972,12 +1038,16 @@ export class AgentToolsService {
         let session: ReturnType<typeof this.neo4j.openSession> | undefined;
         try {
           session = this.neo4j.openSession();
+          // v6 Exam nodes use `matiere` + `filiere`; v1 Exam nodes use
+          // `subject` + `track`. Coalesce so the catalogue surfaces both
+          // slices and the agent doesn't see a 50% drop the second the
+          // collection switches over.
           const where: string[] = [];
           const params: Record<string, unknown> = {
             limit: this.clampLimit(limit, 50, 200),
           };
           if (matiere) {
-            where.push('e.subject = $matiere');
+            where.push('coalesce(e.matiere, e.subject) = $matiere');
             params.matiere = matiere;
           }
           if (year !== undefined && year !== null) {
@@ -989,8 +1059,11 @@ export class AgentToolsService {
             params.session = examSession;
           }
           if (track) {
-            where.push('e.track = $track');
-            params.track = track;
+            const normalisedTrack = normalizeSection(track);
+            if (normalisedTrack) {
+              where.push('coalesce(e.filiere, e.track) = $track');
+              params.track = normalisedTrack;
+            }
           }
           const whereClause = where.length
             ? `WHERE ${where.join(' AND ')}`
@@ -1005,8 +1078,8 @@ export class AgentToolsService {
               e.exam_id AS exam_id,
               e.year    AS year,
               e.session AS session,
-              e.subject AS subject,
-              e.track   AS track,
+              coalesce(e.matiere, e.subject) AS subject,
+              coalesce(e.filiere, e.track)   AS track,
               pair_count
             ORDER BY year DESC, subject ASC, session ASC
             LIMIT toInteger($limit)
@@ -1056,8 +1129,8 @@ export class AgentToolsService {
             .enum(SECTION_ENUM)
             .optional()
             .describe(
-              'Bac section / track. One of: sciences_ex, math, technique, ' +
-                'informatique, economie_gestion. Pass this when the student ' +
+              'Bac section / track. One of: sciences-ex, math, technique, ' +
+                'informatique, economie-gestion. Pass this when the student ' +
                 'names a section.',
             ),
           limit: z
@@ -1076,13 +1149,13 @@ export class AgentToolsService {
 
   /**
    * Discovery tool over the 5 Tunisian Bac sections (a.k.a. tracks).
-   * Returns the canonical short codes (`sciences_ex`, `math`, `technique`,
-   * `informatique`, `economie_gestion`) with pair counts so the agent
+   * Returns the canonical short codes (`sciences-ex`, `math`, `technique`,
+   * `informatique`, `economie-gestion`) with pair counts so the agent
    * can pick an exact `track` filter instead of guessing from natural
    * language. Cheap (one Cypher aggregate, no embeddings).
    *
    * The student-facing names are encoded in the `description` field so
-   * the agent can answer "section sciences" → `sciences_ex`,
+   * the agent can answer "section sciences" → `sciences-ex`,
    * "section maths" → `math`, "BAC techniques" → `technique`, etc.,
    * without rote memorisation of the mapping.
    */
@@ -1092,24 +1165,39 @@ export class AgentToolsService {
         let session: ReturnType<typeof this.neo4j.openSession> | undefined;
         try {
           session = this.neo4j.openSession();
+          // v6 Exam nodes carry `filiere` but not `track`, while v1 Exam
+          // nodes carry `track` but not `filiere`. Coalesce the two so the
+          // section facet works across both slices, then normalise v1's
+          // underscored values to v6's hyphenated form so the agent gets
+          // one consistent set of section codes.
           const cypher = `
             MATCH (p:Pair)-[:FROM_EXAM]->(e:Exam)
             WHERE p.critic_label = 'correct' AND p.under_gate = false
-              AND e.track IS NOT NULL
-            RETURN e.track AS section, count(p) AS pair_count
+              AND coalesce(e.filiere, e.track) IS NOT NULL
+            WITH coalesce(e.filiere, e.track) AS section, p
+            RETURN section, count(p) AS pair_count
             ORDER BY pair_count DESC, section ASC
           `;
           const result = await session.run(cypher);
-          return JSON.stringify({
-            sections: result.records.map((r) => {
-              const code = r.get('section') as string;
-              return {
-                section: code,
-                pair_count: toNumber(r.get('pair_count')),
-                description: SECTION_DESCRIPTIONS[code] ?? null,
-              };
-            }),
-          });
+          // Aggregate after normalisation so v1's `sciences_ex` (underscored)
+          // and v6's `sciences-ex` (hyphenated) collapse onto the same row.
+          const counts = new Map<string, number>();
+          for (const r of result.records) {
+            const raw = r.get('section') as string;
+            const code = normalizeSection(raw) ?? raw;
+            counts.set(
+              code,
+              (counts.get(code) ?? 0) + toNumber(r.get('pair_count')),
+            );
+          }
+          const sections = Array.from(counts.entries())
+            .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+            .map(([code, pair_count]) => ({
+              section: code,
+              pair_count,
+              description: SECTION_DESCRIPTIONS[code] ?? null,
+            }));
+          return JSON.stringify({ sections });
         } catch (err) {
           this.logger.warn(`list_sections failed: ${String(err)}`);
           return `Error listing sections: ${(err as Error).message}`;
@@ -1125,7 +1213,7 @@ export class AgentToolsService {
           'Use this whenever the student names a Bac section ("section ' +
           'science", "BAC math", "section informatique", "éco-gestion", ' +
           'etc.) and you are not sure which canonical code (e.g. ' +
-          '`sciences_ex`, `math`, `technique`) to pass to the `track` ' +
+          '`sciences-ex`, `math`, `technique`) to pass to the `track` ' +
           'filter on search_questions / count_questions / list_exams. ' +
           'Cheap (one aggregate query, no embeddings).',
         schema: z.object({}),
@@ -1186,7 +1274,9 @@ export class AgentToolsService {
             total: sorted.length,
             truncated: sorted.length > cap,
             exercises,
-            questions: sorted.slice(0, cap).map((p) => formatPairForLLM(p)),
+            questions: sorted
+              .slice(0, cap)
+              .map((p) => formatPairForLLM(p, { cdnBase: this.imageCdnBase })),
           });
         } catch (err) {
           this.logger.warn(`list_exam_questions failed: ${String(err)}`);
@@ -1472,7 +1562,10 @@ export class AgentToolsService {
       must.push({ key: 'year', match: { value: args.year } });
     if (args.session)
       must.push({ key: 'session', match: { value: args.session } });
-    if (args.track) must.push({ key: 'track', match: { value: args.track } });
+    if (args.track) {
+      const track = normalizeSection(args.track);
+      if (track) must.push({ key: 'track', match: { value: track } });
+    }
     if (args.exam) must.push({ key: 'exam', match: { value: args.exam } });
     if (args.bloom_level)
       must.push({ key: 'bloom_level', match: { value: args.bloom_level } });
@@ -1501,32 +1594,89 @@ export class AgentToolsService {
 
 // ---- formatting helpers (module-private) -------------------------------
 
+/**
+ * Compose a public asset URL from a v6 image relpath. When
+ * `cdnBase` is set (typically `IMAGE_CDN_BASE` env var pointing at
+ * Cloudflare R2 / Bunny / S3), `relpath` is appended; otherwise we
+ * return the raw relpath so the frontend can compose its own URL or
+ * fall back to a "no asset" state without crashing.
+ */
+function buildImageUrl(
+  relpath: unknown,
+  cdnBase: string | undefined,
+): string | null {
+  if (typeof relpath !== 'string' || relpath.length === 0) return null;
+  if (!cdnBase) return relpath;
+  return `${cdnBase.replace(/\/+$/, '')}/${relpath.replace(/^\/+/, '')}`;
+}
+
+/**
+ * Translate a Qdrant v6 point into the JSON the agent (and downstream
+ * frontend) consumes. Surfaces both legacy v1-named fields (kept for
+ * back-compat with any in-flight conversation state) AND v6-native
+ * fields (image relpaths, source pages, figure counts, exam ids,
+ * has_answer). Mirrors the Python reference impl
+ * `serialize_hit_for_api` in `agent_helpers_v6.py`.
+ *
+ * `pair_id` is the canonical handle the agent passes around between
+ * tool calls. v6 stores it as `pair_id_logical`; we also fall back to
+ * the v1 `pair_id` payload key for safety during the cutover window.
+ */
 function formatPairForLLM(
   point: QdrantPoint,
-  opts?: { full?: boolean },
+  opts?: { full?: boolean; cdnBase?: string },
 ): Record<string, unknown> {
   const payload = (point.payload ?? {}) as Record<string, unknown>;
   const question = readStringPayload(point, 'question_text') ?? '';
   const answer = readStringPayload(point, 'answer_text') ?? '';
   const cap = AgentToolsService['TEXT_PREVIEW_CHARS'] as number;
+  const cdnBase = opts?.cdnBase;
+  const pairId = payload.pair_id_logical ?? payload.pair_id ?? null;
   return {
-    pair_id: payload.pair_id ?? null,
+    pair_id: pairId,
     matiere: payload.matiere ?? null,
     chapter: payload.chapter ?? null,
     exam: payload.exam ?? null,
-    year: payload.year ?? null,
+    exam_id: payload.exam_id ?? null,
+    exercise_id_global: payload.exercise_id_global ?? null,
+    year: payload.year ?? payload.exam_year ?? null,
     session: payload.session ?? null,
-    track: payload.track ?? null,
+    track: payload.track ?? payload.filiere ?? null,
     exercise_number: payload.exercise_number ?? null,
     question_number: payload.question_number ?? null,
     difficulty: payload.difficulty ?? null,
     bloom_level: payload.bloom_level ?? null,
     answer_format: payload.answer_format ?? null,
     requires_figure: payload.requires_figure ?? null,
+    has_answer: payload.has_answer ?? null,
+    has_figure_enonce: payload.has_figure_enonce ?? null,
+    has_figure_corrige: payload.has_figure_corrige ?? null,
+    n_enonce_figures: payload.n_enonce_figures ?? null,
+    n_corrige_figures: payload.n_corrige_figures ?? null,
+    source_pages_enonce: payload.source_pages_enonce ?? [],
+    source_pages_corrige: payload.source_pages_corrige ?? [],
     topics: payload.topics ?? [],
     keywords_fr: payload.keywords_fr ?? [],
     question_text: opts?.full ? question : truncate(question, cap),
     answer_text: opts?.full ? answer : truncate(answer, cap),
+    images: {
+      exercise_enonce: buildImageUrl(
+        payload.exercise_enonce_image_relpath,
+        cdnBase,
+      ),
+      exercise_corrige: buildImageUrl(
+        payload.exercise_corrige_image_relpath,
+        cdnBase,
+      ),
+      exam_full_enonce: buildImageUrl(
+        payload.exam_full_enonce_relpath,
+        cdnBase,
+      ),
+      exam_full_corrige: buildImageUrl(
+        payload.exam_full_corrige_relpath,
+        cdnBase,
+      ),
+    },
     score: typeof point.score === 'number' ? point.score : undefined,
   };
 }

@@ -43,6 +43,15 @@ export interface QdrantFilter {
  *   - critic_label = "correct"   → only LLM-graded correct answers
  *   - under_gate   = false       → exclude flagged/quarantined items
  *
+ * Both conditions are stamped 100% on both v1 (`bac_qa_pairs_nim_v1`) and
+ * v6 (`bac_qa_pairs_omni_v6`) collections, so they pass every point — but
+ * keeping them ensures the filter is enforceable the moment the data
+ * pipeline starts emitting non-correct or under-gate pairs.
+ *
+ * NOTE for v6: both fields require Qdrant payload indexes when strict
+ * mode is enabled (it is on prod). See `backend/scripts/ensure-v6-indexes.ts`
+ * for the idempotent index-creation helper.
+ *
  * Exposed so callers can compose with the agent's optional filters via
  * {@link mergeFilter} without re-typing them and so the rules stay in one
  * place if they ever change.
@@ -79,9 +88,9 @@ export function mergeFilter(extra?: QdrantFilter): QdrantFilter {
  * NestJS — and we only need a small slice of the surface, so calling the
  * REST API directly keeps the dependency surface small and the build clean.
  *
- * Targets the NIM-stack collection schema (named `dense` vector, 1024
- * dims, cosine distance). Every read goes through {@link mergeFilter} so
- * the `critic_label='correct'` + `under_gate=false` invariants can't be
+ * Targets the v6 collection schema (named `dense` vector, 2048 dims,
+ * cosine distance). Every read goes through {@link mergeFilter} so the
+ * `critic_label='correct'` + `under_gate=false` invariants can't be
  * forgotten downstream.
  *
  * Defers connection until first use so the backend can boot when
@@ -112,7 +121,7 @@ export class QdrantClientProvider implements OnModuleInit {
     return (
       this.config.get<string>('QDRANT_COLLECTION') ??
       this.config.get<string>('QDRANT_COLLECTION_NAME') ??
-      'bac_qa_pairs_nim_v1'
+      'bac_qa_pairs_omni_v6'
     );
   }
 
@@ -187,17 +196,33 @@ export class QdrantClientProvider implements OnModuleInit {
   }
 
   /**
-   * Convenience: lookup a single pair by its `pair_id` payload key.
-   * Returns null when no matching point exists in the collection.
+   * Convenience: lookup a single pair by its logical pair id.
+   *
+   * v6 stores the human-readable join key in `pair_id_logical`
+   * (e.g. `"math-2017-controle-informatique:ex_4:q_1.c"`), v1 stored
+   * it in `pair_id` (e.g. `"deepseek_v1__math__2017_controle_..."`).
+   * We try v6 first, then fall back to v1 so callers that hold an
+   * older pair id from a prior session still resolve cleanly during
+   * the v1→v6 cutover window.
+   *
+   * Returns null when no matching point exists in either field.
    */
   async getByPairId(pairId: string): Promise<QdrantPoint | null> {
-    const points = await this.scrollByFilter({
+    const byLogical = await this.scrollByFilter({
+      filter: {
+        must: [{ key: 'pair_id_logical', match: { value: pairId } }],
+      },
+      limit: 1,
+    });
+    if (byLogical[0]) return byLogical[0];
+
+    const byLegacy = await this.scrollByFilter({
       filter: {
         must: [{ key: 'pair_id', match: { value: pairId } }],
       },
       limit: 1,
     });
-    return points[0] ?? null;
+    return byLegacy[0] ?? null;
   }
 
   /**

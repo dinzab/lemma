@@ -8,8 +8,10 @@ import { ConfigService } from '@nestjs/config';
  * Calls the OpenAI-compatible NIM endpoint at
  *   ${NIM_EMBED_URL} (default: https://integrate.api.nvidia.com/v1/embeddings)
  * with `model = ${NIM_EMBED_MODEL}` (default `nvidia/llama-nemotron-embed-1b-v2`,
- * 1024 dims). The dimension is hard-coded against the existing Qdrant
- * collection — changing it means re-indexing the corpus.
+ * 2048 dims). The dimension must match the live Qdrant collection — the
+ * v6 collection (`bac_qa_pairs_omni_v6`) is 2048-dim native; the legacy v1
+ * collection (`bac_qa_pairs_nim_v1`) was 1024-dim on a different model.
+ * Mismatching dim ⇒ silent recall collapse, NOT an error.
  *
  * Auth: prefers the dedicated `NIM_EMBED_API_KEY` so the embedding key
  * can be rotated / scoped independently of the chat-model key. Falls
@@ -46,7 +48,7 @@ export class EmbeddingsClient {
       this.config.get<string>('NIM_EMBED_MODEL') ??
       'nvidia/llama-nemotron-embed-1b-v2';
     const rawDim = this.config.get<string>('NIM_EMBED_DIM');
-    const dimensions = rawDim ? Number.parseInt(rawDim, 10) : 1024;
+    const dimensions = rawDim ? Number.parseInt(rawDim, 10) : 2048;
 
     const res = await fetch(url, {
       method: 'POST',

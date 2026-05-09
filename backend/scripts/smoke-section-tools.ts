@@ -40,6 +40,7 @@ async function main() {
     reranker,
     analogies,
     patterns,
+    config,
   );
   const tools = service.getAll();
   const byName = new Map(tools.map((t) => [t.name, t]));
@@ -64,8 +65,11 @@ async function main() {
 
   try {
     await call('list_sections', {});
-    await call('count_questions', { matiere: 'math', track: 'sciences_ex' });
+    await call('count_questions', { matiere: 'math', track: 'sciences-ex' });
     await call('count_questions', { matiere: 'math', track: 'math' });
+    // Legacy underscored value: agent or stale state may still pass this;
+    // normalizeSection() should translate it to `sciences-ex` transparently.
+    await call('count_questions', { matiere: 'math', track: 'sciences_ex' });
     await call('list_exam_questions', {
       exam: '2017_controle_informatique_math',
       exercise_number: 4,

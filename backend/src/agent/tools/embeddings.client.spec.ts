@@ -11,7 +11,7 @@ import { EmbeddingsClient } from './embeddings.client';
 describe('EmbeddingsClient — API key resolution', () => {
   const ORIGINAL_FETCH = global.fetch;
 
-  function mockEmbedOk(dim = 1024): jest.Mock {
+  function mockEmbedOk(dim = 2048): jest.Mock {
     const mock = jest.fn().mockResolvedValue({
       ok: true,
       status: 200,

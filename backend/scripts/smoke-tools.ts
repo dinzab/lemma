@@ -37,7 +37,9 @@ async function main() {
     console.log(`\n=== ${name} ===`);
     console.log(`args: ${JSON.stringify(args)}`);
     const summary = JSON.stringify(parsed, null, 2);
-    console.log(summary.length > 1500 ? summary.slice(0, 1500) + '\n...' : summary);
+    console.log(
+      summary.length > 1500 ? summary.slice(0, 1500) + '\n...' : summary,
+    );
   }
 
   try {
@@ -56,9 +58,9 @@ async function main() {
       chapter: 'Arithmétique',
       limit: 3,
     });
-    // Use the pair_id from the deterministic sample we saw in the probe.
-    const seedPairId =
-      'deepseek_v1__math__2017_controle_informatique_math__ex4__q1.c';
+    // v6 pair_id is the human-readable join key. Try the v6 form first;
+    // getByPairId falls back to v1 transparently for legacy ids.
+    const seedPairId = 'math-2017-controle-informatique:ex_4:q_1.c';
     await call('get_question_pair', { pair_id: seedPairId });
     await call('find_similar_questions', {
       pair_id: seedPairId,
@@ -71,7 +73,7 @@ async function main() {
     // across tracks once the filter is enforced.
     await call('count_questions', {
       matiere: 'math',
-      track: 'sciences_ex',
+      track: 'sciences-ex',
     });
     await call('count_questions', {
       matiere: 'math',

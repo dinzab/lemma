@@ -12,6 +12,7 @@ import {
 import type { DynamicToolUIPart, ToolUIPart } from "ai";
 
 import { MessageResponse } from "@/components/ai-elements/message";
+import { wrapBareLatex } from "@/lib/latex";
 import { cn } from "@/lib/utils";
 
 export type LemmaHintLadderToolPart = DynamicToolUIPart | ToolUIPart;
@@ -108,10 +109,11 @@ export function HintLadderChip({ part }: HintLadderChipProps) {
       aria-label="Hint Ladder"
       className={cn(
         "my-3 w-full rounded-xl border border-chart-2/25 bg-chart-2/5",
-        "px-4 py-3 text-sm text-foreground shadow-sm",
+        "px-3 py-2.5 sm:px-4 sm:py-3",
+        "text-sm text-foreground shadow-sm",
       )}
     >
-      <div className="flex items-start gap-3">
+      <div className="flex items-start gap-2 sm:gap-3">
         <span
           aria-hidden
           className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-chart-2/10 ring-1 ring-chart-2/25"
@@ -222,8 +224,8 @@ function HintRung({ index, rung, isOpen, onToggle }: HintRungProps) {
       </button>
 
       {isOpen && (
-        <div className="border-t border-chart-2/15 px-3 py-2.5 text-[13px] leading-relaxed text-foreground/90">
-          <MessageResponse>{rung.content}</MessageResponse>
+        <div className="border-t border-chart-2/15 px-2.5 py-2 sm:px-3 sm:py-2.5 text-[13px] leading-relaxed text-foreground/90">
+          <MessageResponse>{wrapBareLatex(rung.content)}</MessageResponse>
         </div>
       )}
     </div>

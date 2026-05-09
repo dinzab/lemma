@@ -232,6 +232,36 @@
   .reveal-on-view.is-visible {
     animation: orion-fade-up 0.7s ease-out forwards;
   }
+
+  /*
+   * KaTeX display math (rendered via @streamdown/math when the LLM
+   * uses $$...$$ delimiters) renders as a wide block — long
+   * expressions like `|z_1| = \sqrt{1^2 + (\sqrt{3})^2} = ...` overrun
+   * the chat surface on narrow viewports (mobile) and break the chip
+   * card layout. Allow horizontal scrolling on the math block itself
+   * so the surrounding card stays the right width and the student can
+   * swipe the equation horizontally if it's longer than the viewport.
+   *
+   * Inline `.katex` (single $...$) is intentionally left alone — it
+   * wraps with the surrounding text via remark-math's default
+   * behaviour and shouldn't get its own scrollbar.
+   */
+  .katex-display {
+    overflow-x: auto;
+    overflow-y: hidden;
+    /* `overflow-x: auto` clips the descender; padding-bottom restores
+     * room for it so square-root vincula / subscripts don't get
+     * shaved off. */
+    padding-bottom: 0.25em;
+    /* Stop the scroll container from creating a tab stop on its own —
+     * the equation isn't focusable by keyboard, only the surrounding
+     * card is. */
+    -ms-overflow-style: none;
+    scrollbar-width: thin;
+  }
+  .katex-display::-webkit-scrollbar {
+    height: 4px;
+  }
 }
 
 @layer base {

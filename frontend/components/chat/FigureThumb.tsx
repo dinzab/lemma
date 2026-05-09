@@ -125,13 +125,30 @@ export function FigureThumb({ url, alt, size = "md", className }: FigureThumbPro
             )}
           >
             <DialogTitle className="sr-only">{alt}</DialogTitle>
-            <div className="relative flex w-full items-center justify-center">
+            {/*
+             * Scrollable + pinch-zoomable container.
+             *
+             * `touch-action: manipulation` is shorthand for
+             * `pan-x pan-y pinch-zoom`; it lets mobile users scroll
+             * the figure with one finger AND pinch-zoom into it with
+             * two, while killing the 300 ms double-tap-zoom delay so
+             * single-tap interactions (like tapping the close button)
+             * stay snappy. `overflow-auto` is what actually carries
+             * the pan; the dialog itself is fixed at 95vw / 90vh so
+             * tall figures stay scrollable inside the lightbox.
+             */}
+            <div
+              className={cn(
+                "relative max-h-[90vh] w-full overflow-auto rounded-lg bg-background shadow-2xl",
+                "touch-manipulation",
+              )}
+            >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={url}
                 alt={alt}
                 className={cn(
-                  "block max-h-[90vh] max-w-full rounded-lg bg-background object-contain shadow-2xl",
+                  "block h-auto w-full max-w-none object-contain",
                 )}
               />
               <DialogClose

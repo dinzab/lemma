@@ -96,10 +96,11 @@ export function QuestionAssetsBlock({ part }: QuestionAssetsBlockProps) {
       aria-label="Voir l'épreuve"
       className={cn(
         "my-3 w-full rounded-xl border border-secondary/25 bg-secondary/5",
-        "px-4 py-3 text-sm text-foreground shadow-sm",
+        "px-3 py-2.5 sm:px-4 sm:py-3",
+        "text-sm text-foreground shadow-sm",
       )}
     >
-      <div className="flex items-start gap-3">
+      <div className="flex items-start gap-2 sm:gap-3">
         <span
           aria-hidden
           className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-secondary/15 ring-1 ring-secondary/25"

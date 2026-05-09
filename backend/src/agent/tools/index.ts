@@ -122,7 +122,7 @@ const EMIT_SOLUTION_STEPS_TOOL_DESCRIPTION = `Use this tool when the student has
 
 ## How to Structure Each Step
 - **title** — one short verb phrase that names what this step accomplishes ("Mettre $z$ sous forme exponentielle", "Calculer le module", "Dresser le tableau de variations"). Match the student's language. NO numbering — the frontend prepends "Étape N".
-- **latex** — the actual working line(s) for this step, in LaTeX. Use \`$...$\` for inline and \`$$...$$\` for display math. One step = one (or a few tightly-related) lines of working, not a whole sub-derivation.
+- **latex** — the actual working line(s) for this step. EVERY piece of mathematical notation MUST be wrapped in math delimiters: \`$...$\` for inline math, \`$$...$$\` for display math. Bare LaTeX without delimiters (e.g. \`\\sqrt{4} = 2\` instead of \`$\\sqrt{4} = 2$\`) renders as raw source on the student's screen and is the single most common failure mode of this tool. ✅ Correct: \`$$|z_1| = \\sqrt{1^2 + (\\sqrt{3})^2} = \\sqrt{4} = 2$$\`. ❌ Wrong: \`|z_1| = \\sqrt{1^2 + (\\sqrt{3})^2} = 2\`. One step = one (or a few tightly-related) lines of working, not a whole sub-derivation.
 - **justification** — one or two sentences explaining *why* this step works — the rule / theorem / observation that licences the move. This is the part students miss when they read a corrigé; surface it explicitly.
 - **common_mistake** (optional) — the typical Tunisian-BAC trap on this step. Skip the field when the step has no notable trap.
 - **predict_next** (optional) — set to true on a step when the next move is something the student should be able to figure out from what's already on screen. The frontend hides the following step behind a "🤔 Predict the next step" affordance with a text input; the student types their guess (anything; we don't validate) and the next card unlocks. Use sparingly — 1-2 gates per solution, on the most pedagogically valuable transitions. Do NOT set on the last step.
@@ -493,9 +493,14 @@ export class AgentToolsService {
                 .string()
                 .min(1)
                 .describe(
-                  'The complete worked solution in LaTeX. Use numbered ' +
-                    'steps when helpful. The frontend de-emphasises this ' +
-                    'rung visually so the student is nudged to try the ' +
+                  'The complete worked solution. EVERY piece of ' +
+                    'mathematical notation MUST be wrapped in math ' +
+                    'delimiters — `$...$` for inline math, `$$...$$` ' +
+                    'for display math. Bare LaTeX (e.g. `\\sqrt{4}` ' +
+                    'instead of `$\\sqrt{4}$`) renders as raw source ' +
+                    "on the student's screen. Use numbered steps when " +
+                    'helpful. The frontend de-emphasises this rung ' +
+                    'visually so the student is nudged to try the ' +
                     'smaller rungs first.',
                 ),
             })
@@ -559,10 +564,20 @@ export class AgentToolsService {
                   .string()
                   .min(1)
                   .describe(
-                    'The actual working line(s) for this step, in LaTeX. ' +
-                      'Inline math: $...$, display: $$...$$. One step = ' +
-                      'one tightly-related working block, not a whole ' +
-                      'sub-derivation.',
+                    'The actual working line(s) for this step. EVERY ' +
+                      'piece of mathematical notation MUST be wrapped ' +
+                      'in math delimiters — `$...$` for inline math ' +
+                      'and `$$...$$` for display math. Bare LaTeX ' +
+                      'without delimiters (e.g. `\\sqrt{4} = 2` instead ' +
+                      'of `$\\sqrt{4} = 2$`) renders as raw source on ' +
+                      "the student's screen and is the most common " +
+                      'failure mode of this field. ' +
+                      'Example (correct): "$$|z_1| = \\sqrt{1^2 + ' +
+                      '(\\sqrt{3})^2} = \\sqrt{4} = 2$$". ' +
+                      'Example (wrong, do not do this): "|z_1| = ' +
+                      '\\sqrt{1^2 + (\\sqrt{3})^2} = 2". ' +
+                      'One step = one (or a few tightly-related) ' +
+                      'lines of working, not a whole sub-derivation.',
                   ),
                 justification: z
                   .string()

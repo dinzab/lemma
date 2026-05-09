@@ -11,6 +11,7 @@ import {
 import type { DynamicToolUIPart, ToolUIPart } from "ai";
 
 import { MessageResponse } from "@/components/ai-elements/message";
+import { wrapBareLatex } from "@/lib/latex";
 import { cn } from "@/lib/utils";
 
 export type LemmaSolutionStepsToolPart = DynamicToolUIPart | ToolUIPart;
@@ -95,10 +96,11 @@ export function StepwiseSolutionCards({ part }: StepwiseSolutionCardsProps) {
       aria-label="Stepwise solution"
       className={cn(
         "my-3 w-full rounded-xl border border-chart-1/25 bg-chart-1/5",
-        "px-4 py-3 text-sm text-foreground shadow-sm",
+        "px-3 py-2.5 sm:px-4 sm:py-3",
+        "text-sm text-foreground shadow-sm",
       )}
     >
-      <div className="flex items-start gap-3">
+      <div className="flex items-start gap-2 sm:gap-3">
         <span
           aria-hidden
           className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-chart-1/10 ring-1 ring-chart-1/25"
@@ -202,20 +204,20 @@ function SolutionStepCard({
       </button>
 
       {isOpen && (
-        <div className="border-t border-chart-1/15 px-3 py-2.5 text-[13px] leading-relaxed text-foreground/90">
-          <MessageResponse>{step.latex}</MessageResponse>
+        <div className="border-t border-chart-1/15 px-2.5 py-2 sm:px-3 sm:py-2.5 text-[13px] leading-relaxed text-foreground/90">
+          <MessageResponse>{wrapBareLatex(step.latex)}</MessageResponse>
 
-          <div className="mt-2 rounded-md bg-muted/40 px-2.5 py-2">
+          <div className="mt-2 rounded-md bg-muted/40 px-2 py-1.5 sm:px-2.5 sm:py-2">
             <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
               Pourquoi
             </div>
             <div className="mt-0.5 text-[13px] leading-relaxed text-foreground/90">
-              <MessageResponse>{step.justification}</MessageResponse>
+              <MessageResponse>{wrapBareLatex(step.justification)}</MessageResponse>
             </div>
           </div>
 
           {step.common_mistake && (
-            <div className="mt-2 flex gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-2.5 py-2">
+            <div className="mt-2 flex gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-2 py-1.5 sm:px-2.5 sm:py-2">
               <AlertTriangle
                 aria-hidden
                 className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400"
@@ -225,7 +227,7 @@ function SolutionStepCard({
                   Piège fréquent
                 </div>
                 <div className="mt-0.5 text-[13px] leading-relaxed text-foreground/90">
-                  <MessageResponse>{step.common_mistake}</MessageResponse>
+                  <MessageResponse>{wrapBareLatex(step.common_mistake)}</MessageResponse>
                 </div>
               </div>
             </div>

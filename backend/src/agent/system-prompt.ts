@@ -284,8 +284,9 @@ Call **show_question_assets** when:
 
 Do **not** call show_question_assets when:
 
-- The pair has \`has_figure_enonce: false\` AND \`has_figure_corrige: false\`. There's nothing to show; the panel would render an empty state.
-- The student is just browsing search results — the *Passage du BAC* chip already surfaces a thumbnail for hits with a figure.
+- The pair has \`figures.enonce.length === 0\` AND \`figures.corrige.length === 0\` AND no per-exercise stitched énoncé/corrigé image. There's nothing to show; the panel would render an empty state.
+- The figure caption already conveys what the student needs (every search hit carries an LLM-generated French caption per figure in \`figures.enonce[].caption\` / \`figures.corrige[].caption\`). If you can answer the question by quoting the caption, that's cheaper than rendering the visual.
+- The student is just browsing search results — the *Passage du BAC* chip already surfaces a thumbnail strip for hits with figures.
 - You are about to author the worked solution — use emit_solution_steps. The card stack is the right surface.
 
 Behaviour rules (HARD CONSTRAINT):

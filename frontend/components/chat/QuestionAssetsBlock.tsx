@@ -34,6 +34,24 @@ interface QuestionAssetsPayload {
     exam_full_enonce?: string | null;
     exam_full_corrige?: string | null;
   };
+  /**
+   * Per-figure entries surfaced by the v6 backend after the May 9
+   * figures injection. When at least one side has entries, the panel
+   * prefers them over the legacy single stitched image because (a)
+   * each entry has its own click-to-zoom and caption, and (b) some
+   * exercises have 4–6 figures that get washed together in the
+   * stitch.
+   */
+  figures?: {
+    enonce?: AssetFigureEntry[] | null;
+    corrige?: AssetFigureEntry[] | null;
+  };
+}
+
+interface AssetFigureEntry {
+  label: string;
+  caption: string;
+  url: string | null;
 }
 
 type TabKey = "enonce" | "corrige" | "exam_full";
@@ -152,6 +170,7 @@ export function QuestionAssetsBlock({ part }: QuestionAssetsBlockProps) {
           <div className="mt-3" role="tabpanel">
             {currentTab === "enonce" && (
               <EnonceTab
+                figures={pickFigures(payload, "enonce")}
                 imageUrl={payload.images?.exercise_enonce ?? null}
                 fallbackUrl={payload.images?.exam_full_enonce ?? null}
                 alt={formatAlt(payload, "Énoncé")}
@@ -159,6 +178,7 @@ export function QuestionAssetsBlock({ part }: QuestionAssetsBlockProps) {
             )}
             {currentTab === "corrige" && (
               <CorrigeTab
+                figures={pickFigures(payload, "corrige")}
                 imageUrl={payload.images?.exercise_corrige ?? null}
                 fallbackUrl={payload.images?.exam_full_corrige ?? null}
                 alt={formatAlt(payload, "Corrigé")}
@@ -183,12 +203,16 @@ export function QuestionAssetsBlock({ part }: QuestionAssetsBlockProps) {
 }
 
 interface EnonceTabProps {
+  figures: AssetFigureEntry[];
   imageUrl: string | null;
   fallbackUrl: string | null;
   alt: string;
 }
 
-function EnonceTab({ imageUrl, fallbackUrl, alt }: EnonceTabProps) {
+function EnonceTab({ figures, imageUrl, fallbackUrl, alt }: EnonceTabProps) {
+  if (figures.length > 0) {
+    return <FigureGrid figures={figures} alt={alt} />;
+  }
   const url = imageUrl ?? fallbackUrl;
   if (!url) {
     return (
@@ -201,6 +225,7 @@ function EnonceTab({ imageUrl, fallbackUrl, alt }: EnonceTabProps) {
 }
 
 interface CorrigeTabProps {
+  figures: AssetFigureEntry[];
   imageUrl: string | null;
   fallbackUrl: string | null;
   alt: string;
@@ -215,6 +240,7 @@ interface CorrigeTabProps {
  * lock used elsewhere in the app.
  */
 function CorrigeTab({
+  figures,
   imageUrl,
   fallbackUrl,
   alt,
@@ -224,7 +250,14 @@ function CorrigeTab({
   const url = imageUrl ?? fallbackUrl;
   const [guess, setGuess] = useState("");
 
-  if (!url) {
+  // Either source of corrigé content can be missing on a given pair;
+  // we render the gate / unlocked view as long as at least one of
+  // them exists. Falling back to the per-figure grid keeps the corrigé
+  // tab visible for the matières (svt / technique / economie) where
+  // exercise_corrige stitches are not generated.
+  const hasContent = figures.length > 0 || !!url;
+
+  if (!hasContent) {
     return (
       <p className="text-[12px] text-muted-foreground">
         Corrigé indisponible pour cet exercice.
@@ -238,7 +271,10 @@ function CorrigeTab({
   };
 
   if (unlocked) {
-    return <FigureThumb url={url} alt={alt} size="lg" />;
+    if (figures.length > 0) {
+      return <FigureGrid figures={figures} alt={alt} />;
+    }
+    return <FigureThumb url={url!} alt={alt} size="lg" />;
   }
 
   return (
@@ -287,6 +323,50 @@ function CorrigeTab({
           </form>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Per-figure grid renderer. Used by both the énoncé and corrigé tabs
+ * when the v6 payload ships `figures.{enonce,corrige}` entries with
+ * captions. Each entry gets its own click-to-zoom thumb (via
+ * `FigureThumb`'s lightbox) and a caption strip below it so the
+ * student can read what the figure depicts even before clicking.
+ *
+ * We render the figures as a 1-column → 2-column responsive grid
+ * because most past-exam pairs ship 1–3 figures; very rarely 4+. A
+ * grid (vs. a horizontal strip) keeps each figure legible without
+ * forcing horizontal scroll on mobile.
+ */
+function FigureGrid({
+  figures,
+  alt,
+}: {
+  figures: AssetFigureEntry[];
+  alt: string;
+}) {
+  return (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      {figures.map((fig, idx) => (
+        <figure
+          key={`${fig.label}-${idx}`}
+          className="flex flex-col gap-1.5"
+        >
+          <FigureThumb
+            url={fig.url ?? null}
+            alt={`${alt} · ${fig.label}`}
+            caption={fig.caption}
+            size="md"
+          />
+          <figcaption className="text-[12px] leading-snug text-muted-foreground">
+            <span className="font-medium text-foreground/80">
+              {fig.label}
+            </span>
+            {fig.caption ? ` — ${fig.caption}` : null}
+          </figcaption>
+        </figure>
+      ))}
     </div>
   );
 }
@@ -387,8 +467,33 @@ function extractAssetsPayload(
     typeof images.exercise_corrige === "string" ||
     typeof images.exam_full_enonce === "string" ||
     typeof images.exam_full_corrige === "string";
-  if (!anyImage) return null;
+  // svt / technique / economie matières don't have stitched per-
+  // exercise images at all but DO have per-figure entries in the new
+  // payload — render the panel for them too as long as we have
+  // figures to show.
+  const anyFigure =
+    pickFigures(payload, "enonce").length > 0 ||
+    pickFigures(payload, "corrige").length > 0;
+  if (!anyImage && !anyFigure) return null;
   return payload;
+}
+
+/**
+ * Side-aware figure picker. Returns only the entries with a
+ * non-empty `url` — silently dropping malformed entries from the
+ * payload — so the tabs/grid logic can lean on `length > 0` without
+ * worrying about rendering broken image slots.
+ */
+function pickFigures(
+  payload: QuestionAssetsPayload,
+  side: "enonce" | "corrige",
+): AssetFigureEntry[] {
+  const arr = payload.figures?.[side];
+  if (!Array.isArray(arr)) return [];
+  return arr.filter(
+    (f): f is AssetFigureEntry =>
+      !!f && typeof f.url === "string" && f.url.length > 0,
+  );
 }
 
 function parseOutput(output: unknown): unknown {
@@ -405,11 +510,17 @@ function parseOutput(output: unknown): unknown {
 function availableTabs(payload: QuestionAssetsPayload): TabDef[] {
   const tabs: TabDef[] = [];
   const images = payload.images ?? {};
+  const enonceFigures = pickFigures(payload, "enonce");
+  const corrigeFigures = pickFigures(payload, "corrige");
   const enonceUrl = images.exercise_enonce ?? images.exam_full_enonce ?? null;
-  if (enonceUrl) tabs.push({ key: "enonce", label: "Énoncé" });
+  if (enonceUrl || enonceFigures.length > 0) {
+    tabs.push({ key: "enonce", label: "Énoncé" });
+  }
   const corrigeUrl =
     images.exercise_corrige ?? images.exam_full_corrige ?? null;
-  if (corrigeUrl) tabs.push({ key: "corrige", label: "Corrigé" });
+  if (corrigeUrl || corrigeFigures.length > 0) {
+    tabs.push({ key: "corrige", label: "Corrigé" });
+  }
   if (images.exam_full_enonce || images.exam_full_corrige) {
     tabs.push({ key: "exam_full", label: "Exam complet" });
   }

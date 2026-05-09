@@ -24,6 +24,18 @@ interface FigureThumbProps {
    *  - lg  : large preview (used as the dominant card on the panel)
    */
   size?: "sm" | "md" | "lg";
+  /**
+   * Optional French caption (LLM-generated description of the figure
+   * from the v6 `enonce_figures[].description` / `corrige_figures[]
+   * .description` payload field). When provided we (a) surface it as
+   * a hover/touch-friendly title attribute and the lightbox subtitle,
+   * and (b) layer it on the dialog so a screen-reader / low-vision
+   * user can read what the figure depicts even if the image fails to
+   * load. We deliberately keep the caption OUT of the inline thumb
+   * (visual noise on dense search results) — it shows up only on
+   * hover and inside the lightbox where there's room.
+   */
+  caption?: string | null;
   className?: string;
 }
 
@@ -54,11 +66,27 @@ const SIZE_CLASSES: Record<NonNullable<FigureThumbProps["size"]>, string> = {
  *
  * Renders nothing if `url` is falsy.
  */
-export function FigureThumb({ url, alt, size = "md", className }: FigureThumbProps) {
+export function FigureThumb({
+  url,
+  alt,
+  size = "md",
+  caption,
+  className,
+}: FigureThumbProps) {
   const [open, setOpen] = useState(false);
   const [errored, setErrored] = useState(false);
 
   if (!url) return null;
+
+  // The caption — when present — feeds two surfaces: the `title`
+  // tooltip on the thumb (so a hovering student gets the gist) and
+  // the lightbox subtitle (so the dialog has the context the alt
+  // line lacks). Keep alt as the structural label (e.g. "Énoncé · BAC
+  // 2018 · Exercice 4") and use the caption as the *content*
+  // description (e.g. "Schéma du circuit RC avec un condensateur de
+  // 100µF").
+  const trimmedCaption = caption?.trim() || null;
+  const accessibleAlt = trimmedCaption ? `${alt} — ${trimmedCaption}` : alt;
 
   if (errored) {
     return (
@@ -69,7 +97,8 @@ export function FigureThumb({ url, alt, size = "md", className }: FigureThumbPro
           className,
         )}
         role="img"
-        aria-label="Figure not available"
+        aria-label={trimmedCaption ?? "Figure not available"}
+        title={trimmedCaption ?? undefined}
       >
         <ImageOff className="size-3" aria-hidden />
         figure indisponible
@@ -82,7 +111,8 @@ export function FigureThumb({ url, alt, size = "md", className }: FigureThumbPro
       <button
         type="button"
         onClick={() => setOpen(true)}
-        aria-label={`Agrandir : ${alt}`}
+        aria-label={`Agrandir : ${accessibleAlt}`}
+        title={trimmedCaption ?? undefined}
         className={cn(
           "group relative inline-flex overflow-hidden rounded-md border border-border/60 bg-muted/30",
           "shadow-sm transition hover:border-secondary/40 hover:shadow",
@@ -93,7 +123,7 @@ export function FigureThumb({ url, alt, size = "md", className }: FigureThumbPro
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={url}
-          alt={alt}
+          alt={accessibleAlt}
           loading="lazy"
           decoding="async"
           onError={() => setErrored(true)}
@@ -124,7 +154,7 @@ export function FigureThumb({ url, alt, size = "md", className }: FigureThumbPro
               "border-0 bg-transparent p-0 shadow-none",
             )}
           >
-            <DialogTitle className="sr-only">{alt}</DialogTitle>
+            <DialogTitle className="sr-only">{accessibleAlt}</DialogTitle>
             {/*
              * Scrollable + pinch-zoomable container.
              *
@@ -146,11 +176,21 @@ export function FigureThumb({ url, alt, size = "md", className }: FigureThumbPro
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={url}
-                alt={alt}
+                alt={accessibleAlt}
                 className={cn(
                   "block h-auto w-full max-w-none object-contain",
                 )}
               />
+              {trimmedCaption && (
+                <p
+                  className={cn(
+                    "px-4 py-3 text-[13px] leading-relaxed",
+                    "border-t border-border/60 bg-muted/40 text-muted-foreground",
+                  )}
+                >
+                  {trimmedCaption}
+                </p>
+              )}
               <DialogClose
                 aria-label="Fermer"
                 className={cn(

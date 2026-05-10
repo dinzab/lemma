@@ -442,10 +442,15 @@ export function LemmaInlineCitationFigure({
 }
 
 /**
- * Parse `lemma:fig:<exam>:<exercise>:<side>:<index>` into a
+ * Parse either canonical or legacy `lemma:fig:…` URI into a
  * FigureRegistry lookup key. Mirrors the helper in
  * `LemmaConversation` but lives here so the chip can resolve its
  * key independently of the collector.
+ *
+ *   canonical: lemma:fig:<exam>:<exercise>:<question>:<side>:<index>
+ *              → { pair_id: "<exam>:<exercise>:<question>", … }
+ *   legacy:    lemma:fig:<exam>:<exercise>:<side>:<index>
+ *              → { pair_id: "<exam>:<exercise>", … }
  */
 function parseFigureRefUri(refUri: string): FigureKey | null {
   if (!refUri.startsWith("lemma:fig:")) return null;

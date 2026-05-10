@@ -46,10 +46,16 @@ export interface FigureKey {
 
 /**
  * Build the canonical registry key for a figure citation. Mirrors the
- * `lemma:fig:<exam_handle>:<exercise_handle>:<side>:<index>` URI
- * grammar, but keyed on the full pair_id rather than the parsed
+ * canonical
+ * `lemma:fig:<exam_handle>:<exercise_handle>:<question_handle>:<side>:<index>`
+ * URI grammar, but keyed on the full pair_id rather than the parsed
  * handles so registration sites (which already hold the pair_id)
  * don't have to re-parse.
+ *
+ * Legacy 4-segment URIs end up keyed as `<exam>:<exercise>:<side>:<index>`
+ * (no question handle). Registration sites do *not* write under that
+ * synthetic key any more, so legacy chips miss the registry and fall
+ * through to the `/references/lemma` resolver.
  */
 export function figureRegistryKey({
   pair_id,

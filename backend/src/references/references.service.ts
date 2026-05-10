@@ -141,6 +141,15 @@ type ParsedUri =
       kind: 'figure';
       exam_handle: string;
       exercise_handle: string;
+      /**
+       * Present for canonical 5-segment figure URIs
+       * (`lemma:fig:<exam>:<exercise>:<question>:<side>:<index>`),
+       * absent for legacy 4-segment URIs persisted by older agent
+       * turns. Resolvers branch on this: when present we look up the
+       * exact pair via `pair_id_logical`; when absent we fall back to
+       * the legacy scroll-and-pick behaviour.
+       */
+      question_handle: string | null;
       side: 'enonce' | 'corrige';
       index: number;
     }
@@ -206,24 +215,44 @@ export class ReferencesService {
     uri: string,
     parsed: Extract<ParsedUri, { kind: 'figure' }>,
   ): Promise<ResolvedFigureResponse> {
-    const points = await this.scrollExercisePairs(
-      parsed.exam_handle,
-      parsed.exercise_handle,
-    );
-    if (points.length === 0) throw new LemmaUriNotFoundError(uri);
-
-    // Find the first pair under the exercise that actually carries the
-    // requested figure on the requested side at the requested index.
     let targetPoint: QdrantPoint | null = null;
     let targetEntries: ReturnType<typeof readFigureEntries> = [];
-    for (const p of points) {
-      const entries = readFigureEntries(p.payload, parsed.side);
-      if (entries.length > parsed.index) {
-        targetPoint = p;
-        targetEntries = entries;
-        break;
+
+    if (parsed.question_handle) {
+      // Canonical 5-segment shape: look up the exact pair so we always
+      // surface the figure the agent actually saw, not whichever pair
+      // happens to scroll first under this (exam, exercise).
+      const pairId = `${parsed.exam_handle}:${parsed.exercise_handle}:${parsed.question_handle}`;
+      const point = await this.qdrant.getByPairId(pairId);
+      if (point) {
+        const entries = readFigureEntries(point.payload, parsed.side);
+        if (entries.length > parsed.index) {
+          targetPoint = point;
+          targetEntries = entries;
+        }
       }
     }
+
+    if (!targetPoint) {
+      // Legacy 4-segment shape (or 5-segment with a stale pair_id):
+      // scroll the exercise and pick the first pair whose figures array
+      // is long enough. Predates the v6 cutover; behaviour matches the
+      // chip the user already saw before this fix shipped.
+      const points = await this.scrollExercisePairs(
+        parsed.exam_handle,
+        parsed.exercise_handle,
+      );
+      if (points.length === 0) throw new LemmaUriNotFoundError(uri);
+      for (const p of points) {
+        const entries = readFigureEntries(p.payload, parsed.side);
+        if (entries.length > parsed.index) {
+          targetPoint = p;
+          targetEntries = entries;
+          break;
+        }
+      }
+    }
+
     if (!targetPoint || targetEntries.length === 0) {
       throw new LemmaUriNotFoundError(uri);
     }
@@ -236,7 +265,19 @@ export class ReferencesService {
       parsed.exam_handle,
       parsed.exercise_handle,
     );
-    const ctx = citationContextFromMeta(meta);
+    const ctx: CitationContext = {
+      ...citationContextFromMeta(meta),
+      // Carry the question handle through so the rebuilt citation
+      // emits the same canonical 5-segment URI the chip sent in.
+      // Falls back to whatever the payload exposes (preserves the
+      // legacy behaviour for 4-segment URIs whose pair we picked
+      // by scroll order).
+      question_handle:
+        parsed.question_handle ??
+        (typeof targetPoint.payload?.question_number === 'string'
+          ? `q_${targetPoint.payload.question_number as string}`
+          : null),
+    };
     const figure: ResolvedFigure = {
       url: buildImageUrl(figEntry.relpath, this.cdnBase),
       label: figEntry.label,
@@ -666,20 +707,50 @@ function parseLemmaUri(uri: string): ParsedUri | null {
   if (uri.startsWith('lemma:fig:')) {
     const rest = uri.slice('lemma:fig:'.length);
     const parts = rest.split(':');
-    // exam : exercise : side : index
+    // Two accepted shapes:
+    //   5-segment (canonical): exam : exercise : question : side : index
+    //   4-segment (legacy):    exam : exercise : side : index
+    // Both end in `:<side>:<index>`, so we peel those off the right and
+    // inspect what remains. The middle slot is a question handle when
+    // it starts with `q_` (the v6 convention) and an exercise handle
+    // when it starts with `ex_` — that lets us tell the two shapes
+    // apart even though they share the same total component count for
+    // some malformed inputs.
     if (parts.length < 4) return null;
     const idxRaw = parts[parts.length - 1];
     const sideRaw = parts[parts.length - 2];
     if (sideRaw !== 'enonce' && sideRaw !== 'corrige') return null;
     const index = Number.parseInt(idxRaw, 10);
     if (!Number.isFinite(index) || index < 0) return null;
-    const examHandle = parts.slice(0, parts.length - 3).join(':');
-    const exerciseHandle = parts[parts.length - 3];
+    // Tail is `<side>:<index>`. The slot just before that is either an
+    // exercise handle (legacy 4-segment) or a question handle (canonical
+    // 5-segment). Prefer the canonical reading when the third-from-last
+    // slot is `ex_*`: that means we have <exam...>:<exercise>:<question>:<side>:<index>.
+    const tailSlot = parts[parts.length - 3];
+    const slotBeforeTail = parts.length >= 5 ? parts[parts.length - 4] : null;
+    let examHandle: string;
+    let exerciseHandle: string;
+    let questionHandle: string | null = null;
+    if (
+      slotBeforeTail !== null &&
+      /^ex_/.test(slotBeforeTail) &&
+      tailSlot.length > 0
+    ) {
+      // Canonical 5-segment: tailSlot is the question handle.
+      questionHandle = tailSlot;
+      exerciseHandle = slotBeforeTail;
+      examHandle = parts.slice(0, parts.length - 4).join(':');
+    } else {
+      // Legacy 4-segment: tailSlot is the exercise handle.
+      exerciseHandle = tailSlot;
+      examHandle = parts.slice(0, parts.length - 3).join(':');
+    }
     if (!examHandle || !exerciseHandle) return null;
     return {
       kind: 'figure',
       exam_handle: examHandle,
       exercise_handle: exerciseHandle,
+      question_handle: questionHandle,
       side: sideRaw,
       index,
     };

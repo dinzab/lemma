@@ -16,9 +16,19 @@ function ScrollArea({
       className={cn("relative", className)}
       {...props}
     >
+      {/*
+        Radix wraps the viewport's children in a div with inline styles
+        `display: table; min-width: 100%` so that horizontal-overflow detection
+        works. With `display: table`, the wrapper shrink-wraps to its content's
+        natural width, which can outgrow the viewport when long unbreakable
+        content (e.g. a long sidebar chat title) is present, and the parent's
+        `overflow: hidden` then clips it. We don't use horizontal scroll here,
+        so override the wrapper to `display: block` and `width: 100%` so the
+        chain has a definite width and `truncate` / `min-w-0` can do their job.
+      */}
       <ScrollAreaPrimitive.Viewport
         data-slot="scroll-area-viewport"
-        className="focus-visible:ring-ring/50 size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:outline-1"
+        className="focus-visible:ring-ring/50 size-full rounded-[inherit] transition-[color,box-shadow] outline-none focus-visible:ring-[3px] focus-visible:outline-1 [&>div]:!block [&>div]:!w-full"
       >
         {children}
       </ScrollAreaPrimitive.Viewport>

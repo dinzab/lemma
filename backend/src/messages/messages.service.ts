@@ -52,6 +52,13 @@ export class MessagesService {
     userId: string;
     role: MessageRole;
     content?: string;
+    /**
+     * Buffered chain-of-thought captured between `reasoning-start`
+     * and `reasoning-end` for assistant rows. Empty / undefined for
+     * non-assistant rows and for assistant rows whose model didn't
+     * emit any reasoning. See `MessageRecord.reasoning`.
+     */
+    reasoning?: string;
     toolName?: string | null;
     toolCallId?: string | null;
     toolInput?: unknown;
@@ -84,6 +91,7 @@ export class MessagesService {
           user_id: input.userId,
           role: input.role,
           content: input.content ?? '',
+          reasoning: input.reasoning ?? '',
           tool_name: input.toolName ?? null,
           tool_call_id: input.toolCallId ?? null,
           tool_input: input.toolInput ?? null,
@@ -92,7 +100,7 @@ export class MessagesService {
           sequence: nextSequence,
         })
         .select(
-          'id, thread_id, run_id, user_id, role, content, ' +
+          'id, thread_id, run_id, user_id, role, content, reasoning, ' +
             'tool_name, tool_call_id, tool_input, tool_output, ' +
             'token_count, sequence, created_at',
         )
@@ -204,7 +212,7 @@ export class MessagesService {
     let query = this.supabase
       .from('messages')
       .select(
-        'id, thread_id, run_id, user_id, role, content, ' +
+        'id, thread_id, run_id, user_id, role, content, reasoning, ' +
           'tool_name, tool_call_id, tool_input, tool_output, ' +
           'token_count, sequence, created_at',
       )

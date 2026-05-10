@@ -63,6 +63,14 @@ interface PersistedMessage {
   role: "user" | "assistant" | "tool" | "system";
   content: string;
   /**
+   * Streamed chain-of-thought captured during this assistant turn,
+   * persisted alongside the matching text segment so the
+   * `<Reasoning>` collapsible the user saw live is restored on
+   * reload. Empty / undefined for non-assistant rows and for assistant
+   * rows whose model didn't emit any reasoning.
+   */
+  reasoning?: string;
+  /**
    * Run id this message belongs to. Tool-role rows are rehydrated
    * onto the assistant turn that owns them by matching `runId`.
    */
@@ -562,8 +570,23 @@ function toUiMessages(persisted: PersistedMessage[]): UIMessage[] {
           input: (r.toolInput ?? {}) as Record<string, unknown>,
           ...(hasOutput ? { output } : {}),
         } as UIMessage["parts"][number]);
-      } else if (r.role === "assistant" && r.content) {
-        parts.push({ type: "text", text: r.content, state: "done" });
+      } else if (r.role === "assistant") {
+        // A persisted assistant row may carry reasoning, text, or both
+        // (the chat backend writes a row per closed text segment AND a
+        // row per closed reasoning segment). Emit reasoning first so
+        // the `<Reasoning>` collapsible renders above the text the
+        // model was "thinking about" — mirrors the live streaming
+        // order where `reasoning-end` precedes the next `text-start`.
+        if (r.reasoning && r.reasoning.length > 0) {
+          parts.push({
+            type: "reasoning",
+            text: r.reasoning,
+            state: "done",
+          } as UIMessage["parts"][number]);
+        }
+        if (r.content) {
+          parts.push({ type: "text", text: r.content, state: "done" });
+        }
       }
     }
 

@@ -11,6 +11,15 @@ export interface MessageRecord {
   userId: string;
   role: MessageRole;
   content: string;
+  /**
+   * Streamed chain-of-thought captured between `reasoning-start` and
+   * `reasoning-end` while the assistant turn was live. Empty string for
+   * non-assistant rows and for assistant rows whose model didn't emit
+   * any reasoning (most providers other than NIM / o1 etc.). Populated
+   * here so reload reproduces the same `<Reasoning>` collapsible the
+   * user saw during streaming.
+   */
+  reasoning: string;
   toolName: string | null;
   toolCallId: string | null;
   toolInput: unknown;
@@ -41,6 +50,9 @@ export interface MessageRow {
   user_id: string;
   role: MessageRole;
   content: string;
+  /** See MessageRecord.reasoning. Nullable on the wire only because the
+   * column was added after the initial schema; we coerce to '' below. */
+  reasoning: string | null;
   tool_name: string | null;
   tool_call_id: string | null;
   tool_input: unknown;
@@ -58,6 +70,7 @@ export function rowToMessage(row: MessageRow): MessageRecord {
     userId: row.user_id,
     role: row.role,
     content: row.content,
+    reasoning: row.reasoning ?? '',
     toolName: row.tool_name,
     toolCallId: row.tool_call_id,
     toolInput: row.tool_input,

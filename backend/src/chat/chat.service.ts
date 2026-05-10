@@ -279,6 +279,7 @@ export class ChatService {
     // `textStreamedViaMessages` flag, which dropped the fallback.
     const streamedAiMessageIds = new Set<string>();
     let activeReasoningId: string | null = null;
+    let activeReasoningBuffer = '';
     const streamedReasoningIds = new Set<string>();
     // Map tool_call_id → messages row id so we can patch tool_output
     // when the corresponding ToolMessage arrives later in the stream.
@@ -337,13 +338,41 @@ export class ChatService {
     const openReasoning = (id: string) => {
       if (activeReasoningId !== null) return;
       activeReasoningId = id;
+      activeReasoningBuffer = '';
       publish({ type: 'reasoning-start', id });
     };
 
-    const closeReasoning = () => {
+    // Close the current reasoning part on the wire AND persist its
+    // accumulated text as its own assistant row so reload reproduces
+    // the same `<Reasoning>` collapsible the user saw live. The row
+    // carries an empty `content` and the buffered chain-of-thought in
+    // `reasoning`; the frontend's `toUiMessages` rehydrator emits a
+    // `{ type: "reasoning", text, state: "done" }` UIMessage part for
+    // any row with non-empty `reasoning`.
+    //
+    // Called at every tool-call boundary, every reasoning→answer flip,
+    // and at end-of-turn. No-op if no reasoning is currently open.
+    const closeReasoning = async () => {
       if (activeReasoningId === null) return;
       publish({ type: 'reasoning-end', id: activeReasoningId });
+      const buffered = activeReasoningBuffer;
       activeReasoningId = null;
+      activeReasoningBuffer = '';
+      if (buffered.trim().length === 0) return;
+      try {
+        await this.messages.insertMessage({
+          threadId,
+          runId,
+          userId,
+          role: 'assistant',
+          content: '',
+          reasoning: buffered,
+        });
+      } catch (err) {
+        this.logger.warn(
+          `Failed to persist reasoning segment for run ${runId}: ${String(err)}`,
+        );
+      }
     };
 
     const announceToolInput = async (
@@ -357,7 +386,7 @@ export class ChatService {
       // sequence — so reload reconstructs the same ordering the
       // user saw live.
       await closeTextSegment();
-      closeReasoning();
+      await closeReasoning();
       publish({
         type: 'tool-input-available',
         toolCallId: callId,
@@ -408,6 +437,7 @@ export class ChatService {
               streamedReasoningIds.add(rid);
               openReasoning(rid);
               if (activeReasoningId) {
+                activeReasoningBuffer += reasoningDelta;
                 publish({
                   type: 'reasoning-delta',
                   id: activeReasoningId,
@@ -421,7 +451,7 @@ export class ChatService {
               // Switching from reasoning → answer: close the
               // reasoning part so the AI SDK ends the "Thinking…"
               // shimmer before the answer text streams in.
-              closeReasoning();
+              await closeReasoning();
               openText();
               activeTextBuffer += delta;
               if (activeTextId) {
@@ -516,13 +546,14 @@ export class ChatService {
                   const rid = ai.id ?? `reasoning-${randomUUID()}`;
                   openReasoning(rid);
                   if (activeReasoningId) {
+                    activeReasoningBuffer += reasoning;
                     publish({
                       type: 'reasoning-delta',
                       id: activeReasoningId,
                       delta: reasoning,
                     });
                   }
-                  closeReasoning();
+                  await closeReasoning();
                 }
 
                 const text =
@@ -597,7 +628,7 @@ export class ChatService {
       }
     } catch (err) {
       await closeTextSegment();
-      closeReasoning();
+      await closeReasoning();
       if (isAbortError(err)) {
         // Reserved for an explicit, future stop endpoint. Currently
         // nothing aborts `abortController` — page reload is handled
@@ -626,7 +657,7 @@ export class ChatService {
     // Flush the trailing text / reasoning segments (the model's
     // final answer).
     await closeTextSegment();
-    closeReasoning();
+    await closeReasoning();
     await this.agentRuns.completeRun(runId);
     publish({ type: 'finish' });
     this.hub.close(runId, 'completed');
@@ -731,6 +762,12 @@ function toMessageDto(message: MessageRecord): MessageDto {
     runId: message.runId,
     createdAt: message.createdAt.toISOString(),
   };
+  // Surface reasoning to the wire only when it's actually populated —
+  // the field is empty for the vast majority of rows (non-assistant,
+  // and assistant turns where the model didn't emit chain-of-thought).
+  if (message.reasoning && message.reasoning.length > 0) {
+    base.reasoning = message.reasoning;
+  }
 
   if (message.role === 'tool') {
     return {

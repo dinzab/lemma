@@ -37,6 +37,12 @@ export interface MessageDto {
   role: 'user' | 'assistant' | 'tool' | 'system';
   content: string;
   /**
+   * Streamed chain-of-thought captured during the assistant turn (NIM /
+   * o1-class models). Present on assistant rows only; omitted when
+   * empty so the wire stays compact for the common case.
+   */
+  reasoning?: string;
+  /**
    * id of the agent run this message belongs to. The frontend uses
    * this to fold tool-role rows back into the dynamic-tool parts of
    * the assistant turn that owns them on history reload.

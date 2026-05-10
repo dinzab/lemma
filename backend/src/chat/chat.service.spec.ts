@@ -133,6 +133,7 @@ function makeMessageRecord(overrides: Partial<MessageRecord>): MessageRecord {
     userId: USER_ID,
     role: overrides.role ?? 'assistant',
     content: overrides.content ?? '',
+    reasoning: overrides.reasoning ?? '',
     toolName: overrides.toolName ?? null,
     toolCallId: overrides.toolCallId ?? null,
     toolInput: overrides.toolInput ?? null,
@@ -309,6 +310,99 @@ describe('ChatService.streamRunToResponse', () => {
     expect(deps.agentRuns.completeRun).toHaveBeenCalledWith(RUN_ID);
     expect(deps.agentRuns.failRun).not.toHaveBeenCalled();
     expect(deps.agentRuns.cancelRun).not.toHaveBeenCalled();
+  });
+
+  it('persists streamed reasoning as its own assistant row so reload restores the <Reasoning> collapsible', async () => {
+    // Mirrors a NIM / o1-class turn: the model emits reasoning_content
+    // first (chain-of-thought), then a normal text answer. The wire
+    // sequence the user sees is:
+    //   reasoning-start → reasoning-delta(...) → reasoning-end →
+    //   text-start → text-delta → text-end → finish
+    // The DB write sequence we want is:
+    //   user, assistant(reasoning), assistant(text)
+    async function* synthetic(): AsyncGenerator<{
+      mode: 'messages' | 'updates';
+      payload: unknown;
+    }> {
+      yield {
+        mode: 'messages',
+        payload: [
+          new AIMessageChunk({
+            id: 'ai-1',
+            content: '',
+            additional_kwargs: {
+              reasoning_content: 'Thinking step 1. ',
+            },
+          }),
+          {},
+        ],
+      };
+      yield {
+        mode: 'messages',
+        payload: [
+          new AIMessageChunk({
+            id: 'ai-1',
+            content: '',
+            additional_kwargs: {
+              reasoning_content: 'Thinking step 2.',
+            },
+          }),
+          {},
+        ],
+      };
+      yield* messageEvent(
+        new AIMessageChunk({ id: 'ai-1', content: 'Final answer.' }),
+      );
+    }
+
+    const { service, deps } = buildService(synthetic());
+    const { response, frames } = makeMockResponse();
+
+    await service.streamRunToResponse({
+      threadId: THREAD_ID,
+      userId: USER_ID,
+      message: 'hello',
+      response,
+    });
+
+    // Wire: reasoning chunks arrive before text chunks.
+    const chunkTypes = (frames() as Array<{ type: string }>).map((c) => c.type);
+    expect(chunkTypes).toEqual(
+      expect.arrayContaining([
+        'reasoning-start',
+        'reasoning-delta',
+        'reasoning-end',
+        'text-start',
+        'text-delta',
+        'text-end',
+      ]),
+    );
+    expect(chunkTypes.indexOf('reasoning-end')).toBeLessThan(
+      chunkTypes.indexOf('text-start'),
+    );
+
+    // DB writes: user → assistant(reasoning row) → assistant(text row).
+    // The reasoning row carries empty content + the buffered CoT in
+    // `reasoning`; the text row carries the answer in `content`.
+    const inserted = deps.messages.insertMessage.mock.calls.map(
+      (c) =>
+        c[0] as {
+          role: string;
+          content?: string;
+          reasoning?: string;
+        },
+    );
+    expect(inserted.map((m) => m.role)).toEqual([
+      'user',
+      'assistant',
+      'assistant',
+    ]);
+    const reasoningRow = inserted[1];
+    const textRow = inserted[2];
+    expect(reasoningRow.reasoning).toBe('Thinking step 1. Thinking step 2.');
+    expect(reasoningRow.content ?? '').toBe('');
+    expect(textRow.content).toBe('Final answer.');
+    expect(textRow.reasoning ?? '').toBe('');
   });
 
   it('keeps the run going after the client disconnects so resume can re-attach', async () => {

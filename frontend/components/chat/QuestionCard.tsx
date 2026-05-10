@@ -127,6 +127,7 @@ export function QuestionCard({ part }: QuestionCardProps) {
   const examLine = formatExamLine(payload);
   const exerciseLine = formatExerciseLine(payload);
   const figureAlt = formatFigureAlt(payload);
+  const difficultyLabel = formatDifficultyLabel(payload.difficulty);
   const corrigeAvailable =
     corrigeText.length > 0 ||
     corrigeFigures.length > 0 ||
@@ -136,7 +137,7 @@ export function QuestionCard({ part }: QuestionCardProps) {
     <aside
       aria-label="Question card"
       className={cn(
-        "my-3 w-full overflow-hidden rounded-2xl border border-secondary/30 bg-secondary/5",
+        "my-3 w-full overflow-hidden rounded-2xl border border-secondary/40 bg-secondary/5",
         "shadow-sm",
       )}
     >
@@ -144,22 +145,22 @@ export function QuestionCard({ part }: QuestionCardProps) {
       <div className="flex items-start gap-3 px-4 py-3">
         <span
           aria-hidden
-          className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-secondary/15 ring-1 ring-secondary/25"
+          className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-secondary/20 ring-1 ring-secondary/40"
         >
-          <ScrollText className="size-3.5 text-secondary-foreground" />
+          <ScrollText className="size-3.5 text-secondary" />
         </span>
 
         <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-secondary-foreground/80">
+          <div className="flex flex-wrap items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-secondary">
             <span>Passage du BAC</span>
             {examLine && (
-              <span className="rounded-full bg-secondary/20 px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal text-secondary-foreground">
+              <span className="rounded-full bg-secondary/20 px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal text-foreground">
                 {examLine}
               </span>
             )}
-            {payload.difficulty && (
+            {difficultyLabel && (
               <span className="rounded-full bg-muted/60 px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal text-muted-foreground">
-                {capitalise(String(payload.difficulty))}
+                {difficultyLabel}
               </span>
             )}
           </div>
@@ -180,14 +181,16 @@ export function QuestionCard({ part }: QuestionCardProps) {
 
       {/* Énoncé section. */}
       <div className="border-t border-secondary/20 bg-background/60 px-4 py-3">
-        <div className="mb-2 flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-secondary-foreground/80">
+        <div className="mb-2 flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-secondary">
           <BookOpen className="size-3" aria-hidden />
           Énoncé
         </div>
 
         {enonceText.length > 0 && (
           <div className="text-[14px] leading-relaxed text-foreground">
-            <MessageResponse>{enonceText}</MessageResponse>
+            <MessageResponse parseIncompleteMarkdown={false}>
+              {enonceText}
+            </MessageResponse>
           </div>
         )}
 
@@ -227,22 +230,22 @@ export function QuestionCard({ part }: QuestionCardProps) {
               type="button"
               onClick={() => setRevealCorrige(true)}
               className={cn(
-                "group inline-flex w-full items-center justify-between gap-2 rounded-lg border border-dashed border-secondary/40 bg-secondary/10 px-3 py-2 text-[13px] font-medium text-secondary-foreground transition-colors",
-                "hover:border-secondary/60 hover:bg-secondary/15",
+                "group inline-flex w-full items-center justify-between gap-2 rounded-lg border border-dashed border-secondary/50 bg-secondary/10 px-3 py-2 text-[13px] font-medium text-foreground transition-colors",
+                "hover:border-secondary/70 hover:bg-secondary/20 hover:text-secondary",
               )}
               aria-expanded={false}
             >
               <span className="inline-flex items-center gap-2">
-                <Lock className="size-3.5" aria-hidden />
+                <Lock className="size-3.5 text-secondary" aria-hidden />
                 Voir le corrigé
               </span>
-              <span className="text-[11px] font-normal text-muted-foreground transition-colors group-hover:text-secondary-foreground">
+              <span className="text-[11px] font-normal text-muted-foreground">
                 Essaie d&apos;abord, puis révèle
               </span>
             </button>
           ) : (
             <>
-              <div className="mb-2 flex items-center justify-between gap-2 text-[10.5px] font-semibold uppercase tracking-wider text-secondary-foreground/80">
+              <div className="mb-2 flex items-center justify-between gap-2 text-[10.5px] font-semibold uppercase tracking-wider text-secondary">
                 <span className="inline-flex items-center gap-1.5">
                   <BookOpen className="size-3" aria-hidden />
                   Corrigé
@@ -250,7 +253,7 @@ export function QuestionCard({ part }: QuestionCardProps) {
                 <button
                   type="button"
                   onClick={() => setRevealCorrige(false)}
-                  className="inline-flex items-center gap-1 text-[11px] font-medium normal-case tracking-normal text-muted-foreground hover:text-secondary-foreground"
+                  className="inline-flex items-center gap-1 text-[11px] font-medium normal-case tracking-normal text-muted-foreground hover:text-foreground"
                   aria-expanded
                 >
                   Masquer
@@ -260,7 +263,9 @@ export function QuestionCard({ part }: QuestionCardProps) {
 
               {corrigeText.length > 0 && (
                 <div className="text-[14px] leading-relaxed text-foreground">
-                  <MessageResponse>{corrigeText}</MessageResponse>
+                  <MessageResponse parseIncompleteMarkdown={false}>
+                    {corrigeText}
+                  </MessageResponse>
                 </div>
               )}
 
@@ -435,6 +440,28 @@ function formatFigureAlt(payload: QuestionPairPayload): string {
 function capitalise(s: string): string {
   if (s.length === 0) return s;
   return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/**
+ * Render the difficulty payload as a readable pill label.
+ *
+ * The corpus's `difficulty` field is sometimes a numeric scale (1–5)
+ * and sometimes a string token (“facile” / “moyenne” / “difficile”).
+ * A bare “3” in the header strip is meaningless to a student, so we
+ * prefix numeric values with “Difficulté …” (assumed `/5` per the
+ * corpus pipeline) and capitalise string values verbatim.
+ *
+ * Returns `null` when the field is empty or unrecognised so the pill
+ * collapses entirely.
+ */
+function formatDifficultyLabel(
+  difficulty: string | null | undefined,
+): string | null {
+  if (difficulty === null || difficulty === undefined) return null;
+  const raw = String(difficulty).trim();
+  if (raw.length === 0) return null;
+  if (/^\d+(\.\d+)?$/.test(raw)) return `Difficulté ${raw}/5`;
+  return capitalise(raw);
 }
 
 function stringField(value: unknown): string | null {

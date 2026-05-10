@@ -28,7 +28,12 @@ import {
   useMemo,
   useState,
 } from "react";
-import { Streamdown } from "streamdown";
+import { Streamdown, defaultUrlTransform } from "streamdown";
+import type { UrlTransform } from "streamdown";
+import {
+  LemmaInlineCitation,
+  LemmaInlineCitationFigure,
+} from "@/components/chat/LemmaInlineCitation";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage["role"];
@@ -335,6 +340,66 @@ const streamdownPlugins = {
 };
 
 /**
+ * Streamdown's default `urlTransform` (inherited from react-markdown)
+ * strips any `href` whose protocol isn't on a small allow-list
+ * (http, https, mailto, tel, irc, sms, …). Our agent emits
+ * `lemma:` URIs for inline citation chips (`lemma:pair:…`,
+ * `lemma:fig:…`, `lemma:exercise:…`, `lemma:exam:…`); we
+ * pass them through verbatim and dispatch them to a custom
+ * `<a>` renderer below. Everything else falls back to the default
+ * sanitiser — we never want to weaken protocol checks for the
+ * generic case.
+ */
+const lemmaSafeUrlTransform: UrlTransform = (url, key, node) => {
+  if (typeof url === "string" && url.startsWith("lemma:")) return url;
+  return defaultUrlTransform(url, key, node);
+};
+
+interface AnchorComponentProps extends ComponentProps<"a"> {
+  // Streamdown's `Components` map adds an `ExtraProps` member with
+  // the original hast `node` — we don't currently need it.
+  node?: unknown;
+}
+
+function LemmaAwareAnchor({
+  href,
+  children,
+  className,
+  node: _node,
+  ...rest
+}: AnchorComponentProps) {
+  void _node;
+  if (typeof href === "string" && href.startsWith("lemma:fig:")) {
+    return (
+      <LemmaInlineCitationFigure refUri={href} className={className}>
+        {children}
+      </LemmaInlineCitationFigure>
+    );
+  }
+  if (
+    typeof href === "string" &&
+    (href.startsWith("lemma:pair:") ||
+      href.startsWith("lemma:exercise:") ||
+      href.startsWith("lemma:exam:"))
+  ) {
+    return (
+      <LemmaInlineCitation refUri={href} className={className}>
+        {children}
+      </LemmaInlineCitation>
+    );
+  }
+  return (
+    <a href={href} className={className} {...rest}>
+      {children}
+    </a>
+  );
+}
+
+const streamdownComponents = {
+  a: LemmaAwareAnchor,
+};
+
+/**
  * Convert LaTeX-native math delimiters to the `$...$` / `$$...$$`
  * delimiters that `remark-math` understands.
  *
@@ -371,6 +436,8 @@ export const MessageResponse = memo(
           className
         )}
         plugins={streamdownPlugins}
+        components={streamdownComponents}
+        urlTransform={lemmaSafeUrlTransform}
         {...props}
       >
         {normalised}

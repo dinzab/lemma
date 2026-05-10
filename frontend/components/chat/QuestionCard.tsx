@@ -136,9 +136,11 @@ export function QuestionCard({ part }: QuestionCardProps) {
   return (
     <aside
       aria-label="Question card"
+      data-pair-id={payload.pair_id ?? undefined}
       className={cn(
         "my-3 w-full overflow-hidden rounded-2xl border border-secondary/40 bg-secondary/5",
         "shadow-sm",
+        "scroll-mt-24 transition-shadow",
       )}
     >
       {/* Header strip — metadata, scannable at a glance. */}

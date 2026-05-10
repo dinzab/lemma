@@ -1,8 +1,14 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { GraduationCap, Sparkles } from "lucide-react";
 import type { UIMessage } from "ai";
+
+import {
+  FigureRegistryProvider,
+  useFigureRegistry,
+} from "@/context/figure-registry-context";
+import type { FigureKey, RegisteredFigure } from "@/context/figure-registry-context";
 
 import {
   Conversation,
@@ -117,6 +123,63 @@ export function LemmaConversation({
     );
   }
 
+  return (
+    <FigureRegistryProvider>
+      <FigureCollector messages={messages} />
+      <ConversationInner
+        messages={messages}
+        showAssistantTyping={showAssistantTyping}
+        latestWriteTodosLocation={latestWriteTodosLocation}
+        isStreaming={isStreaming}
+      />
+    </FigureRegistryProvider>
+  );
+}
+
+/**
+ * Side-effect-only component: walks the conversation's tool parts and
+ * registers every figure surfaced through `search_questions`,
+ * `get_question_pair`, `show_question_assets`, or `inspect_figure`
+ * into the FigureRegistry. The inline `lemma:fig:…` chip in
+ * `MessageResponse` reads from that registry to render a
+ * click-to-zoom thumbnail next to the prose.
+ */
+function FigureCollector({ messages }: { messages: UIMessage[] }) {
+  const { registerFigure } = useFigureRegistry();
+  useEffect(() => {
+    for (const message of messages) {
+      for (const part of message.parts) {
+        const partType = (part as { type?: string }).type;
+        if (
+          partType !== "dynamic-tool" &&
+          (typeof partType !== "string" || !partType.startsWith("tool-"))
+        ) {
+          continue;
+        }
+        const output = (part as { output?: unknown }).output;
+        if (output === undefined || output === null) continue;
+        for (const reg of collectFigureRegistrations(output)) {
+          registerFigure(reg.key, reg.figure);
+        }
+      }
+    }
+  }, [messages, registerFigure]);
+  return null;
+}
+
+interface ConversationInnerProps {
+  messages: UIMessage[];
+  showAssistantTyping: boolean;
+  latestWriteTodosLocation: { messageIdx: number; partIdx: number } | null;
+  isStreaming: boolean;
+}
+
+function ConversationInner({
+  messages,
+  showAssistantTyping,
+  latestWriteTodosLocation,
+  isStreaming,
+}: ConversationInnerProps) {
   return (
     <Conversation>
       <ConversationContent className="mx-auto w-full max-w-3xl">
@@ -380,4 +443,192 @@ function TypingIndicator() {
       <span className="size-1.5 animate-bounce rounded-full bg-primary/80" />
     </div>
   );
+}
+
+interface RawFigureEntry {
+  url?: string | null;
+  label?: string | null;
+  caption?: string | null;
+  citation?: { ref_uri?: string | null } | null;
+}
+
+interface RawFigurePayload {
+  pair_id?: string | null;
+  figures?: {
+    enonce?: RawFigureEntry[] | null;
+    corrige?: RawFigureEntry[] | null;
+  } | null;
+  // search_questions returns { results: RawFigurePayload[] }
+  results?: RawFigurePayload[] | null;
+  // inspect_figure returns { figures: RawFigureEntry[] } at top level
+  // alongside the standalone-figure shape — handled separately below.
+}
+
+/**
+ * Walk one tool-call output and emit a flat list of figure
+ * registrations for the FigureRegistry. We try to recognise three
+ * shapes:
+ *
+ *  1. `formatPairForLLM` (used by `get_question_pair`,
+ *     `show_question_assets`, and embedded under `results[]` for
+ *     `search_questions`) — a `pair_id` + `figures.{enonce,corrige}[]`.
+ *  2. `inspect_figure` — a top-level `pair_id` + a flat `figures[]`
+ *     where each entry already carries its own
+ *     `citation.ref_uri` (`lemma:fig:…`) so we use that as the
+ *     canonical key without re-deriving side / index from the array
+ *     position.
+ *  3. anything else — quietly ignored.
+ *
+ * Defensive against malformed shapes — every level is optional so
+ * we can register what we can and skip the rest.
+ */
+function collectFigureRegistrations(
+  output: unknown,
+): { key: FigureKey; figure: RegisteredFigure }[] {
+  const out: { key: FigureKey; figure: RegisteredFigure }[] = [];
+  const parsed = parseToolOutput(output);
+  if (!parsed || typeof parsed !== "object") return out;
+
+  // Shape 3 is handled by the catch-all early-return; we now handle 1 & 2.
+  const root = parsed as RawFigurePayload & {
+    figures?: RawFigureEntry[] | { enonce?: RawFigureEntry[] | null; corrige?: RawFigureEntry[] | null } | null;
+  };
+
+  // search_questions: walk results[]
+  if (Array.isArray(root.results)) {
+    for (const r of root.results) {
+      if (!r || typeof r !== "object") continue;
+      out.push(...registrationsForPair(r));
+    }
+  }
+
+  // get_question_pair / show_question_assets: top-level pair shape
+  out.push(...registrationsForPair(root));
+
+  // inspect_figure: top-level `figures` is a flat array of entries
+  // each carrying a `citation.ref_uri` like
+  // `lemma:fig:<exam>:<exercise>:<side>:<index>`.
+  if (Array.isArray(root.figures)) {
+    for (const fig of root.figures) {
+      if (!fig || typeof fig !== "object") continue;
+      const refUri = fig.citation?.ref_uri ?? null;
+      const key = parseFigureRefUri(refUri);
+      if (!key) continue;
+      const url = typeof fig.url === "string" ? fig.url : null;
+      if (!url) continue;
+      out.push({
+        key,
+        figure: {
+          url,
+          alt: fig.label ?? "Figure",
+          caption: fig.caption ?? null,
+          shortLabel: fig.label ?? "Figure",
+          label: fig.label ?? "Figure",
+        },
+      });
+    }
+  }
+
+  return out;
+}
+
+/**
+ * Emit FigureRegistry entries for one pair-shaped payload. Reads
+ * `pair_id` + `figures.{enonce,corrige}[]` and keys each figure by
+ * `<pair_id>:<side>:<0-based-index>` to mirror the `lemma:fig:…`
+ * citation grammar.
+ */
+function registrationsForPair(
+  payload: RawFigurePayload,
+): { key: FigureKey; figure: RegisteredFigure }[] {
+  const out: { key: FigureKey; figure: RegisteredFigure }[] = [];
+  const pair_id = typeof payload.pair_id === "string" ? payload.pair_id : null;
+  if (!pair_id) return out;
+  // The `lemma:fig:…` URI grammar drops the question handle —
+  // figures live on an exercise, not on a sub-question. Register
+  // both the synthetic exercise handle (the prefix the chip parses
+  // out of the URI) AND the full pair_id (so future variants of the
+  // citation grammar that include the question handle still resolve)
+  // — both point at the same RegisteredFigure entry.
+  const exerciseHandle = exerciseHandleFromPairId(pair_id);
+  const figs = payload.figures;
+  if (!figs || typeof figs !== "object" || Array.isArray(figs)) return out;
+  for (const side of ["enonce", "corrige"] as const) {
+    const list = figs[side];
+    if (!Array.isArray(list)) continue;
+    list.forEach((fig, index) => {
+      if (!fig || typeof fig !== "object") return;
+      const url = typeof fig.url === "string" ? fig.url : null;
+      if (!url) return;
+      const sideLabel = side === "enonce" ? "l'énoncé" : "la correction";
+      const figure: RegisteredFigure = {
+        url,
+        alt: fig.label ?? `figure ${index + 1} de ${sideLabel}`,
+        caption: fig.caption ?? null,
+        shortLabel: `figure ${index + 1} de ${sideLabel}`,
+        label: fig.label ?? `figure ${index + 1} de ${sideLabel}`,
+      };
+      out.push({ key: { pair_id, side, index }, figure });
+      if (exerciseHandle && exerciseHandle !== pair_id) {
+        out.push({
+          key: { pair_id: exerciseHandle, side, index },
+          figure,
+        });
+      }
+    });
+  }
+  return out;
+}
+
+/**
+ * Given a v6 pair_id (e.g. `math-2024-principale-math:ex_1:q_1.a`),
+ * return the exercise-only handle (`math-2024-principale-math:ex_1`).
+ * The figure citation URI uses the latter, so the FigureRegistry
+ * needs an entry under that key for the chip lookup to hit.
+ */
+function exerciseHandleFromPairId(pairId: string): string | null {
+  const parts = pairId.split(":");
+  if (parts.length < 2) return null;
+  return `${parts[0]}:${parts[1]}`;
+}
+
+function parseToolOutput(output: unknown): unknown {
+  if (typeof output === "string") {
+    try {
+      return JSON.parse(output);
+    } catch {
+      return null;
+    }
+  }
+  return output;
+}
+
+/**
+ * Parse a `lemma:fig:<exam>:<exercise>:<side>:<index>` URI back into
+ * a FigureRegistry key. Returns null for any non-`lemma:fig:…` URI
+ * or a malformed one.
+ *
+ * The pair_id is recomposed from `<exam>:<exercise>:<question>` —
+ * but figure URIs only carry `<exam>:<exercise>` (no question
+ * handle), so we can't reconstruct a full pair_id here. Instead we
+ * register figures keyed by the synthetic pair handle
+ * `<exam>:<exercise>` for inspect_figure-style entries; the chip
+ * lookup uses the same synthetic handle when the URI lacks a
+ * question handle.
+ */
+function parseFigureRefUri(refUri: string | null | undefined): FigureKey | null {
+  if (typeof refUri !== "string") return null;
+  if (!refUri.startsWith("lemma:fig:")) return null;
+  const rest = refUri.slice("lemma:fig:".length);
+  const parts = rest.split(":");
+  if (parts.length < 4) return null;
+  const index = Number.parseInt(parts[parts.length - 1], 10);
+  const sideRaw = parts[parts.length - 2];
+  if (sideRaw !== "enonce" && sideRaw !== "corrige") return null;
+  if (!Number.isFinite(index) || index < 0) return null;
+  // Everything before <side>:<index> is `<exam>:<exercise>` (the
+  // exam handle itself contains hyphens but no colons in v6).
+  const handle = parts.slice(0, parts.length - 2).join(":");
+  if (!handle) return null;
+  return { pair_id: handle, side: sideRaw, index };
 }

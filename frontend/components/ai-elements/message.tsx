@@ -28,8 +28,14 @@ import {
   useMemo,
   useState,
 } from "react";
-import { Streamdown, defaultUrlTransform } from "streamdown";
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
+import {
+  Streamdown,
+  defaultRehypePlugins,
+  defaultUrlTransform,
+} from "streamdown";
 import type { UrlTransform } from "streamdown";
+import type { PluggableList } from "unified";
 import {
   LemmaInlineCitation,
   LemmaInlineCitationFigure,
@@ -355,6 +361,49 @@ const lemmaSafeUrlTransform: UrlTransform = (url, key, node) => {
   return defaultUrlTransform(url, key, node);
 };
 
+/**
+ * Streamdown's default rehype pipeline runs `rehype-sanitize` BEFORE
+ * `rehype-harden`. The sanitiser strips any `href` whose protocol
+ * isn't on `defaultSchema.protocols.href` (http, https, mailto,
+ * irc, ircs, xmpp — Streamdown adds `tel`); harden then sees a
+ * dangling `<a>` with no href and replaces it with the gray
+ * `… [blocked]` indicator. That kills our `lemma:` citation chips
+ * before `urlTransform` / the `<a>` component override gets a
+ * chance to render them.
+ *
+ * Mirror Streamdown's own schema tweak (extend protocols.href +
+ * add the `code metastring` attribute) and tack `lemma` on so the
+ * sanitiser keeps the href intact. Harden then validates against
+ * its `allowedProtocols: ["*"]` default and lets it through.
+ *
+ * Generic protocol checks stay untouched — `javascript:`, `data:`,
+ * `file:`, `vbscript:` are still blocked by `rehype-harden`.
+ */
+const lemmaSanitizeSchema = {
+  ...defaultSchema,
+  protocols: {
+    ...defaultSchema.protocols,
+    href: [
+      ...(defaultSchema.protocols?.href ?? []),
+      "tel",
+      "lemma",
+    ],
+  },
+  attributes: {
+    ...defaultSchema.attributes,
+    code: [
+      ...(defaultSchema.attributes?.code ?? []),
+      "metastring",
+    ],
+  },
+};
+
+const lemmaRehypePlugins: PluggableList = [
+  defaultRehypePlugins.raw,
+  [rehypeSanitize, lemmaSanitizeSchema],
+  defaultRehypePlugins.harden,
+];
+
 interface AnchorComponentProps extends ComponentProps<"a"> {
   // Streamdown's `Components` map adds an `ExtraProps` member with
   // the original hast `node` — we don't currently need it.
@@ -436,6 +485,7 @@ export const MessageResponse = memo(
           className
         )}
         plugins={streamdownPlugins}
+        rehypePlugins={lemmaRehypePlugins}
         components={streamdownComponents}
         urlTransform={lemmaSafeUrlTransform}
         {...props}

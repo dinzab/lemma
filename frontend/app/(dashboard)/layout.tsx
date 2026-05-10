@@ -16,9 +16,6 @@ import {
   Search,
   Sparkles,
   MessageSquare,
-  MoreHorizontal,
-  Pencil,
-  Trash2,
   Loader2,
 } from "lucide-react";
 import { logout } from "../(auth)/actions";
@@ -37,6 +34,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { ChatRowActions } from "@/components/chat/ChatRowActions";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { cn } from "@/lib/utils";
@@ -137,8 +135,8 @@ interface ThreadRowProps {
   isActive: boolean;
   isMenuOpen: boolean;
   onMenuOpenChange: (open: boolean) => void;
-  onRename: (chat: Thread) => void;
-  onDelete: (chat: Thread) => void;
+  onRename: (chat: Thread, nextTitle: string) => Promise<void>;
+  onDelete: (chat: Thread) => Promise<void>;
 }
 
 function ThreadRow({
@@ -171,32 +169,27 @@ function ThreadRow({
         <span className="truncate">{chat.title}</span>
       </Link>
 
-      <DropdownMenu open={isMenuOpen} onOpenChange={onMenuOpenChange}>
-        <DropdownMenuTrigger asChild>
-          <button
-            className="mr-1 flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-background/50 hover:text-foreground group-hover:opacity-100 data-[state=open]:opacity-100"
-            aria-label="Chat actions"
-          >
-            <MoreHorizontal className="h-3.5 w-3.5" />
-          </button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-40">
-          <DropdownMenuItem
-            className="cursor-pointer gap-2"
-            onClick={() => onRename(chat)}
-          >
-            <Pencil className="h-4 w-4" />
-            Rename
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            className="cursor-pointer gap-2 text-destructive focus:text-destructive"
-            onClick={() => onDelete(chat)}
-          >
-            <Trash2 className="h-4 w-4" />
-            Delete
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      {/*
+        Trigger visibility:
+        - On touch (no hover) we keep it at full opacity so the user actually
+          sees an affordance to delete / rename. Tailwind's `[@media(hover:hover)]`
+          variant fades it in only on devices that report hover support.
+        - On the active row we also keep it visible at full opacity even on
+          desktop, so the currently-open chat always advertises its actions.
+      */}
+      <ChatRowActions
+        threadTitle={chat.title}
+        open={isMenuOpen}
+        onOpenChange={onMenuOpenChange}
+        onRename={(nextTitle) => onRename(chat, nextTitle)}
+        onDelete={() => onDelete(chat)}
+        triggerClassName={cn(
+          "opacity-100",
+          "[@media(hover:hover)]:opacity-0",
+          "[@media(hover:hover)]:group-hover:opacity-100",
+          isActive && "[@media(hover:hover)]:opacity-100",
+        )}
+      />
     </div>
   );
 }
@@ -296,22 +289,20 @@ const SidebarContent = ({ setIsSidebarOpen }: SidebarContentProps) => {
   const currentTheme = theme === "dark" ? "dark" : "light";
   const onHome = pathname === "/new";
 
-  const handleRenameThread = async (thread: Thread) => {
-    const nextTitle = window.prompt("Rename chat", thread.title);
-    if (!nextTitle || nextTitle.trim() === thread.title) return;
-
+  const handleRenameThread = async (thread: Thread, nextTitle: string) => {
     try {
-      const updated = await renameThread(thread.id, nextTitle.trim());
+      const updated = await renameThread(thread.id, nextTitle);
       applyRename(updated);
       toast.success("Chat renamed");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to rename chat");
+      toast.error(
+        error instanceof Error ? error.message : "Failed to rename chat",
+      );
+      throw error;
     }
   };
 
   const handleDeleteThread = async (thread: Thread) => {
-    if (!window.confirm(`Delete "${thread.title}"?`)) return;
-
     try {
       await deleteThread(thread.id);
       removeThread(thread.id);
@@ -319,8 +310,9 @@ const SidebarContent = ({ setIsSidebarOpen }: SidebarContentProps) => {
       if (activeThreadId === thread.id) {
         router.push("/new");
       }
-    } catch {
+    } catch (error) {
       toast.error("Failed to delete chat");
+      throw error;
     }
   };
 

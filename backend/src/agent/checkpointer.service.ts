@@ -143,6 +143,40 @@ export class CheckpointerService implements OnModuleInit, OnModuleDestroy {
 
     return { messages: page, nextCursor, total };
   }
+
+  /**
+   * Hard-delete every checkpoint, write, and blob row LangGraph has stored
+   * for this thread. Called from the thread DELETE flow so a "removed" chat
+   * can never silently resurrect when the agent is invoked with the same
+   * thread_id later (LangGraph would happily replay the old state).
+   *
+   * MemorySaver doesn't expose a thread-scoped delete; we no-op there because
+   * the in-memory fallback only exists for `POSTGRES_URI`-less environments
+   * (local dev) where state is wiped on restart anyway.
+   */
+  async deleteThread(threadId: string): Promise<void> {
+    if (!this.isPostgres) {
+      return;
+    }
+    const saver = this._saver as unknown as {
+      deleteThread?: (threadId: string) => Promise<void>;
+    };
+    if (typeof saver?.deleteThread !== 'function') {
+      this.logger.warn(
+        `Checkpointer has no deleteThread() — skipping checkpoint purge ` +
+          `for thread_id=${threadId}. State will linger in checkpoint tables.`,
+      );
+      return;
+    }
+    try {
+      await saver.deleteThread(threadId);
+    } catch (err) {
+      this.logger.error(
+        `Failed to delete checkpoint state for thread_id=${threadId}: ${String(err)}`,
+      );
+      throw err;
+    }
+  }
 }
 
 function clampLimit(limit: number | undefined): number {

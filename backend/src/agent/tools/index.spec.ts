@@ -5,6 +5,13 @@ import {
   formatRerankPassage,
   readFigureEntries,
 } from './index';
+import {
+  buildExamCitation,
+  buildExerciseCitation,
+  buildFigureCitation,
+  buildPairCitation,
+  parsePairId,
+} from '../citations';
 
 /**
  * Unit tests for `buildImageUrl`.
@@ -432,5 +439,261 @@ describe('formatRerankPassage', () => {
     expect(enonceLine!.length).toBeLessThan(800);
     // Truncation marker present.
     expect(enonceLine!.endsWith('…')).toBe(true);
+  });
+});
+
+/**
+ * Unit tests for the `lemma:` citation builders.
+ *
+ * Pinning the contract that every retrieval tool ships a Citation
+ * block whose `inline_link` is a drop-in markdown link the agent can
+ * paste verbatim into its prose. Catches: mis-parsed pair_ids,
+ * missing fallbacks, encoding regressions on the URI scheme.
+ */
+describe('citation builders', () => {
+  const PAIR_ID = 'math-2024-principale-math:ex_1:q_1.a';
+  const CTX = {
+    pair_id: PAIR_ID,
+    matiere: 'math',
+    year: 2024,
+    session: 'principale',
+    track: 'math',
+    exercise_number: 1,
+    question_number: '1.a',
+  };
+
+  describe('parsePairId', () => {
+    it('destructures a v6 pair_id into exam / exercise / question handles', () => {
+      const parsed = parsePairId(PAIR_ID);
+      expect(parsed).toEqual({
+        exam_handle: 'math-2024-principale-math',
+        exercise_handle: 'ex_1',
+        question_handle: 'q_1.a',
+      });
+    });
+
+    it('returns null for an empty / malformed pair_id', () => {
+      expect(parsePairId(null)).toBeNull();
+      expect(parsePairId('')).toBeNull();
+      expect(parsePairId('not-a-real-id')).toBeNull();
+    });
+  });
+
+  describe('buildPairCitation', () => {
+    it('produces a ref_uri, short_label, label, and inline_link', () => {
+      const citation = buildPairCitation(CTX);
+      expect(citation).not.toBeNull();
+      expect(citation!.ref_uri).toBe(`lemma:pair:${PAIR_ID}`);
+      expect(citation!.short_label).toMatch(/Bac 2024/);
+      expect(citation!.short_label).toMatch(/Ex\s*1/);
+      expect(citation!.short_label).toMatch(/Q1\.a/);
+      expect(citation!.inline_link).toBe(
+        `[${citation!.short_label}](${citation!.ref_uri})`,
+      );
+    });
+
+    it('returns null when pair_id is missing', () => {
+      expect(buildPairCitation({ ...CTX, pair_id: null })).toBeNull();
+    });
+  });
+
+  describe('buildFigureCitation', () => {
+    it('builds a 0-based fig URI keyed by side', () => {
+      const fig0 = buildFigureCitation(CTX, 'enonce', 0);
+      expect(fig0).not.toBeNull();
+      expect(fig0!.ref_uri).toBe(
+        'lemma:fig:math-2024-principale-math:ex_1:enonce:0',
+      );
+      const fig1Corrige = buildFigureCitation(CTX, 'corrige', 1);
+      expect(fig1Corrige!.ref_uri).toBe(
+        'lemma:fig:math-2024-principale-math:ex_1:corrige:1',
+      );
+    });
+
+    it('renders 1-based figure numbers in the human label', () => {
+      const fig0 = buildFigureCitation(CTX, 'enonce', 0);
+      expect(fig0!.short_label).toMatch(/figure 1/);
+      const fig2 = buildFigureCitation(CTX, 'enonce', 2);
+      expect(fig2!.short_label).toMatch(/figure 3/);
+    });
+
+    it('returns null when pair_id is missing', () => {
+      expect(
+        buildFigureCitation({ ...CTX, pair_id: null }, 'enonce', 0),
+      ).toBeNull();
+    });
+  });
+
+  describe('buildExerciseCitation', () => {
+    it('produces a lemma:exercise URI without the question handle', () => {
+      const citation = buildExerciseCitation(CTX);
+      expect(citation).not.toBeNull();
+      expect(citation!.ref_uri).toBe(
+        'lemma:exercise:math-2024-principale-math:ex_1',
+      );
+      expect(citation!.short_label).toMatch(/Ex\s*1/);
+    });
+  });
+
+  describe('buildExamCitation', () => {
+    it('uses exam_handle when provided', () => {
+      const citation = buildExamCitation({
+        exam_handle: 'math-2024-principale-math',
+        matiere: 'math',
+        year: 2024,
+        session: 'principale',
+        track: 'math',
+      });
+      expect(citation).not.toBeNull();
+      expect(citation!.ref_uri).toBe('lemma:exam:math-2024-principale-math');
+    });
+
+    it('returns null when both exam_handle and pair_id are missing', () => {
+      expect(
+        buildExamCitation({
+          exam_handle: null,
+          matiere: 'math',
+          year: 2024,
+          session: 'principale',
+          track: 'math',
+        }),
+      ).toBeNull();
+    });
+  });
+});
+
+/**
+ * Unit tests for citation propagation through `formatFiguresForLLM`.
+ *
+ * Pinning the contract that every formatted figure carries a
+ * `citation` block when called with a `pairContext`, so the agent
+ * can drop the figure's `inline_link` into its prose without
+ * re-deriving the URI.
+ */
+describe('formatFiguresForLLM (citation propagation)', () => {
+  const CDN = 'https://cdn.example/ocr_omni';
+  const CTX = {
+    pair_id: 'math-2024-principale-math:ex_1:q_1.a',
+    matiere: 'math',
+    year: 2024,
+    session: 'principale',
+    track: 'math',
+    exercise_number: 1,
+    question_number: '1.a',
+  };
+
+  it('emits citation: null on each figure when no pairContext is passed', () => {
+    const payload = {
+      enonce_figures: [
+        { label: 'figure 1', description: 'caption a', relpath: 'a.png' },
+        { label: 'figure 2', description: 'caption b', relpath: 'b.png' },
+      ],
+      corrige_figures: [
+        { label: 'figure 1', description: 'caption c', relpath: 'c.png' },
+      ],
+    };
+    const out = formatFiguresForLLM(payload, CDN);
+    expect(out.enonce.every((f) => f.citation === null)).toBe(true);
+    expect(out.corrige.every((f) => f.citation === null)).toBe(true);
+  });
+
+  it('emits per-figure citations keyed by side + 0-based index', () => {
+    const payload = {
+      enonce_figures: [
+        { label: 'figure 1', description: 'caption a', relpath: 'a.png' },
+        { label: 'figure 2', description: 'caption b', relpath: 'b.png' },
+      ],
+      corrige_figures: [
+        { label: 'figure 1', description: 'caption c', relpath: 'c.png' },
+      ],
+    };
+    const out = formatFiguresForLLM(payload, CDN, { pairContext: CTX });
+    expect(out.enonce[0].citation?.ref_uri).toBe(
+      'lemma:fig:math-2024-principale-math:ex_1:enonce:0',
+    );
+    expect(out.enonce[1].citation?.ref_uri).toBe(
+      'lemma:fig:math-2024-principale-math:ex_1:enonce:1',
+    );
+    expect(out.corrige[0].citation?.ref_uri).toBe(
+      'lemma:fig:math-2024-principale-math:ex_1:corrige:0',
+    );
+  });
+});
+
+/**
+ * Unit tests for citation propagation through `formatPairForLLM`.
+ *
+ * Pinning the contract that the formatted pair envelope carries a
+ * top-level `citation` block AND per-figure citations, derived from
+ * the Qdrant payload's `pair_id_logical` / matière / year / session
+ * / track / exercise_number / question_number fields.
+ */
+describe('formatPairForLLM (citation propagation)', () => {
+  it('emits a top-level citation block sourced from pair_id_logical', () => {
+    const point = {
+      id: 'p',
+      score: 0.9,
+      payload: {
+        pair_id_logical: 'math-2024-principale-math:ex_1:q_1.a',
+        matiere: 'math',
+        year: 2024,
+        session: 'principale',
+        track: 'math',
+        exercise_number: 1,
+        question_number: '1.a',
+        question_text: 'q',
+        answer_text: 'a',
+      },
+    };
+    const out = formatPairForLLM(point);
+    expect(out.citation).not.toBeNull();
+    expect((out.citation as { ref_uri: string }).ref_uri).toBe(
+      'lemma:pair:math-2024-principale-math:ex_1:q_1.a',
+    );
+  });
+
+  it('propagates per-figure citations alongside the pair citation', () => {
+    const point = {
+      id: 'p',
+      score: 0.9,
+      payload: {
+        pair_id_logical: 'math-2024-principale-math:ex_1:q_1.a',
+        matiere: 'math',
+        year: 2024,
+        session: 'principale',
+        track: 'math',
+        exercise_number: 1,
+        question_number: '1.a',
+        question_text: 'q',
+        answer_text: 'a',
+        enonce_figures: [
+          { label: 'figure 1', description: 'caption a', relpath: 'a.png' },
+        ],
+      },
+    };
+    const out = formatPairForLLM(point);
+    const figures = out.figures as {
+      enonce: { citation: { ref_uri: string } | null }[];
+      corrige: { citation: { ref_uri: string } | null }[];
+    };
+    expect(figures.enonce[0].citation?.ref_uri).toBe(
+      'lemma:fig:math-2024-principale-math:ex_1:enonce:0',
+    );
+  });
+
+  it('emits citation: null when pair_id_logical is missing', () => {
+    const point = {
+      id: 'p',
+      score: 0.9,
+      payload: {
+        // intentionally no pair_id_logical / pair_id
+        matiere: 'math',
+        year: 2024,
+        question_text: 'q',
+        answer_text: 'a',
+      },
+    };
+    const out = formatPairForLLM(point);
+    expect(out.citation).toBeNull();
   });
 });

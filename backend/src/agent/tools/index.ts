@@ -18,6 +18,15 @@ import {
   type VisionAnalysisResult,
 } from '../vision.service';
 import { FigurePerceptionCacheService } from '../figure-perception-cache.service';
+import {
+  buildExamCitation,
+  buildExerciseCitation,
+  buildFigureCitation,
+  buildPairCitation,
+  parsePairId,
+  type Citation,
+  type CitationContext,
+} from '../citations';
 
 /**
  * Description for the write_todos planning tool. Mirrors the public
@@ -386,6 +395,14 @@ export class AgentToolsService {
   /** Hard cap on the Qdrant scroll backing `list_exam_questions` — the
    *  largest exam in the corpus has ~30 sub-questions, so 200 is safe. */
   private static readonly LIST_EXAM_QUESTIONS_SCROLL_CAP = 200;
+  /**
+   * Sample-cap for `count_questions`: how many matching pairs to scroll
+   * AFTER the count round-trip so the agent gets immediate citation
+   * fodder ("here are 3 representative questions") without firing a
+   * separate `search_questions` call. Kept small so the
+   * count-then-sample path stays cheaper than search end-to-end.
+   */
+  private static readonly COUNT_QUESTIONS_SAMPLE_CAP = 5;
 
   /**
    * Soft per-thread budget for `inspect_figure`. We track a sliding
@@ -953,6 +970,32 @@ export class AgentToolsService {
           }
           const payload = (point.payload ?? {}) as Record<string, unknown>;
           const cdnBase = this.imageCdnBase;
+          const resolvedPairId = (payload.pair_id_logical ??
+            payload.pair_id ??
+            pair_id) as string;
+          const pairContext: CitationContext = {
+            pair_id: resolvedPairId,
+            matiere: payload.matiere as string | null | undefined,
+            year: (payload.year ?? payload.exam_year) as
+              | number
+              | string
+              | null
+              | undefined,
+            session: payload.session as string | null | undefined,
+            track: (payload.track ?? payload.filiere) as
+              | string
+              | null
+              | undefined,
+            exercise_number: payload.exercise_number as
+              | number
+              | string
+              | null
+              | undefined,
+            question_number: payload.question_number as
+              | string
+              | null
+              | undefined,
+          };
           const images = {
             exercise_enonce: buildImageUrl(
               payload.exercise_enonce_image_relpath,
@@ -977,6 +1020,7 @@ export class AgentToolsService {
           // pairs have populated arrays but `has_figure_*=false`).
           const figures = formatFiguresForLLM(payload, cdnBase, {
             full: true,
+            pairContext,
           });
           const hasAnyFigure =
             figures.enonce.length > 0 ||
@@ -984,7 +1028,16 @@ export class AgentToolsService {
             images.exercise_enonce !== null ||
             images.exercise_corrige !== null;
           return JSON.stringify({
-            pair_id: payload.pair_id_logical ?? payload.pair_id ?? pair_id,
+            pair_id: resolvedPairId,
+            citation: buildPairCitation(pairContext),
+            exercise_citation: buildExerciseCitation(pairContext),
+            exam_citation: buildExamCitation({
+              exam_handle: (payload.exam_id ?? null) as string | null,
+              matiere: pairContext.matiere,
+              year: pairContext.year,
+              session: pairContext.session,
+              track: pairContext.track,
+            }),
             exam: payload.exam ?? null,
             exam_id: payload.exam_id ?? null,
             year: payload.year ?? payload.exam_year ?? null,
@@ -1090,11 +1143,45 @@ export class AgentToolsService {
           }
 
           const cdnBase = this.imageCdnBase;
+          const inspectPayload = (point.payload ?? {}) as Record<
+            string,
+            unknown
+          >;
+          const inspectPairId = (inspectPayload.pair_id_logical ??
+            inspectPayload.pair_id ??
+            pair_id) as string;
+          const inspectPairContext: CitationContext = {
+            pair_id: inspectPairId,
+            matiere: inspectPayload.matiere as string | null | undefined,
+            year: (inspectPayload.year ?? inspectPayload.exam_year) as
+              | number
+              | string
+              | null
+              | undefined,
+            session: inspectPayload.session as string | null | undefined,
+            track: (inspectPayload.track ?? inspectPayload.filiere) as
+              | string
+              | null
+              | undefined,
+            exercise_number: inspectPayload.exercise_number as
+              | number
+              | string
+              | null
+              | undefined,
+            question_number: inspectPayload.question_number as
+              | string
+              | null
+              | undefined,
+          };
           // Reuse `formatFiguresForLLM` to get the canonical
-          // (label, caption, url) shape — keeps caption truncation
-          // aligned with what the agent sees in search results.
+          // (label, caption, url, citation) shape — keeps caption
+          // truncation aligned with what the agent sees in search
+          // results, and gives every inspected figure the
+          // `lemma:fig:…` handle the agent should drop into prose
+          // alongside the perceived value.
           const allFigures = formatFiguresForLLM(point.payload, cdnBase, {
             full: false,
+            pairContext: inspectPairContext,
           });
           const sideFigures = allFigures[side];
           if (sideFigures.length === 0) {
@@ -1163,6 +1250,7 @@ export class AgentToolsService {
               label: fig.label,
               url: fig.url,
               caption_short: fig.caption,
+              citation: fig.citation,
               perception: result.analysis.analysis ? result.analysis : null,
               cache_hit: result.cacheHit,
             });
@@ -1172,6 +1260,7 @@ export class AgentToolsService {
               label: fig.label,
               url: fig.url,
               caption_short: fig.caption,
+              citation: fig.citation,
               perception: null,
               cache_hit: false,
               truncated: true,
@@ -1179,7 +1268,8 @@ export class AgentToolsService {
           }
 
           return JSON.stringify({
-            pair_id: pair_id,
+            pair_id: inspectPairId,
+            citation: buildPairCitation(inspectPairContext),
             side,
             focus: requestedFocus,
             question: question ?? null,
@@ -1435,7 +1525,35 @@ export class AgentToolsService {
         try {
           const filter = this.buildQdrantFilterFromArgs(args);
           const count = await this.qdrant.count(filter);
-          return JSON.stringify({ count });
+          // Cheap enrichment: pull a short sample of matching pairs so
+          // the agent can immediately suggest 1–2 representative
+          // questions / cite a topical span without firing a second
+          // expensive search. The scroll is bounded by
+          // COUNT_QUESTIONS_SAMPLE_CAP, so the wall-clock cost is
+          // dominated by the count round-trip already paid above.
+          const sample =
+            count > 0
+              ? await this.qdrant.scrollByFilter({
+                  filter: filter ?? { must: [] },
+                  limit: AgentToolsService.COUNT_QUESTIONS_SAMPLE_CAP,
+                })
+              : [];
+          const cdnBase = this.imageCdnBase;
+          const samplePairs = sample
+            .slice(0, AgentToolsService.COUNT_QUESTIONS_SAMPLE_CAP)
+            .map((p) => formatPairForLLM(p, { cdnBase }));
+          const summary = summariseSample(sample);
+          return JSON.stringify({
+            count,
+            sample_size: samplePairs.length,
+            top_chapters: summary.top_chapters,
+            top_topics: summary.top_topics,
+            top_exams: summary.top_exams,
+            example_pair_ids: samplePairs
+              .map((p) => p.pair_id)
+              .filter((id) => typeof id === 'string'),
+            sample: samplePairs,
+          });
         } catch (err) {
           this.logger.warn(`count_questions failed: ${String(err)}`);
           return `Error counting questions: ${(err as Error).message}`;
@@ -1445,9 +1563,13 @@ export class AgentToolsService {
         name: 'count_questions',
         description:
           'Count corrected, gate-passing Bac questions matching the given ' +
-          'filters. Cheap (no embeddings, no reranker) — use this to answer ' +
-          'aggregate questions like "how many trigonometry problems do you have?" ' +
-          'before deciding whether to do an expensive search.',
+          'filters AND return a small sample (up to ' +
+          `${AgentToolsService.COUNT_QUESTIONS_SAMPLE_CAP} pairs) plus ` +
+          'aggregated facets (top chapters, topics, exams) so you can ' +
+          'immediately cite or suggest a representative question without a ' +
+          'second round-trip. Cheap (no embeddings, no reranker) — use this ' +
+          'to answer aggregate questions like "how many trigonometry problems ' +
+          'do you have?" before deciding whether to do an expensive search.',
         schema: z.object({
           matiere: z
             .enum([
@@ -1528,11 +1650,22 @@ export class AgentToolsService {
           const params: Record<string, unknown> = matiere ? { matiere } : {};
           const result = await session.run(cypher, params);
           return JSON.stringify({
-            chapters: result.records.map((r) => ({
-              chapter: r.get('chapter'),
-              matiere: r.get('matiere'),
-              pair_count: toNumber(r.get('pair_count')),
-            })),
+            chapters: result.records.map((r) => {
+              const chapterName = r.get('chapter') as string;
+              const chapterMatiere = r.get('matiere') as string;
+              return {
+                chapter: chapterName,
+                matiere: chapterMatiere,
+                pair_count: toNumber(r.get('pair_count')),
+                // Drop-in filter the agent can hand straight to
+                // search_questions / count_questions / list_topics
+                // without re-typing the chapter name.
+                search_filter: {
+                  matiere: chapterMatiere,
+                  chapter: chapterName,
+                },
+              };
+            }),
           });
         } catch (err) {
           this.logger.warn(`list_chapters failed: ${String(err)}`);
@@ -1607,11 +1740,22 @@ export class AgentToolsService {
           `;
           const result = await session.run(cypher, params);
           return JSON.stringify({
-            topics: result.records.map((r) => ({
-              topic: r.get('topic'),
-              matiere: r.get('matiere'),
-              pair_count: toNumber(r.get('pair_count')),
-            })),
+            topics: result.records.map((r) => {
+              const topicName = r.get('topic') as string;
+              const topicMatiere = r.get('matiere') as string;
+              return {
+                topic: topicName,
+                matiere: topicMatiere,
+                pair_count: toNumber(r.get('pair_count')),
+                // Drop-in filter for search_questions /
+                // count_questions — the agent passes this object
+                // verbatim instead of re-typing topic + matiere.
+                search_filter: {
+                  matiere: topicMatiere,
+                  topic: topicName,
+                },
+              };
+            }),
           });
         } catch (err) {
           this.logger.warn(`list_topics failed: ${String(err)}`);
@@ -1718,14 +1862,28 @@ export class AgentToolsService {
           `;
           const result = await session.run(cypher, params);
           return JSON.stringify({
-            exams: result.records.map((r) => ({
-              exam_id: r.get('exam_id'),
-              year: toNumber(r.get('year')),
-              session: r.get('session'),
-              subject: r.get('subject'),
-              track: r.get('track'),
-              pair_count: toNumber(r.get('pair_count')),
-            })),
+            exams: result.records.map((r) => {
+              const examId = r.get('exam_id') as string;
+              const examYear = toNumber(r.get('year'));
+              const examSession = r.get('session') as string;
+              const subject = r.get('subject') as string;
+              const examTrack = r.get('track') as string;
+              return {
+                exam_id: examId,
+                year: examYear,
+                session: examSession,
+                subject,
+                track: examTrack,
+                pair_count: toNumber(r.get('pair_count')),
+                citation: buildExamCitation({
+                  exam_handle: examId,
+                  matiere: subject,
+                  year: examYear,
+                  session: examSession,
+                  track: examTrack,
+                }),
+              };
+            }),
           });
         } catch (err) {
           this.logger.warn(`list_exams failed: ${String(err)}`);
@@ -2192,38 +2350,58 @@ const FIGURE_PASSAGE_CHARS_PER_SIDE = 600;
 /**
  * One LLM-facing figure record: the caption plus a fully-qualified
  * public URL ready to paste into a Streamdown image or React `<img>`.
+ *
+ * `citation` is the inline-citation block the agent should drop into
+ * prose when referring to this specific figure. It's null only when
+ * the caller failed to supply enough metadata to build a stable
+ * `lemma:fig:…` URI (no pair_id and no explicit handles) — the agent
+ * falls back to descriptive prose without a chip in that case.
  */
 export interface FormattedFigure {
   label: string;
   caption: string;
   url: string | null;
+  citation: Citation | null;
 }
 
 /**
  * Translate the per-side figure entries into the
- * `{label, caption, url}` shape consumed by the agent and the
- * frontend chips. When `full=false` the captions are truncated to
- * {@link FIGURE_CAPTION_PREVIEW_CHARS} so the search-result payload
- * stays compact; `full=true` keeps the full caption (used by
+ * `{label, caption, url, citation}` shape consumed by the agent and
+ * the frontend chips. When `full=false` the captions are truncated
+ * to {@link FIGURE_CAPTION_PREVIEW_CHARS} so the search-result
+ * payload stays compact; `full=true` keeps the full caption (used by
  * `get_question_pair` and `show_question_assets` where the agent /
  * student is committed to one specific pair).
+ *
+ * `pairContext` carries the metadata needed to build per-figure
+ * `lemma:fig:…` citations. Pass it whenever you have a known pair
+ * (the search-result formatter, get_question_pair, show_question_assets,
+ * inspect_figure). It's intentionally optional so callers without
+ * pair context can still reuse the shape — citations come back
+ * `null` and the figure renders as a plain thumbnail.
  */
 export function formatFiguresForLLM(
   payload: unknown,
   cdnBase: string | undefined,
-  opts?: { full?: boolean },
+  opts?: { full?: boolean; pairContext?: CitationContext },
 ): { enonce: FormattedFigure[]; corrige: FormattedFigure[] } {
-  const map = (entries: FigureEntry[]): FormattedFigure[] =>
-    entries.map((f) => ({
+  const map = (
+    entries: FigureEntry[],
+    side: 'enonce' | 'corrige',
+  ): FormattedFigure[] =>
+    entries.map((f, idx) => ({
       label: f.label,
       caption: opts?.full
         ? f.description
         : truncate(f.description, FIGURE_CAPTION_PREVIEW_CHARS),
       url: buildImageUrl(f.relpath, cdnBase),
+      citation: opts?.pairContext
+        ? buildFigureCitation(opts.pairContext, side, idx)
+        : null,
     }));
   return {
-    enonce: map(readFigureEntries(payload, 'enonce')),
-    corrige: map(readFigureEntries(payload, 'corrige')),
+    enonce: map(readFigureEntries(payload, 'enonce'), 'enonce'),
+    corrige: map(readFigureEntries(payload, 'corrige'), 'corrige'),
   };
 }
 
@@ -2258,11 +2436,44 @@ export function formatPairForLLM(
   const cap = AgentToolsService['TEXT_PREVIEW_CHARS'] as number;
   const cdnBase = opts?.cdnBase;
   const pairId = payload.pair_id_logical ?? payload.pair_id ?? null;
+  const pairContext: CitationContext = {
+    pair_id: typeof pairId === 'string' ? pairId : null,
+    matiere: payload.matiere as string | null | undefined,
+    year: (payload.year ?? payload.exam_year) as
+      | number
+      | string
+      | null
+      | undefined,
+    session: payload.session as string | null | undefined,
+    track: (payload.track ?? payload.filiere) as string | null | undefined,
+    exercise_number: payload.exercise_number as
+      | number
+      | string
+      | null
+      | undefined,
+    question_number: payload.question_number as string | null | undefined,
+  };
   const figures = formatFiguresForLLM(payload, cdnBase, {
     full: opts?.full,
+    pairContext,
+  });
+  const citation = buildPairCitation(pairContext);
+  const exerciseCitation = buildExerciseCitation(pairContext);
+  const examCitation = buildExamCitation({
+    exam_handle:
+      pairContext.exam_handle ??
+      parsePairId(pairContext.pair_id)?.exam_handle ??
+      null,
+    matiere: pairContext.matiere,
+    year: pairContext.year,
+    session: pairContext.session,
+    track: pairContext.track,
   });
   return {
     pair_id: pairId,
+    citation,
+    exercise_citation: exerciseCitation,
+    exam_citation: examCitation,
     matiere: payload.matiere ?? null,
     chapter: payload.chapter ?? null,
     exam: payload.exam ?? null,
@@ -2410,6 +2621,7 @@ interface InspectFigureEntry {
   label: string;
   url: string | null;
   caption_short: string;
+  citation: Citation | null;
   perception: VisionAnalysisResult['analysis'] | null;
   cache_hit: boolean;
   truncated?: boolean;
@@ -2488,6 +2700,67 @@ function uniqueExerciseNumbers(points: QdrantPoint[]): number[] {
 function truncate(s: string, max: number): string {
   if (s.length <= max) return s;
   return `${s.slice(0, max)}…`;
+}
+
+/**
+ * Aggregate a sample of Qdrant points into the small facet summary
+ * surfaced by `count_questions`: the top chapters / topics / exams
+ * that appear in the sample, ordered by frequency. Used so the agent
+ * can immediately suggest "this filter mostly hits chapter X" without
+ * firing a second search.
+ *
+ * Bounded output (top 5 of each) so the payload stays small even on
+ * a large sample.
+ */
+function summariseSample(points: QdrantPoint[]): {
+  top_chapters: { chapter: string; count: number }[];
+  top_topics: { topic: string; count: number }[];
+  top_exams: { exam_id: string; count: number }[];
+} {
+  const chapterCounts = new Map<string, number>();
+  const topicCounts = new Map<string, number>();
+  const examCounts = new Map<string, number>();
+  for (const p of points) {
+    const payload = (p.payload ?? {}) as Record<string, unknown>;
+    const chapter = payload.chapter;
+    if (typeof chapter === 'string' && chapter.length > 0) {
+      chapterCounts.set(chapter, (chapterCounts.get(chapter) ?? 0) + 1);
+    }
+    const topics = payload.topics;
+    if (Array.isArray(topics)) {
+      for (const t of topics) {
+        if (typeof t === 'string' && t.length > 0) {
+          topicCounts.set(t, (topicCounts.get(t) ?? 0) + 1);
+        }
+      }
+    }
+    const examId = payload.exam_id ?? payload.exam;
+    if (typeof examId === 'string' && examId.length > 0) {
+      examCounts.set(examId, (examCounts.get(examId) ?? 0) + 1);
+    }
+  }
+  const topN = <K extends string>(
+    map: Map<string, number>,
+    key: K,
+  ): ({ [P in K]: string } & { count: number })[] =>
+    [...map.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .slice(0, 5)
+      .map(([name, count]) => ({ [key]: name, count }) as never);
+  return {
+    top_chapters: topN(chapterCounts, 'chapter') as {
+      chapter: string;
+      count: number;
+    }[],
+    top_topics: topN(topicCounts, 'topic') as {
+      topic: string;
+      count: number;
+    }[],
+    top_exams: topN(examCounts, 'exam_id') as {
+      exam_id: string;
+      count: number;
+    }[],
+  };
 }
 
 /**

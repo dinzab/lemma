@@ -75,9 +75,11 @@ export function PastPaperChip({ part }: PastPaperChipProps) {
   return (
     <aside
       aria-label="Passage du BAC"
+      data-pair-id={top.pair_id ?? undefined}
       className={cn(
         "my-3 w-full rounded-xl border border-secondary/40 bg-secondary/5",
         "px-4 py-3 text-sm text-foreground shadow-sm",
+        "scroll-mt-24 transition-shadow",
       )}
     >
       <div className="flex items-start gap-3">

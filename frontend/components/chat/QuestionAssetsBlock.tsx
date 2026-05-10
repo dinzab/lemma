@@ -112,10 +112,12 @@ export function QuestionAssetsBlock({ part }: QuestionAssetsBlockProps) {
   return (
     <aside
       aria-label="Voir l'épreuve"
+      data-pair-id={payload.pair_id ?? undefined}
       className={cn(
         "my-3 w-full rounded-xl border border-secondary/40 bg-secondary/5",
         "px-3 py-2.5 sm:px-4 sm:py-3",
         "text-sm text-foreground shadow-sm",
+        "scroll-mt-24 transition-shadow",
       )}
     >
       <div className="flex items-start gap-2 sm:gap-3">

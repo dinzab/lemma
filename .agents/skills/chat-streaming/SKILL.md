@@ -58,6 +58,54 @@ LLMs aimed at chat surfaces frequently emit the LaTeX-native `\(...\)` (inline) 
 
 If the model starts emitting yet another delimiter convention (e.g. `[math]…[/math]`, `\begin{equation}…\end{equation}`), extend that helper rather than wrapping with another component.
 
+### 3. The rehype-sanitize → rehype-harden order, and why `[blocked]` shows up
+
+If you see prose where a markdown link shows up as the gray text `… [blocked]` (e.g. `Bac 2020 principale Ex 3 Q2 [blocked]`), that's `rehype-harden`'s `linkBlockPolicy: "indicator"` rendering a `<span class="text-gray-500">… [blocked]</span>` because the `<a>` it visited had **no href**. The `[blocked]` literal comes verbatim from `rehype-harden`, NOT from any code in this repo.
+
+The href usually disappears because of the order of Streamdown's default `rehypePlugins`:
+
+1. `rehype-raw`
+2. `rehype-sanitize` — uses `hast-util-sanitize`'s `defaultSchema`, whose `protocols.href` allow-list is **only** `["http", "https", "irc", "ircs", "mailto", "xmpp"]`. Streamdown extends this with `"tel"` and adds `"metastring"` to `attributes.code`, but anything else (including custom URI schemes like `lemma:`) gets silently stripped from the `href` attribute.
+3. `rehype-harden` — sees an `<a>` with no `href` and rewrites it to the gray `[blocked]` indicator.
+
+Neither `urlTransform` (runs in the hast→React stage, downstream of harden) nor `harden`'s `allowedProtocols: ["*"]` (downstream of sanitize) can save the link, because the sanitiser already ate the href.
+
+**Fix pattern** (used for the `lemma:` citation chips landed in #61 / fixed in #62):
+
+```ts
+import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
+import { defaultRehypePlugins } from "streamdown";
+import type { PluggableList } from "unified";
+
+const lemmaSanitizeSchema = {
+  ...defaultSchema,
+  protocols: {
+    ...defaultSchema.protocols,
+    href: [...(defaultSchema.protocols?.href ?? []), "tel", "lemma"],
+  },
+  attributes: {
+    ...defaultSchema.attributes,
+    code: [...(defaultSchema.attributes?.code ?? []), "metastring"],
+  },
+};
+
+const lemmaRehypePlugins: PluggableList = [
+  defaultRehypePlugins.raw,
+  [rehypeSanitize, lemmaSanitizeSchema],
+  defaultRehypePlugins.harden,
+];
+
+<Streamdown rehypePlugins={lemmaRehypePlugins} … />
+```
+
+Things to keep verbatim from Streamdown's own schema tweak so we stay drop-in:
+- Adding `"tel"` to `protocols.href`.
+- Adding `"metastring"` to `attributes.code`.
+
+Dangerous protocols (`javascript:`, `data:` for non-images, `vbscript:`, `file:`, `ftp:`) are still blocked downstream — `rehype-harden` has its own hard-coded `blockedProtocols` set and the wildcard `allowedPrefixes: ["*"]` only allows http/https origins. Don't "fix" by passing `allowedProtocols: ["*"]` alone or by disabling sanitize — both either fail or weaken security.
+
+If you introduce a new custom URI scheme on the agent side (e.g. `lemma:concept:…`, a future `audio:…` scheme), extend `lemmaSanitizeSchema.protocols.href` here and add a matching branch in `LemmaAwareAnchor` so the chip dispatches to the right component.
+
 ## Frontend chat component layout
 
 `frontend/components/chat/LemmaConversation.tsx`:
@@ -108,6 +156,7 @@ Save the email/password you used, then sign in at `http://localhost:3000/login`.
 2. **Avatar regression** — settled assistant bubbles should be flush-left with NO avatar; the avatar is only visible inside the typing-indicator row.
 3. **Typing indicator persistence** — avatar + bouncing dots should remain visible throughout streaming, including when assistant text is partially rendered. They should NOT vanish the instant the SDK creates the assistant placeholder.
 4. **Math rendering** — paste a prompt like the 2022 BAC exponential-form question. Sqrt bars should be hugged tightly to their radicand, fractions should render stacked with a horizontal bar, exponents should be small and superscripted. If anything looks linearised, check the KaTeX CSS import (above).
+5. **Inline citation chips** — ask a question that triggers `search_questions` / `get_question_pair` (e.g. "Bac 2020 principale Math Ex 3 Q2"). Each `Bac 20XX … Ex N Q…` reference in the prose should render as a small clickable secondary-coloured pill (the `<LemmaInlineCitation>` chip), NOT as plain text followed by `[blocked]`. If you do see `[blocked]`, the rehype-sanitize allow-list is the first place to look (see §3 above).
 
 ### Lint, typecheck, test, build
 

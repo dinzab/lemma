@@ -18,17 +18,9 @@ import {
 import { LemmaToolCall } from "@/components/chat/LemmaToolCall";
 import type { LemmaToolUIPart } from "@/components/chat/LemmaToolCall";
 import {
-  RealLifeAnchorChip,
-  type LemmaAnalogyToolPart,
-} from "@/components/chat/RealLifeAnchorChip";
-import {
   PastPaperChip,
   type LemmaSearchQuestionsToolPart,
 } from "@/components/chat/PastPaperChip";
-import {
-  ThinkingPatternChip,
-  type LemmaPatternToolPart,
-} from "@/components/chat/ThinkingPatternChip";
 import {
   HintLadderChip,
   type LemmaHintLadderToolPart,
@@ -164,17 +156,6 @@ export function LemmaConversation({
                   if (!todos) return null;
                   return <TodoPlanPanel key={key} todos={todos} />;
                 }
-                if (isRecallAnalogyPart(part)) {
-                  // A12 *Dans la vraie vie* surface — render the
-                  // curated anchor as a soft pinned card instead of
-                  // the generic debug-style tool chip.
-                  return (
-                    <RealLifeAnchorChip
-                      key={key}
-                      part={part as LemmaAnalogyToolPart}
-                    />
-                  );
-                }
                 if (isSearchQuestionsPart(part)) {
                   // A2 *Passage du BAC* surface — render the top
                   // matching past-paper question as a soft pinned
@@ -185,18 +166,6 @@ export function LemmaConversation({
                     <PastPaperChip
                       key={key}
                       part={part as LemmaSearchQuestionsToolPart}
-                    />
-                  );
-                }
-                if (isRecallPatternPart(part)) {
-                  // A11 *Comment penser à ça* surface — render the
-                  // canonical thinking-frame (genre + recipe + trap)
-                  // as a pinned card before the assistant's prose.
-                  // Chip itself returns null for `covered: false`.
-                  return (
-                    <ThinkingPatternChip
-                      key={key}
-                      part={part as LemmaPatternToolPart}
                     />
                   );
                 }
@@ -338,26 +307,6 @@ function findLatestWriteTodosLocation(
     }
   }
   return null;
-}
-
-function isRecallAnalogyPart(part: {
-  type?: string;
-  toolName?: string;
-}): boolean {
-  if (part.type === "dynamic-tool" && part.toolName === "recall_analogy") {
-    return true;
-  }
-  return part.type === "tool-recall_analogy";
-}
-
-function isRecallPatternPart(part: {
-  type?: string;
-  toolName?: string;
-}): boolean {
-  if (part.type === "dynamic-tool" && part.toolName === "recall_pattern") {
-    return true;
-  }
-  return part.type === "tool-recall_pattern";
 }
 
 function isEmitSolutionStepsPart(part: {

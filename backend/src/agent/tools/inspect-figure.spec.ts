@@ -4,8 +4,6 @@ import type { QdrantClientProvider, QdrantPoint } from './qdrant.client';
 import type { Neo4jClientProvider } from './neo4j.client';
 import type { EmbeddingsClient } from './embeddings.client';
 import type { RerankerClient } from './reranker.client';
-import type { AnalogiesClient } from './analogies.client';
-import type { PatternsClient } from './patterns.client';
 import { VisionService, type VisionAnalysisResult } from '../vision.service';
 import { FigurePerceptionCacheService } from '../figure-perception-cache.service';
 
@@ -66,8 +64,6 @@ describe('inspect_figure tool', () => {
     const neo4j = {} as unknown as Neo4jClientProvider;
     const embeddings = {} as unknown as EmbeddingsClient;
     const reranker = {} as unknown as RerankerClient;
-    const analogies = {} as unknown as AnalogiesClient;
-    const patterns = {} as unknown as PatternsClient;
 
     const defaultVisionResult: VisionAnalysisResult = {
       analysis: {
@@ -100,8 +96,6 @@ describe('inspect_figure tool', () => {
       neo4j,
       embeddings,
       reranker,
-      analogies,
-      patterns,
       vision,
       cache,
       configWith({ R2_PUBLIC_BASE: 'https://cdn.test/ocr_omni' }),

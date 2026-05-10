@@ -21,6 +21,11 @@ import {
   MessageContent,
   MessageResponse,
 } from "@/components/ai-elements/message";
+import {
+  Reasoning,
+  ReasoningContent,
+  ReasoningTrigger,
+} from "@/components/ai-elements/reasoning";
 import { LemmaToolCall } from "@/components/chat/LemmaToolCall";
 import type { LemmaToolUIPart } from "@/components/chat/LemmaToolCall";
 import {
@@ -193,6 +198,32 @@ function ConversationInner({
               if (part.type === "text") {
                 return (
                   <MessageResponse key={key}>{part.text}</MessageResponse>
+                );
+              }
+              if (part.type === "reasoning") {
+                // The chat loop emits `reasoning-*` SSE events while
+                // the model is thinking; without this branch the
+                // accumulated `{ type: "reasoning", text, state }`
+                // part would be silently dropped from the transcript.
+                // We collapse the live thinking into the standard AI
+                // Elements collapsible — auto-opens while streaming,
+                // auto-closes a beat after `reasoning-end`. Settled
+                // assistant turns reloaded from the DB never carry
+                // reasoning parts (we don't persist them), so this
+                // surface is intrinsically stream-only.
+                const partState = (part as { state?: string }).state;
+                const text = (part as { text?: string }).text ?? "";
+                if (text.length === 0 && partState !== "streaming") {
+                  return null;
+                }
+                return (
+                  <Reasoning
+                    key={key}
+                    isStreaming={partState === "streaming"}
+                  >
+                    <ReasoningTrigger />
+                    <ReasoningContent>{text}</ReasoningContent>
+                  </Reasoning>
                 );
               }
               if (

@@ -21,10 +21,14 @@ import type { FigureKey } from "@/context/figure-registry-context";
  *
  *  1. `<LemmaInlineCitation>` for `lemma:pair:…`, `lemma:exercise:…`,
  *     and `lemma:exam:…` — a small pill that scrolls the page to the
- *     matching `<QuestionCard>` / `<PastPaperChip>` (data-pair-id),
- *     and falls back to a non-active label otherwise. The pair URI
- *     also flashes a brief highlight ring on the matched card so the
- *     student visually catches the "I'm pointing here" cue.
+ *     matching `<QuestionCard>` / `<PastPaperChip>` /
+ *     `<QuestionAssetsBlock>` (matched against `data-pair-id`).
+ *     `pair` URIs match the full pair_id; `exercise` / `exam` URIs
+ *     match by prefix because `pair_id` is always shaped
+ *     `<exam_id>:ex_<n>:q_<n>` — so any block on the page that
+ *     belongs to the cited exercise / exam will satisfy the click.
+ *     The chip flashes a brief highlight ring on the matched card so
+ *     the student visually catches the "I'm pointing here" cue.
  *
  *  2. `<LemmaInlineCitationFigure>` for `lemma:fig:…` — a tiny
  *     thumbnail + label pulled from the conversation's
@@ -43,40 +47,89 @@ interface LemmaInlineCitationProps {
   children?: ReactNode;
 }
 
-/** Parsed `lemma:pair:<exam>:<exercise>:<question>` -> `<exam>:<exercise>:<question>`. */
-function pairIdFromRefUri(refUri: string): string | null {
-  if (refUri.startsWith("lemma:pair:")) {
-    const rest = refUri.slice("lemma:pair:".length);
-    return rest.length > 0 ? rest : null;
+type LemmaUriKind = "pair" | "exercise" | "exam";
+
+interface ParsedLemmaUri {
+  kind: LemmaUriKind;
+  /** Bare identifier following the `lemma:<kind>:` prefix. */
+  id: string;
+}
+
+/**
+ * Parse a scrollable `lemma:` URI into its kind + identifier. Returns
+ * `null` for malformed URIs and for `lemma:fig:…` (which is handled
+ * by `<LemmaInlineCitationFigure>` and never routed through this
+ * parser).
+ */
+function parseLemmaScrollUri(refUri: string): ParsedLemmaUri | null {
+  const prefixes: Array<{ prefix: string; kind: LemmaUriKind }> = [
+    { prefix: "lemma:pair:", kind: "pair" },
+    { prefix: "lemma:exercise:", kind: "exercise" },
+    { prefix: "lemma:exam:", kind: "exam" },
+  ];
+  for (const { prefix, kind } of prefixes) {
+    if (refUri.startsWith(prefix)) {
+      const rest = refUri.slice(prefix.length);
+      return rest.length > 0 ? { kind, id: rest } : null;
+    }
   }
   return null;
 }
 
 /**
+ * Find the on-page surface that matches a parsed lemma URI. We match
+ * everything against `data-pair-id` because `pair_id` already encodes
+ * exam + exercise + question:
+ *
+ *   pair_id        = "<exam_id>:ex_<n>:q_<n>"
+ *   lemma:pair:    → exact match on data-pair-id
+ *   lemma:exercise:→ prefix match "<exercise_id>:" against data-pair-id
+ *   lemma:exam:    → prefix match "<exam_id>:"     against data-pair-id
+ *
+ * No need to mint extra `data-exercise-id` / `data-exam-id`
+ * attributes on every block component as long as something on the
+ * page is keyed by a matching pair_id.
+ */
+function findScrollTarget(parsed: ParsedLemmaUri): HTMLElement | null {
+  if (typeof document === "undefined") return null;
+  if (parsed.kind === "pair") {
+    return document.querySelector<HTMLElement>(
+      `[data-pair-id="${cssEscape(parsed.id)}"]`,
+    );
+  }
+  // exercise / exam: prefix-match against data-pair-id. `^=` is the
+  // CSS prefix-match selector; we append `:` so `ex_3` doesn't also
+  // match a hypothetical `ex_30`.
+  const prefix = `${parsed.id}:`;
+  return document.querySelector<HTMLElement>(
+    `[data-pair-id^="${cssEscape(prefix)}"]`,
+  );
+}
+
+/**
  * `lemma:pair:…` / `lemma:exercise:…` / `lemma:exam:…` chip.
- * Click action depends on the URI flavour:
- *  - `pair`: scroll to the matching card on the page (matched by
- *    `data-pair-id`). If no match found, the chip stays static.
- *  - `exercise` / `exam`: chip is non-active (no scroll target on
- *    page), but rendered as a labelled pill so the prose still has
- *    the bridge to the citation.
+ * Click intercepts the custom-protocol href, finds the matching
+ * surface on the page (`<QuestionCard>` / `<PastPaperChip>` /
+ * `<QuestionAssetsBlock>`), scrolls it into view, and flashes a
+ * brief highlight ring. If no match is on the page (e.g. the agent
+ * cited a question whose card isn't currently rendered) the click is
+ * a graceful no-op so the chip stays as a labelled bridge to the
+ * citation.
  */
 export function LemmaInlineCitation({
   refUri,
   className,
   children,
 }: LemmaInlineCitationProps) {
-  const pairId = pairIdFromRefUri(refUri);
+  const parsed = parseLemmaScrollUri(refUri);
 
   const onClick = useCallback(
     (e: React.MouseEvent<HTMLAnchorElement>) => {
       // Always intercept — the href is a custom protocol the browser
       // would otherwise refuse to navigate to.
       e.preventDefault();
-      if (!pairId || typeof document === "undefined") return;
-      const target = document.querySelector<HTMLElement>(
-        `[data-pair-id="${cssEscape(pairId)}"]`,
-      );
+      if (!parsed) return;
+      const target = findScrollTarget(parsed);
       if (!target) return;
       target.scrollIntoView({ behavior: "smooth", block: "center" });
       // Briefly flash a highlight ring so the student sees what we
@@ -87,7 +140,7 @@ export function LemmaInlineCitation({
         target.classList.remove(LEMMA_FLASH_CLASS);
       }, LEMMA_FLASH_MS);
     },
-    [pairId],
+    [parsed],
   );
 
   return (

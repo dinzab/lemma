@@ -16,7 +16,8 @@
  *
  * URI grammar:
  *   lemma:pair:<exam_handle>:<exercise_handle>:<question_handle>
- *   lemma:fig:<exam_handle>:<exercise_handle>:<side>:<index_zero_based>
+ *   lemma:fig:<exam_handle>:<exercise_handle>:<question_handle>:<side>:<index_zero_based>
+ *   lemma:fig:<exam_handle>:<exercise_handle>:<side>:<index_zero_based>   (legacy)
  *   lemma:exercise:<exam_handle>:<exercise_handle>
  *   lemma:exam:<exam_handle>
  *
@@ -25,6 +26,19 @@
  * `math-2024-principale-math`), `exercise_handle` is `ex_<n>`, and
  * `question_handle` is `q_<n>.<a>` (matches the v6 pair_id
  * convention). `side` is `enonce` | `corrige`.
+ *
+ * The 5-segment figure shape (with `question_handle`) is the canonical
+ * form. The 4-segment shape predates the v6-figures cutover, when
+ * `enonce_figures` / `corrige_figures` were thought to live at the
+ * exercise level and a single `(exam, exercise, side, index)` triple
+ * uniquely identified a physical image. In the v6 corpus those arrays
+ * live on each pair (sub-question) and frequently differ across pairs
+ * inside the same exercise — multiple physically different images can
+ * share the same `(exam, exercise, side, index)`. The question handle
+ * is therefore required to disambiguate. Resolvers continue to accept
+ * the 4-segment shape so chips persisted by older agent turns keep
+ * working (their scroll-and-pick-first behaviour is no worse than what
+ * was already being rendered there).
  *
  * The block's `inline_link` field is the recommended drop-in form —
  * the agent can paste it verbatim into prose for a working citation.
@@ -234,28 +248,48 @@ export function buildPairCitation(ctx: CitationContext): Citation | null {
  * `index` is the 0-based position of the figure in the side's array.
  * The student-facing label uses the 1-based number.
  *
- *   ref_uri:     lemma:fig:math-2024-principale-math:ex_1:enonce:0
+ *   ref_uri:     lemma:fig:math-2024-principale-math:ex_1:q_1.a:enonce:0
  *   short_label: "figure 1 de l'énoncé"
  *   label:       "Figure 1 de l'énoncé du Bac 2024 Ex 1"
- *   inline_link: "[figure 1 de l'énoncé](lemma:fig:math-2024-principale-math:ex_1:enonce:0)"
+ *   inline_link: "[figure 1 de l'énoncé](lemma:fig:math-2024-principale-math:ex_1:q_1.a:enonce:0)"
+ *
+ * The question handle is included whenever the calling context has
+ * one (every pair-shaped tool surface — search results, get_question_pair,
+ * inspect_figure — does). It's required because v6 stores
+ * `enonce_figures` / `corrige_figures` per pair, and different pairs in
+ * the same exercise may carry physically different images at the same
+ * `(side, index)`. Without the question handle the resolver has no way
+ * to know which pair's array the URI is talking about.
+ *
+ * Falls back to the legacy 4-segment shape
+ * (`lemma:fig:<exam>:<exercise>:<side>:<index>`) when no question
+ * handle is in scope (e.g. when re-deriving a citation from a parsed
+ * legacy URI inside the resolver). The frontend chip + the resolver
+ * both continue to accept that shape, so the agent never emits a
+ * dead URI even on legacy code paths.
  */
 export function buildFigureCitation(
   ctx: CitationContext,
   side: 'enonce' | 'corrige',
   index: number,
 ): Citation | null {
-  // Figure URIs are scoped to an exercise, not a single sub-question
-  // (`lemma:fig:<exam>:<exercise>:<side>:<index>`), so we only need
-  // exam_handle + exercise_handle. Mirrors `buildExerciseCitation`'s
+  // Figure URIs are scoped to a pair (sub-question). Pull the question
+  // handle from the explicit `question_handle` field first, then fall
+  // back to the parsed pair_id. Mirrors `buildExerciseCitation`'s
   // looser-than-resolveHandles fallback so the resolver can build a
-  // citation when no question handle is in scope (e.g. when resolving
-  // a `lemma:fig:…` URI that doesn't include a pair_id).
+  // citation when only exam + exercise are known (e.g. when resolving
+  // a legacy 4-segment `lemma:fig:…` URI that doesn't carry a question
+  // handle).
   const parsed = parsePairId(ctx.pair_id);
   const exam_handle = ctx.exam_handle ?? parsed?.exam_handle ?? null;
   const exercise_handle =
     ctx.exercise_handle ?? parsed?.exercise_handle ?? null;
+  const question_handle =
+    ctx.question_handle ?? parsed?.question_handle ?? null;
   if (!exam_handle || !exercise_handle) return null;
-  const refUri = `lemma:fig:${exam_handle}:${exercise_handle}:${side}:${index}`;
+  const refUri = question_handle
+    ? `lemma:fig:${exam_handle}:${exercise_handle}:${question_handle}:${side}:${index}`
+    : `lemma:fig:${exam_handle}:${exercise_handle}:${side}:${index}`;
   const oneBased = index + 1;
   const sideLabel = side === 'enonce' ? "l'énoncé" : 'la correction';
   const short_label = `figure ${oneBased} de ${sideLabel}`;

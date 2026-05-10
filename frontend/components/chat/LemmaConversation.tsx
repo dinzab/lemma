@@ -587,8 +587,17 @@ function collectFigureRegistrations(
 /**
  * Emit FigureRegistry entries for one pair-shaped payload. Reads
  * `pair_id` + `figures.{enonce,corrige}[]` and keys each figure by
- * `<pair_id>:<side>:<0-based-index>` to mirror the `lemma:fig:…`
- * citation grammar.
+ * `<pair_id>:<side>:<0-based-index>` to mirror the canonical
+ * `lemma:fig:<exam>:<exercise>:<question>:<side>:<index>` citation
+ * grammar.
+ *
+ * Note: we deliberately DO NOT register a duplicate entry under the
+ * synthetic exercise handle (`<exam>:<exercise>`). The legacy 4-segment
+ * URI shape is exercise-scoped and would cause the *last* pair to write
+ * its figure into the shared key (wrong figure for every other pair in
+ * the same exercise). Legacy chips fall through to `/references/lemma`
+ * — which scrolls the corpus and picks a figure consistently — so the
+ * thumbnail and lightbox at least agree.
  */
 function registrationsForPair(
   payload: RawFigurePayload,
@@ -596,13 +605,6 @@ function registrationsForPair(
   const out: { key: FigureKey; figure: RegisteredFigure }[] = [];
   const pair_id = typeof payload.pair_id === "string" ? payload.pair_id : null;
   if (!pair_id) return out;
-  // The `lemma:fig:…` URI grammar drops the question handle —
-  // figures live on an exercise, not on a sub-question. Register
-  // both the synthetic exercise handle (the prefix the chip parses
-  // out of the URI) AND the full pair_id (so future variants of the
-  // citation grammar that include the question handle still resolve)
-  // — both point at the same RegisteredFigure entry.
-  const exerciseHandle = exerciseHandleFromPairId(pair_id);
   const figs = payload.figures;
   if (!figs || typeof figs !== "object" || Array.isArray(figs)) return out;
   for (const side of ["enonce", "corrige"] as const) {
@@ -621,27 +623,9 @@ function registrationsForPair(
         label: fig.label ?? `figure ${index + 1} de ${sideLabel}`,
       };
       out.push({ key: { pair_id, side, index }, figure });
-      if (exerciseHandle && exerciseHandle !== pair_id) {
-        out.push({
-          key: { pair_id: exerciseHandle, side, index },
-          figure,
-        });
-      }
     });
   }
   return out;
-}
-
-/**
- * Given a v6 pair_id (e.g. `math-2024-principale-math:ex_1:q_1.a`),
- * return the exercise-only handle (`math-2024-principale-math:ex_1`).
- * The figure citation URI uses the latter, so the FigureRegistry
- * needs an entry under that key for the chip lookup to hit.
- */
-function exerciseHandleFromPairId(pairId: string): string | null {
-  const parts = pairId.split(":");
-  if (parts.length < 2) return null;
-  return `${parts[0]}:${parts[1]}`;
 }
 
 function parseToolOutput(output: unknown): unknown {
@@ -656,17 +640,21 @@ function parseToolOutput(output: unknown): unknown {
 }
 
 /**
- * Parse a `lemma:fig:<exam>:<exercise>:<side>:<index>` URI back into
- * a FigureRegistry key. Returns null for any non-`lemma:fig:…` URI
- * or a malformed one.
+ * Parse either canonical or legacy `lemma:fig:…` URI back into a
+ * FigureRegistry key. Returns null for non-`lemma:fig:…` URIs or
+ * malformed input.
  *
- * The pair_id is recomposed from `<exam>:<exercise>:<question>` —
- * but figure URIs only carry `<exam>:<exercise>` (no question
- * handle), so we can't reconstruct a full pair_id here. Instead we
- * register figures keyed by the synthetic pair handle
- * `<exam>:<exercise>` for inspect_figure-style entries; the chip
- * lookup uses the same synthetic handle when the URI lacks a
- * question handle.
+ *   canonical: lemma:fig:<exam>:<exercise>:<question>:<side>:<index>
+ *              → { pair_id: "<exam>:<exercise>:<question>", side, index }
+ *   legacy:    lemma:fig:<exam>:<exercise>:<side>:<index>
+ *              → { pair_id: "<exam>:<exercise>", side, index }
+ *
+ * Canonical URIs hit the registry under the same key the pair-shaped
+ * tools use (full v6 pair_id) so the chip thumbnail matches the figure
+ * the agent actually saw. Legacy URIs predate the cutover; the registry
+ * never registers under the synthetic exercise key any more, so the
+ * lookup misses and the chip falls through to `/references/lemma`
+ * (which has its own legacy fallback).
  */
 function parseFigureRefUri(refUri: string | null | undefined): FigureKey | null {
   if (typeof refUri !== "string") return null;
@@ -678,8 +666,13 @@ function parseFigureRefUri(refUri: string | null | undefined): FigureKey | null 
   const sideRaw = parts[parts.length - 2];
   if (sideRaw !== "enonce" && sideRaw !== "corrige") return null;
   if (!Number.isFinite(index) || index < 0) return null;
-  // Everything before <side>:<index> is `<exam>:<exercise>` (the
-  // exam handle itself contains hyphens but no colons in v6).
+  // Everything before the trailing `<side>:<index>` is the registry key.
+  // For canonical 5-segment URIs that's `<exam>:<exercise>:<question>`
+  // (a full v6 pair_id, matches the key `registrationsForPair` writes).
+  // For legacy 4-segment URIs that's `<exam>:<exercise>` (the synthetic
+  // exercise handle); `registrationsForPair` no longer registers under
+  // it, so the lookup misses and the chip falls through to the
+  // `/references/lemma` resolver. Both behaviours are correct.
   const handle = parts.slice(0, parts.length - 2).join(":");
   if (!handle) return null;
   return { pair_id: handle, side: sideRaw, index };

@@ -498,15 +498,57 @@ describe('citation builders', () => {
   });
 
   describe('buildFigureCitation', () => {
-    it('builds a 0-based fig URI keyed by side', () => {
+    it('builds a 0-based fig URI keyed by side AND question handle', () => {
+      // Canonical 5-segment shape — the question handle disambiguates
+      // figures across pairs that share the same (exam, exercise, side,
+      // index) tuple. See the doc comment on `buildFigureCitation` for
+      // the why.
       const fig0 = buildFigureCitation(CTX, 'enonce', 0);
       expect(fig0).not.toBeNull();
       expect(fig0!.ref_uri).toBe(
-        'lemma:fig:math-2024-principale-math:ex_1:enonce:0',
+        'lemma:fig:math-2024-principale-math:ex_1:q_1.a:enonce:0',
       );
       const fig1Corrige = buildFigureCitation(CTX, 'corrige', 1);
       expect(fig1Corrige!.ref_uri).toBe(
-        'lemma:fig:math-2024-principale-math:ex_1:corrige:1',
+        'lemma:fig:math-2024-principale-math:ex_1:q_1.a:corrige:1',
+      );
+    });
+
+    it('emits distinct URIs for two pairs in the same exercise', () => {
+      // Regression: in the v6 corpus, different pairs in one exercise
+      // can carry physically different `enonce_figures[0]` images; the
+      // citation must reflect the calling pair so the resolver can
+      // pick the right one.
+      const fromQ1a = buildFigureCitation(CTX, 'enonce', 0);
+      const fromQ3b = buildFigureCitation(
+        { ...CTX, pair_id: 'math-2024-principale-math:ex_1:q_3.b' },
+        'enonce',
+        0,
+      );
+      expect(fromQ1a!.ref_uri).not.toBe(fromQ3b!.ref_uri);
+      expect(fromQ3b!.ref_uri).toBe(
+        'lemma:fig:math-2024-principale-math:ex_1:q_3.b:enonce:0',
+      );
+    });
+
+    it('falls back to the legacy 4-segment URI when no question handle is in scope', () => {
+      // Resolver-internal callsite: when rebuilding a citation for a
+      // legacy URI we don't always have a question handle on hand.
+      const legacy = buildFigureCitation(
+        {
+          exam_handle: 'math-2024-principale-math',
+          exercise_handle: 'ex_1',
+          matiere: 'math',
+          year: 2024,
+          session: 'principale',
+          track: 'math',
+          exercise_number: 1,
+        },
+        'enonce',
+        0,
+      );
+      expect(legacy!.ref_uri).toBe(
+        'lemma:fig:math-2024-principale-math:ex_1:enonce:0',
       );
     });
 
@@ -609,13 +651,13 @@ describe('formatFiguresForLLM (citation propagation)', () => {
     };
     const out = formatFiguresForLLM(payload, CDN, { pairContext: CTX });
     expect(out.enonce[0].citation?.ref_uri).toBe(
-      'lemma:fig:math-2024-principale-math:ex_1:enonce:0',
+      'lemma:fig:math-2024-principale-math:ex_1:q_1.a:enonce:0',
     );
     expect(out.enonce[1].citation?.ref_uri).toBe(
-      'lemma:fig:math-2024-principale-math:ex_1:enonce:1',
+      'lemma:fig:math-2024-principale-math:ex_1:q_1.a:enonce:1',
     );
     expect(out.corrige[0].citation?.ref_uri).toBe(
-      'lemma:fig:math-2024-principale-math:ex_1:corrige:0',
+      'lemma:fig:math-2024-principale-math:ex_1:q_1.a:corrige:0',
     );
   });
 });
@@ -677,7 +719,7 @@ describe('formatPairForLLM (citation propagation)', () => {
       corrige: { citation: { ref_uri: string } | null }[];
     };
     expect(figures.enonce[0].citation?.ref_uri).toBe(
-      'lemma:fig:math-2024-principale-math:ex_1:enonce:0',
+      'lemma:fig:math-2024-principale-math:ex_1:q_1.a:enonce:0',
     );
   });
 

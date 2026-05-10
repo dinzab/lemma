@@ -59,6 +59,14 @@ interface LemmaConversationProps {
   messages: UIMessage[];
   isLoading?: boolean;
   isStreaming?: boolean;
+  /**
+   * True while the chat hook is auto-reconnecting to the in-memory
+   * RunStreamHub after a dropped wire (page reload, WiFi flicker,
+   * server hub eviction). Used to swap the bouncing-dots typing
+   * indicator for an explicit “Reconnecting…” cue so the user
+   * understands why the answer paused.
+   */
+  isReconnecting?: boolean;
   emptyTitle?: string;
   emptyDescription?: string;
 }
@@ -93,6 +101,7 @@ export function LemmaConversation({
   messages,
   isLoading = false,
   isStreaming = false,
+  isReconnecting = false,
   emptyTitle = "Ready when you are",
   emptyDescription = "Ask anything about your Baccalaureate — past papers, methods, or that one exercise that's stuck.",
 }: LemmaConversationProps) {
@@ -136,6 +145,7 @@ export function LemmaConversation({
         showAssistantTyping={showAssistantTyping}
         latestWriteTodosLocation={latestWriteTodosLocation}
         isStreaming={isStreaming}
+        isReconnecting={isReconnecting}
       />
     </FigureRegistryProvider>
   );
@@ -177,6 +187,7 @@ interface ConversationInnerProps {
   showAssistantTyping: boolean;
   latestWriteTodosLocation: { messageIdx: number; partIdx: number } | null;
   isStreaming: boolean;
+  isReconnecting: boolean;
 }
 
 function ConversationInner({
@@ -184,6 +195,7 @@ function ConversationInner({
   showAssistantTyping,
   latestWriteTodosLocation,
   isStreaming,
+  isReconnecting,
 }: ConversationInnerProps) {
   return (
     <Conversation>
@@ -371,7 +383,7 @@ function ConversationInner({
             <AssistantAvatar className="mt-0.5" />
             <Message from="assistant" className="flex-1 min-w-0">
               <MessageContent>
-                <TypingIndicator />
+                <TypingIndicator reconnecting={isReconnecting} />
               </MessageContent>
             </Message>
           </div>
@@ -462,16 +474,25 @@ function isGetQuestionPairPart(part: {
   return part.type === "tool-get_question_pair";
 }
 
-function TypingIndicator() {
+function TypingIndicator({ reconnecting = false }: { reconnecting?: boolean }) {
+  // While auto-reconnect is in flight we swap the regular bouncing
+  // dots for a labelled “Reconnecting…” row so the user understands
+  // why the answer paused (vs. the model just thinking). The dots
+  // stay so the row keeps its rhythm even on the labelled variant.
   return (
     <div
-      className="flex items-center gap-1 py-1.5 text-muted-foreground"
-      aria-label="Tutor is thinking"
+      className="flex items-center gap-2 py-1.5 text-muted-foreground"
+      aria-label={reconnecting ? "Reconnecting to tutor" : "Tutor is thinking"}
       role="status"
     >
-      <span className="size-1.5 animate-bounce rounded-full bg-primary/80 [animation-delay:-0.3s]" />
-      <span className="size-1.5 animate-bounce rounded-full bg-primary/80 [animation-delay:-0.15s]" />
-      <span className="size-1.5 animate-bounce rounded-full bg-primary/80" />
+      <div className="flex items-center gap-1">
+        <span className="size-1.5 animate-bounce rounded-full bg-primary/80 [animation-delay:-0.3s]" />
+        <span className="size-1.5 animate-bounce rounded-full bg-primary/80 [animation-delay:-0.15s]" />
+        <span className="size-1.5 animate-bounce rounded-full bg-primary/80" />
+      </div>
+      {reconnecting && (
+        <span className="text-xs font-medium">Reconnecting…</span>
+      )}
     </div>
   );
 }

@@ -74,23 +74,23 @@ export function PastPaperChip({ part }: PastPaperChipProps) {
     <aside
       aria-label="Passage du BAC"
       className={cn(
-        "my-3 w-full rounded-xl border border-secondary/25 bg-secondary/5",
+        "my-3 w-full rounded-xl border border-secondary/40 bg-secondary/5",
         "px-4 py-3 text-sm text-foreground shadow-sm",
       )}
     >
       <div className="flex items-start gap-3">
         <span
           aria-hidden
-          className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-secondary/15 ring-1 ring-secondary/25"
+          className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-secondary/20 ring-1 ring-secondary/40"
         >
-          <ScrollText className="size-3.5 text-secondary-foreground" />
+          <ScrollText className="size-3.5 text-secondary" />
         </span>
 
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-secondary-foreground/80">
+          <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-secondary">
             <span>Passage du BAC</span>
             {matchPct !== null && (
-              <span className="rounded-full bg-secondary/20 px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal text-secondary-foreground">
+              <span className="rounded-full bg-secondary/20 px-1.5 py-0.5 text-[10px] font-medium normal-case tracking-normal text-foreground">
                 {matchPct}% match
               </span>
             )}
@@ -146,7 +146,7 @@ export function PastPaperChip({ part }: PastPaperChipProps) {
                 type="button"
                 onClick={() => setExpanded((v) => !v)}
                 aria-expanded={expanded}
-                className="mt-2 inline-flex items-center gap-1 text-[12px] font-medium text-secondary-foreground hover:underline focus:outline-none focus-visible:underline"
+                className="mt-2 inline-flex items-center gap-1 text-[12px] font-medium text-secondary hover:underline focus:outline-none focus-visible:underline"
               >
                 {expanded ? "Réduire" : "Voir la question"}
                 <ChevronDown

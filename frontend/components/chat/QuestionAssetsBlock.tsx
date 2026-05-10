@@ -113,7 +113,7 @@ export function QuestionAssetsBlock({ part }: QuestionAssetsBlockProps) {
     <aside
       aria-label="Voir l'épreuve"
       className={cn(
-        "my-3 w-full rounded-xl border border-secondary/25 bg-secondary/5",
+        "my-3 w-full rounded-xl border border-secondary/40 bg-secondary/5",
         "px-3 py-2.5 sm:px-4 sm:py-3",
         "text-sm text-foreground shadow-sm",
       )}
@@ -121,13 +121,13 @@ export function QuestionAssetsBlock({ part }: QuestionAssetsBlockProps) {
       <div className="flex items-start gap-2 sm:gap-3">
         <span
           aria-hidden
-          className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-secondary/15 ring-1 ring-secondary/25"
+          className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-secondary/20 ring-1 ring-secondary/40"
         >
-          <ImagePlay className="size-3.5 text-secondary-foreground" />
+          <ImagePlay className="size-3.5 text-secondary" />
         </span>
 
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-secondary-foreground/80">
+          <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-secondary">
             <span>Voir l&apos;épreuve</span>
           </div>
 
@@ -158,7 +158,7 @@ export function QuestionAssetsBlock({ part }: QuestionAssetsBlockProps) {
                   "rounded-full px-3 py-1 text-[12px] font-medium transition",
                   "focus:outline-none focus-visible:ring-2 focus-visible:ring-secondary/40",
                   currentTab === t.key
-                    ? "bg-secondary/20 text-secondary-foreground"
+                    ? "bg-secondary/25 text-foreground"
                     : "bg-muted/60 text-muted-foreground hover:bg-muted",
                 )}
               >

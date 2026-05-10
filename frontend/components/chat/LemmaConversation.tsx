@@ -42,6 +42,11 @@ import {
   type LemmaShowQuestionAssetsToolPart,
 } from "@/components/chat/QuestionAssetsBlock";
 import {
+  QuestionCard,
+  canRenderAsQuestionCard,
+  type LemmaGetQuestionPairToolPart,
+} from "@/components/chat/QuestionCard";
+import {
   TodoPlanPanel,
   extractTodosFromToolPart,
 } from "@/components/chat/TodoPlanPanel";
@@ -235,6 +240,30 @@ export function LemmaConversation({
                     />
                   );
                 }
+                if (
+                  isGetQuestionPairPart(part) &&
+                  canRenderAsQuestionCard(
+                    part as LemmaGetQuestionPairToolPart,
+                  )
+                ) {
+                  // *Question card* surface — render the full énoncé
+                  // (text + figures) plus a recall-gated corrigé
+                  // when the agent calls `get_question_pair`. The
+                  // raw payload is a long JSON object that's useless
+                  // as a tool-chip dump; this card is the structured
+                  // student-facing equivalent. We only swap the chip
+                  // out when the payload actually carries renderable
+                  // content — error strings ("No question pair
+                  // found…") and in-flight calls fall through to
+                  // `<LemmaToolCall>` so the agent surface stays
+                  // debuggable.
+                  return (
+                    <QuestionCard
+                      key={key}
+                      part={part as LemmaGetQuestionPairToolPart}
+                    />
+                  );
+                }
                 return (
                   <LemmaToolCall
                     key={key}
@@ -375,6 +404,19 @@ function isShowQuestionAssetsPart(part: {
     return true;
   }
   return part.type === "tool-show_question_assets";
+}
+
+function isGetQuestionPairPart(part: {
+  type?: string;
+  toolName?: string;
+}): boolean {
+  if (
+    part.type === "dynamic-tool" &&
+    part.toolName === "get_question_pair"
+  ) {
+    return true;
+  }
+  return part.type === "tool-get_question_pair";
 }
 
 function TypingIndicator() {

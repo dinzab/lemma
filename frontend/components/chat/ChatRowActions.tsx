@@ -112,7 +112,7 @@ export function ChatRowActions({
           <button
             type="button"
             className={cn(
-              "mr-1 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground",
+              "mr-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground",
               "transition-opacity hover:bg-background/50 hover:text-foreground",
               "data-[state=open]:opacity-100",
               triggerClassName,

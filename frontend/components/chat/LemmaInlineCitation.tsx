@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { ImageOff, Maximize2, ScrollText } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -14,6 +14,14 @@ import {
 } from "@/components/ui/dialog";
 import { useFigureRegistry } from "@/context/figure-registry-context";
 import type { FigureKey } from "@/context/figure-registry-context";
+import {
+  resolveLemmaUri,
+  type ResolvedExamResponse,
+  type ResolvedExerciseResponse,
+  type ResolvedFigureResponse,
+  type ResolvedPairResponse,
+  type ResolvedReference,
+} from "@/lib/api/references";
 
 /**
  * Inline `lemma:` citation chips rendered by the Streamdown `<a>`
@@ -112,9 +120,10 @@ function findScrollTarget(parsed: ParsedLemmaUri): HTMLElement | null {
  * surface on the page (`<QuestionCard>` / `<PastPaperChip>` /
  * `<QuestionAssetsBlock>`), scrolls it into view, and flashes a
  * brief highlight ring. If no match is on the page (e.g. the agent
- * cited a question whose card isn't currently rendered) the click is
- * a graceful no-op so the chip stays as a labelled bridge to the
- * citation.
+ * cited a question whose card isn't currently rendered) the click
+ * falls back to opening a Reference dialog populated by the
+ * `/references/lemma` resolver — exam title, exercise figures, full
+ * énoncé scan when the corpus has it — so the chip is never inert.
  */
 export function LemmaInlineCitation({
   refUri,
@@ -122,6 +131,13 @@ export function LemmaInlineCitation({
   children,
 }: LemmaInlineCitationProps) {
   const parsed = parseLemmaScrollUri(refUri);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  // Resolved payload for the fallback Dialog. We lazily fetch on the
+  // first click that misses the on-page scroll target, then reuse the
+  // memoised result for subsequent clicks.
+  const [resolved, setResolved] = useState<ResolvedReference | null>(null);
+  const [resolving, setResolving] = useState(false);
+  const [resolveError, setResolveError] = useState<string | null>(null);
 
   const onClick = useCallback(
     (e: React.MouseEvent<HTMLAnchorElement>) => {
@@ -130,38 +146,75 @@ export function LemmaInlineCitation({
       e.preventDefault();
       if (!parsed) return;
       const target = findScrollTarget(parsed);
-      if (!target) return;
-      target.scrollIntoView({ behavior: "smooth", block: "center" });
-      // Briefly flash a highlight ring so the student sees what we
-      // pointed at. We add + remove a class instead of inlining
-      // styles so the colour stays themable.
-      target.classList.add(LEMMA_FLASH_CLASS);
-      window.setTimeout(() => {
-        target.classList.remove(LEMMA_FLASH_CLASS);
-      }, LEMMA_FLASH_MS);
+      if (target) {
+        target.scrollIntoView({ behavior: "smooth", block: "center" });
+        // Briefly flash a highlight ring so the student sees what we
+        // pointed at. We add + remove a class instead of inlining
+        // styles so the colour stays themable.
+        target.classList.add(LEMMA_FLASH_CLASS);
+        window.setTimeout(() => {
+          target.classList.remove(LEMMA_FLASH_CLASS);
+        }, LEMMA_FLASH_MS);
+        return;
+      }
+      // No scroll target on the page — pop the resolver-backed
+      // Dialog so the chip stays useful even when the cited
+      // exercise / pair / exam wasn't surfaced on a card. We
+      // open the dialog optimistically and resolve in parallel
+      // so the loading state lives inside it.
+      setDialogOpen(true);
+      if (!resolved && !resolving) {
+        setResolving(true);
+        setResolveError(null);
+        resolveLemmaUri(refUri)
+          .then((r) => {
+            setResolved(r);
+            if (!r) {
+              setResolveError(
+                "Désolé, cette référence est introuvable dans le corpus.",
+              );
+            }
+          })
+          .catch((err) => {
+            setResolveError(
+              err instanceof Error ? err.message : "Erreur réseau.",
+            );
+          })
+          .finally(() => setResolving(false));
+      }
     },
-    [parsed],
+    [parsed, refUri, resolved, resolving],
   );
 
   return (
-    <a
-      href={refUri}
-      onClick={onClick}
-      className={cn(
-        "inline-flex items-center gap-1 align-baseline",
-        "rounded-md border border-secondary/40 bg-secondary/10 px-1.5 py-0.5",
-        "text-[12px] font-medium text-foreground no-underline",
-        "transition hover:border-secondary/60 hover:bg-secondary/15",
-        "focus:outline-none focus-visible:ring-2 focus-visible:ring-secondary/40",
-        className,
-      )}
-    >
-      <ScrollText
-        className="size-3 shrink-0 text-secondary"
-        aria-hidden
+    <>
+      <a
+        href={refUri}
+        onClick={onClick}
+        className={cn(
+          "inline-flex items-center gap-1 align-baseline",
+          "rounded-md border border-secondary/40 bg-secondary/10 px-1.5 py-0.5",
+          "text-[12px] font-medium text-foreground no-underline",
+          "transition hover:border-secondary/60 hover:bg-secondary/15",
+          "focus:outline-none focus-visible:ring-2 focus-visible:ring-secondary/40",
+          className,
+        )}
+      >
+        <ScrollText
+          className="size-3 shrink-0 text-secondary"
+          aria-hidden
+        />
+        <span className="truncate">{children}</span>
+      </a>
+      <LemmaReferenceDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        fallbackLabel={typeof children === "string" ? children : refUri}
+        resolved={resolved}
+        resolving={resolving}
+        error={resolveError}
       />
-      <span className="truncate">{children}</span>
-    </a>
+    </>
   );
 }
 
@@ -192,12 +245,23 @@ interface LemmaInlineCitationFigureProps {
 
 /**
  * `lemma:fig:…` chip — a tiny thumbnail + label that pops the
- * FigureThumb lightbox on click. Pulls the figure's URL + caption
- * from the `<FigureRegistry>` populated by `<LemmaConversation>`'s
- * tool-output collector. Falls back to a static label-only chip
- * when the registry doesn't (yet) have an entry — typical during
- * the agent's first turn after firing the tool while the message
- * stream is still arriving.
+ * FigureThumb lightbox on click.
+ *
+ * Resolution order:
+ *   1. The conversation-scoped `<FigureRegistry>` populated by
+ *      `<LemmaConversation>`'s tool-output collector. Cheapest:
+ *      pure in-memory lookup against figures that came back with
+ *      the agent's tool calls.
+ *   2. The `/api/references/lemma` resolver — fired lazily on
+ *      mount when the registry has no entry. Fixes the broken
+ *      "figure indisponible" fallback the user saw when the
+ *      agent cited `lemma:fig:…` without firing a tool that
+ *      registered the figure (and the chip just rendered as a
+ *      dashed broken-image icon).
+ *
+ * The fallback fetcher is memoised process-wide by
+ * `resolveLemmaUri`, so even if the same chip is mounted in
+ * multiple messages we only hit the network once per URI.
  */
 export function LemmaInlineCitationFigure({
   refUri,
@@ -206,9 +270,58 @@ export function LemmaInlineCitationFigure({
 }: LemmaInlineCitationFigureProps) {
   const key = parseFigureRefUri(refUri);
   const registry = useFigureRegistry();
-  const fig = key ? registry.getFigure(key) : null;
+  const registered = key ? registry.getFigure(key) : null;
   const [open, setOpen] = useState(false);
   const [errored, setErrored] = useState(false);
+  // Backend-resolver fallback. Only fired when the in-conversation
+  // registry has nothing for this URI; cleared if the registry
+  // catches up (e.g. the matching tool call lands later).
+  const [resolved, setResolved] =
+    useState<ResolvedFigureResponse | null>(null);
+
+  useEffect(() => {
+    if (registered?.url) return;
+    if (resolved) return;
+    let cancelled = false;
+    resolveLemmaUri(refUri)
+      .then((r) => {
+        if (cancelled) return;
+        if (r && r.kind === "figure") setResolved(r);
+      })
+      .catch(() => {
+        // Resolver failures fall through to the dashed
+        // unavailable chip — silent so a transient network
+        // hiccup doesn't pollute the message log.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [refUri, registered?.url, resolved]);
+
+  // Normalise the registered + resolved sources into one shape so the
+  // render path doesn't have to care which came back.
+  const fig: { url: string | null; caption: string | null; alt: string; shortLabel: string } | null =
+    registered?.url
+      ? {
+          url: registered.url,
+          caption: registered.caption,
+          alt: registered.alt,
+          shortLabel: registered.shortLabel,
+        }
+      : resolved?.figure?.url
+        ? {
+            url: resolved.figure.url,
+            caption: resolved.figure.caption,
+            alt:
+              resolved.figure.citation?.label ??
+              resolved.figure.label ??
+              "figure",
+            shortLabel:
+              resolved.figure.citation?.short_label ??
+              resolved.figure.label ??
+              "figure",
+          }
+        : null;
 
   const labelText =
     typeof children === "string" && children.trim().length > 0
@@ -346,4 +459,294 @@ function parseFigureRefUri(refUri: string): FigureKey | null {
   const handle = parts.slice(0, parts.length - 2).join(":");
   if (!handle) return null;
   return { pair_id: handle, side: sideRaw, index };
+}
+
+/**
+ * Resolver-backed fallback Dialog for the `lemma:pair:` /
+ * `lemma:exercise:` / `lemma:exam:` chip — popped when the chip's
+ * click finds no on-page surface to scroll to. Renders a compact
+ * "open the source" panel: chip label header, full-exam scan
+ * thumbnail, and a list of figures with click-through to a
+ * lightbox.
+ *
+ * Kept inside `LemmaInlineCitation.tsx` so all `lemma:`-aware UI
+ * sits under one roof — the resolver, the parsing helpers, and the
+ * fallback rendering all change together.
+ */
+interface LemmaReferenceDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  fallbackLabel: string;
+  resolved: ResolvedReference | null;
+  resolving: boolean;
+  error: string | null;
+}
+
+function LemmaReferenceDialog({
+  open,
+  onOpenChange,
+  fallbackLabel,
+  resolved,
+  resolving,
+  error,
+}: LemmaReferenceDialogProps) {
+  const title =
+    (resolved && "label" in resolved && resolved.label) || fallbackLabel;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogPortal>
+        <DialogOverlay className="bg-black/70" />
+        <DialogContent
+          className={cn(
+            "max-w-[min(720px,95vw)] sm:max-w-[min(720px,95vw)]",
+            "max-h-[85vh] overflow-y-auto p-0",
+          )}
+        >
+          <DialogTitle className="sr-only">{title}</DialogTitle>
+          <div className="space-y-4 p-5">
+            <header className="space-y-1">
+              <h3 className="text-sm font-semibold leading-tight text-foreground">
+                {title}
+              </h3>
+              {resolved && "exam" in resolved && (
+                <p className="text-[12px] text-muted-foreground">
+                  {[
+                    resolved.exam.matiere,
+                    resolved.exam.year,
+                    resolved.exam.session,
+                    resolved.exam.track,
+                  ]
+                    .filter(Boolean)
+                    .join(" — ")}
+                </p>
+              )}
+            </header>
+
+            {resolving && !resolved && (
+              <p className="text-[13px] text-muted-foreground">
+                Chargement de la référence…
+              </p>
+            )}
+
+            {error && (
+              <p className="text-[13px] text-destructive">{error}</p>
+            )}
+
+            {resolved && resolved.kind === "figure" && (
+              <ResolvedFigureBody resolved={resolved} />
+            )}
+            {resolved && resolved.kind === "exercise" && (
+              <ResolvedExerciseBody resolved={resolved} />
+            )}
+            {resolved && resolved.kind === "pair" && (
+              <ResolvedPairBody resolved={resolved} />
+            )}
+            {resolved && resolved.kind === "exam" && (
+              <ResolvedExamBody resolved={resolved} />
+            )}
+          </div>
+        </DialogContent>
+      </DialogPortal>
+    </Dialog>
+  );
+}
+
+function ResolvedFigureBody({
+  resolved,
+}: {
+  resolved: ResolvedFigureResponse;
+}) {
+  if (!resolved.figure.url) {
+    return (
+      <p className="text-[13px] text-muted-foreground">
+        Aucune image disponible pour cette figure.
+      </p>
+    );
+  }
+  return (
+    <figure className="space-y-2">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={resolved.figure.url}
+        alt={resolved.figure.label}
+        className="block w-full rounded-md border border-border/60 bg-background object-contain"
+      />
+      {resolved.figure.caption && (
+        <figcaption className="text-[12px] text-muted-foreground">
+          {resolved.figure.caption}
+        </figcaption>
+      )}
+    </figure>
+  );
+}
+
+function ResolvedExerciseBody({
+  resolved,
+}: {
+  resolved: ResolvedExerciseResponse;
+}) {
+  return (
+    <div className="space-y-3">
+      {resolved.exercise.exercise_enonce_image_url && (
+        <FullExerciseScan
+          url={resolved.exercise.exercise_enonce_image_url}
+          alt={`Énoncé — ${resolved.label}`}
+        />
+      )}
+      <FigureGrid
+        side="énoncé"
+        figures={resolved.figures.enonce}
+      />
+      <FigureGrid
+        side="correction"
+        figures={resolved.figures.corrige}
+      />
+      {resolved.figures.enonce.length === 0 &&
+        resolved.figures.corrige.length === 0 &&
+        !resolved.exercise.exercise_enonce_image_url && (
+          <p className="text-[13px] text-muted-foreground">
+            Cet exercice n&apos;a pas d&apos;illustrations dans le corpus.
+          </p>
+        )}
+    </div>
+  );
+}
+
+function ResolvedPairBody({
+  resolved,
+}: {
+  resolved: ResolvedPairResponse;
+}) {
+  return (
+    <div className="space-y-3">
+      {resolved.question_text && (
+        <section>
+          <h4 className="mb-1 text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">
+            Énoncé
+          </h4>
+          <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-foreground">
+            {resolved.question_text}
+          </p>
+        </section>
+      )}
+      <FigureGrid
+        side="énoncé"
+        figures={resolved.figures.enonce}
+      />
+      <FigureGrid
+        side="correction"
+        figures={resolved.figures.corrige}
+      />
+    </div>
+  );
+}
+
+function ResolvedExamBody({
+  resolved,
+}: {
+  resolved: ResolvedExamResponse;
+}) {
+  return (
+    <div className="space-y-3">
+      {resolved.exam_full_enonce_url && (
+        <FullExerciseScan
+          url={resolved.exam_full_enonce_url}
+          alt={`Énoncé complet — ${resolved.label}`}
+        />
+      )}
+      <ul className="space-y-1 text-[13px] text-foreground">
+        {resolved.exercises.map((ex) => (
+          <li
+            key={ex.exercise_handle}
+            className="flex items-center justify-between rounded-md border border-border/60 bg-muted/30 px-3 py-2"
+          >
+            <span>
+              Exercice {ex.exercise_number ?? "?"} — {ex.n_questions}{" "}
+              question{ex.n_questions === 1 ? "" : "s"}
+            </span>
+            <span className="text-[12px] text-muted-foreground">
+              {ex.n_enonce_figures + ex.n_corrige_figures} figure
+              {ex.n_enonce_figures + ex.n_corrige_figures === 1 ? "" : "s"}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function FullExerciseScan({ url, alt }: { url: string; alt: string }) {
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="block overflow-hidden rounded-md border border-border/60"
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={url}
+        alt={alt}
+        loading="lazy"
+        className="block w-full bg-background object-contain"
+      />
+    </a>
+  );
+}
+
+function FigureGrid({
+  side,
+  figures,
+}: {
+  side: string;
+  figures: ResolvedExerciseResponse["figures"]["enonce"];
+}) {
+  if (figures.length === 0) return null;
+  return (
+    <section>
+      <h4 className="mb-1 text-[12px] font-semibold uppercase tracking-wide text-muted-foreground">
+        Figures de l&apos;{side}
+      </h4>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+        {figures.map((fig) => (
+          <a
+            key={`${fig.side}:${fig.index}`}
+            href={fig.url ?? "#"}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => {
+              if (!fig.url) e.preventDefault();
+            }}
+            className={cn(
+              "flex flex-col gap-1 rounded-md border border-border/60 bg-background p-2",
+              "transition hover:border-secondary/50 hover:bg-muted/30",
+            )}
+          >
+            {fig.url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={fig.url}
+                alt={fig.label}
+                loading="lazy"
+                className="h-32 w-full rounded-sm object-contain"
+              />
+            ) : (
+              <div className="flex h-32 w-full items-center justify-center rounded-sm bg-muted text-muted-foreground">
+                <ImageOff className="size-5" aria-hidden />
+              </div>
+            )}
+            <span className="text-[12px] font-medium text-foreground">
+              {fig.label}
+            </span>
+            {fig.caption && (
+              <span className="text-[11px] text-muted-foreground">
+                {fig.caption}
+              </span>
+            )}
+          </a>
+        ))}
+      </div>
+    </section>
+  );
 }

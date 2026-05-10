@@ -34,6 +34,15 @@ import { FigurePerceptionCacheService } from './figure-perception-cache.service'
     AgentToolsService,
     AgentService,
   ],
-  exports: [CheckpointerService, AgentService],
+  exports: [
+    CheckpointerService,
+    AgentService,
+    // Surface the Qdrant client + the relpath-aware image URL helper
+    // (lives on AgentToolsService via `imageCdnBase`) so adjacent
+    // modules — like ReferencesModule's `lemma:` URI resolver — can
+    // reuse the same connection pool + the canonical R2 URL shape
+    // without re-implementing the `ocr_omni/` prefix normalisation.
+    QdrantClientProvider,
+  ],
 })
 export class AgentModule {}

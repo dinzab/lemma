@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import {
@@ -7,6 +7,7 @@ import {
   ThreadsListResponseDto,
 } from './dto';
 import { ThreadNotFoundException } from './exceptions/thread.exceptions';
+import { CheckpointerService } from '../agent/checkpointer.service';
 
 /**
  * Service for managing chat threads in Supabase
@@ -15,8 +16,12 @@ import { ThreadNotFoundException } from './exceptions/thread.exceptions';
 @Injectable()
 export class ThreadsService {
   private supabase: SupabaseClient;
+  private readonly logger = new Logger(ThreadsService.name);
 
-  constructor(private readonly configService: ConfigService) {
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly checkpointer: CheckpointerService,
+  ) {
     const supabaseUrl = this.configService.getOrThrow<string>('SUPABASE_URL');
     const supabaseServiceKey = this.configService.getOrThrow<string>(
       'SUPABASE_SERVICE_ROLE_KEY',
@@ -137,6 +142,9 @@ export class ThreadsService {
     // First verify the thread exists and user owns it
     await this.getThread(threadId, userId);
 
+    // Drop the SQL row first — this is the source of truth the UI lists from.
+    // ON DELETE CASCADE on the messages / agent_runs FKs purges those tables
+    // server-side without us needing to issue extra DELETEs.
     const { error } = await this.supabase
       .from('threads')
       .delete()
@@ -146,6 +154,21 @@ export class ThreadsService {
     if (error) {
       console.error('Failed to delete thread:', error);
       throw new Error(`Failed to delete thread: ${error.message}`);
+    }
+
+    // Then purge the LangGraph checkpoint state in the separate POSTGRES_URI
+    // database. Without this, a "deleted" thread would silently resurrect
+    // (full message history + tool state) the next time the agent is invoked
+    // with the same thread_id. We log-and-swallow rather than throw because
+    // the user-facing row is already gone and a stuck checkpoint is a less
+    // bad outcome than a confusing 500 after a successful UX delete.
+    try {
+      await this.checkpointer.deleteThread(threadId);
+    } catch (err) {
+      this.logger.error(
+        `Thread ${threadId} deleted from Supabase but checkpoint purge ` +
+          `failed: ${String(err)}. Run manual cleanup if this recurs.`,
+      );
     }
   }
 

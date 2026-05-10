@@ -4,6 +4,7 @@ import { ThrottlerModule } from '@nestjs/throttler';
 import { ThreadsController } from './threads.controller';
 import { ThreadsService } from './threads.service';
 import { UserThrottlerGuard } from '../throttler/user-throttler.guard';
+import { AgentModule } from '../agent/agent.module';
 
 /**
  * ThreadsModule
@@ -21,6 +22,7 @@ import { UserThrottlerGuard } from '../throttler/user-throttler.guard';
 @Module({
   imports: [
     ConfigModule,
+    AgentModule,
     ThrottlerModule.forRoot({
       throttlers: [
         // 60 requests/minute per authenticated user across all thread

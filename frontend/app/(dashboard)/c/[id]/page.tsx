@@ -3,11 +3,14 @@
 import { useParams, useRouter } from "next/navigation";
 import { useState, useRef, useEffect, useCallback } from "react";
 import { AlertCircle, RefreshCw } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useLemmaChat } from "@/hooks/useChat";
 import { LemmaConversation } from "@/components/chat/LemmaConversation";
-import { getThread } from "@/lib/api/threads";
+import { ChatHeader } from "@/components/chat/ChatHeader";
+import { deleteThread, getThread, renameThread } from "@/lib/api/threads";
 import { PromptComposer } from "@/components/chat/PromptComposer";
+import { useThreads } from "@/context/threads-context";
 
 interface ActiveRunResponse {
   runId: string | null;
@@ -22,9 +25,18 @@ export default function ChatThreadPage() {
   const [input, setInput] = useState("");
   const [isValidating, setIsValidating] = useState(true);
   const [hasValidated, setHasValidated] = useState(false);
+  const [threadTitle, setThreadTitle] = useState<string | null>(null);
   const [activeRun, setActiveRun] = useState<ActiveRunResponse | null>(null);
   const [resumeDismissed, setResumeDismissed] = useState(false);
   const initialMessageSentRef = useRef(false);
+
+  const { threads, applyRename, removeThread } = useThreads();
+
+  // Prefer the title from the threads context — that way a rename done from
+  // the sidebar reflects in the chat header (and vice versa) without an
+  // extra refetch.
+  const contextTitle = threads.find((t) => t.id === threadId)?.title ?? null;
+  const headerTitle = contextTitle ?? threadTitle;
 
   const {
     messages,
@@ -56,6 +68,7 @@ export default function ChatThreadPage() {
           router.replace("/new");
           return;
         }
+        setThreadTitle(thread.title);
         setIsValidating(false);
         setHasValidated(true);
       } catch (err) {
@@ -137,11 +150,40 @@ export default function ChatThreadPage() {
     !isLoading &&
     (activeRun.status === "running" || activeRun.status === "failed");
 
+  const handleRename = useCallback(
+    async (nextTitle: string) => {
+      try {
+        const updated = await renameThread(threadId, nextTitle);
+        applyRename(updated);
+        setThreadTitle(updated.title);
+        toast.success("Chat renamed");
+      } catch (error) {
+        toast.error(
+          error instanceof Error ? error.message : "Failed to rename chat",
+        );
+        throw error;
+      }
+    },
+    [threadId, applyRename],
+  );
+
+  const handleDelete = useCallback(async () => {
+    try {
+      await deleteThread(threadId);
+      removeThread(threadId);
+      toast.success("Chat deleted");
+      router.push("/new");
+    } catch (error) {
+      toast.error("Failed to delete chat");
+      throw error;
+    }
+  }, [threadId, removeThread, router]);
+
   if (isValidating) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3">
-        <div className="h-8 w-8 rounded-full border-2 border-primary/30 border-t-primary animate-spin" />
-        <p className="text-sm text-muted-foreground">Validating access...</p>
+        <div className="h-7 w-7 rounded-full border-2 border-primary/25 border-t-primary animate-spin" />
+        <p className="text-xs text-muted-foreground">Opening conversation…</p>
       </div>
     );
   }
@@ -152,6 +194,12 @@ export default function ChatThreadPage() {
         <div className="absolute left-1/2 top-[5%] h-72 w-[26rem] -translate-x-1/2 rounded-full bg-primary/5 blur-3xl" />
       </div>
       <div className="flex h-full flex-1 flex-col">
+        <ChatHeader
+          title={headerTitle}
+          onRename={handleRename}
+          onDelete={handleDelete}
+        />
+
         {/* Resume banner — shown when a previous run was interrupted. */}
         {showResumeBanner && activeRun && (
           <div className="mx-auto mt-3 flex w-full max-w-3xl items-center gap-3 rounded-xl border border-amber-300/40 bg-amber-50/60 px-4 py-2.5 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">

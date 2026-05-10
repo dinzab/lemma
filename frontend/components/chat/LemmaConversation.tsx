@@ -82,8 +82,8 @@ export function LemmaConversation({
   messages,
   isLoading = false,
   isStreaming = false,
-  emptyTitle = "Start a conversation",
-  emptyDescription = "Ask me anything about your Baccalaureate studies",
+  emptyTitle = "Ready when you are",
+  emptyDescription = "Ask anything about your Baccalaureate — past papers, methods, or that one exercise that's stuck.",
 }: LemmaConversationProps) {
   // Keep the typing indicator (avatar + bouncing dots) visible for the
   // entire loading lifecycle — `submitted` AND `streaming` — instead of

@@ -117,11 +117,34 @@ export function useLemmaChat({
   const [olderCursor, setOlderCursor] = useState<string | null>(null);
   const [olderTotal, setOlderTotal] = useState(0);
   const [isResuming, setIsResuming] = useState(false);
+  // True while the resume loop is in between attempts (backoff sleep)
+  // OR actively reconnecting after a dropped stream. Distinct from
+  // `isResuming` (true on the very first attach) so the UI can show a
+  // “Reconnecting…” indicator only when we're actually retrying.
+  const [isReconnecting, setIsReconnecting] = useState(false);
 
   // Track the live resume controller so we can cancel cleanly when the
   // thread changes / the component unmounts; otherwise a slow reload
   // might leak a half-open EventSource into the next thread.
   const resumeAbortRef = useRef<AbortController | null>(null);
+  // Guard against re-entrancy when the SDK's `onError` fires multiple
+  // times for the same drop — only one reconnect loop should ever be
+  // running per thread mount.
+  const reconnectInFlightRef = useRef(false);
+  const threadIdRef = useRef(threadId);
+  threadIdRef.current = threadId;
+  // The default `activeRunApi` / `historyApi` / `resumeApi` props are
+  // arrow-lambdas re-created every render, so listing them in a
+  // `useCallback` dep array would invalidate the reconnect loop on
+  // every render and tear down the seed effect with it. We pin them
+  // to refs so closures stay stable while still picking up overrides
+  // if a caller swaps them.
+  const activeRunApiRef = useRef(activeRunApi);
+  activeRunApiRef.current = activeRunApi;
+  const historyApiRef = useRef(historyApi);
+  historyApiRef.current = historyApi;
+  const resumeApiRef = useRef(resumeApi);
+  resumeApiRef.current = resumeApi;
 
   // Stable transport across renders — `useChat` re-instantiates heavy
   // state when it sees a different transport reference.
@@ -130,11 +153,21 @@ export function useLemmaChat({
     [api],
   );
 
+  // Forward declared so `onError` can fire it without a circular ref.
+  // The actual implementation is set below once `setMessages` etc. are
+  // available; we route through a ref so the SDK callback stays stable.
+  const triggerAutoReconnectRef = useRef<() => void>(() => {});
+
   const chat = useAiChat<UIMessage>({
     id: threadId,
     transport,
     onError: (err) => {
       console.error("[useLemmaChat] stream error:", err);
+      // The live POST /chat/stream connection just dropped. The agent
+      // run keeps going on the backend (see chat.service.ts — close on
+      // the HTTP response is intentionally NOT wired to abort), so we
+      // can fall back to the resume hub and replay whatever we missed.
+      triggerAutoReconnectRef.current();
     },
   });
 
@@ -148,6 +181,127 @@ export function useLemmaChat({
     error,
   } = chat;
 
+  // Reusable reconnect entry point. Re-fetches history (so the splice
+  // prefix is up-to-date when we're called mid-flight after a live
+  // stream drop), looks up the active run, and replays the hub with
+  // exponential backoff until the run reports a terminal status, the
+  // wire emits a `finish` chunk, or we hit MAX_RECONNECT_ATTEMPTS.
+  //
+  // `isCancelled` is checked between attempts and inside the backoff
+  // sleep so a thread switch / unmount tears down the loop promptly.
+  const runReconnectLoop = useCallback(
+    async (isCancelled: () => boolean): Promise<void> => {
+      if (reconnectInFlightRef.current) return;
+      reconnectInFlightRef.current = true;
+      const tid = threadIdRef.current;
+      try {
+        for (let attempt = 0; attempt < MAX_RECONNECT_ATTEMPTS; attempt++) {
+          if (isCancelled()) return;
+
+          // Re-probe active-run on every attempt so a run that finishes
+          // server-side between retries can short-circuit the loop.
+          let active: ActiveRun | null = null;
+          try {
+            const res = await fetch(activeRunApiRef.current(tid), {
+              credentials: "include",
+            });
+            if (res.ok) {
+              active = (await res.json()) as ActiveRun;
+            }
+          } catch {
+            // Network error on the probe — fall through to backoff;
+            // the next attempt may succeed.
+          }
+          if (
+            !active ||
+            active.status !== "running" ||
+            !active.runId
+          ) {
+            // Run is no longer alive (completed / failed / cancelled /
+            // never existed). Nothing left to do; the persisted
+            // history is already accurate via the seed fetch.
+            return;
+          }
+
+          // Re-fetch history so the splice prefix reflects whatever the
+          // backend persisted while we were disconnected.
+          let history: PersistedMessage[];
+          try {
+            const res = await fetch(historyApiRef.current(tid), {
+              credentials: "include",
+            });
+            if (!res.ok) throw new Error(`history ${res.status}`);
+            const page = (await res.json()) as MessagesPage;
+            history = [...page.messages].reverse();
+          } catch {
+            history = [];
+          }
+          const splice = computeResumeSplice(history, active.runId);
+          if (splice === null) return;
+          if (isCancelled()) return;
+
+          // First attempt is plain “resuming” (the user just opened the
+          // page or the stream just dropped); follow-up attempts after
+          // a dropped wire show as “Reconnecting…”.
+          if (attempt === 0) {
+            setIsResuming(true);
+          } else {
+            setIsReconnecting(true);
+          }
+
+          const outcome = await resumeFromHub({
+            runId: active.runId,
+            spliceCount: splice,
+            history,
+            resumeApi: resumeApiRef.current,
+            setMessages,
+            abortRef: resumeAbortRef,
+            isCancelled,
+          });
+
+          if (outcome === "finish" || outcome === "cancelled") {
+            return;
+          }
+
+          // Stream dropped without a `finish` chunk. Back off, then
+          // re-probe + re-attach. The hub re-replays from the start of
+          // the run on every subscriber, so the next attempt rebuilds
+          // the assistant turn from scratch — no double-counting.
+          setIsReconnecting(true);
+          const delay = backoffDelayMs(attempt);
+          const slept = await sleepCancellable(delay, isCancelled);
+          if (!slept) return;
+        }
+      } finally {
+        reconnectInFlightRef.current = false;
+        setIsResuming(false);
+        setIsReconnecting(false);
+      }
+    },
+    // `setMessages` is stable per useAiChat instance; the API builders
+    // are pinned via refs above so they don't need to be deps.
+    [setMessages],
+  );
+
+  // Stable wrapper for the SDK's `onError` callback. Cancels any
+  // in-flight resume connection (so we don't fight ourselves), then
+  // kicks off a fresh reconnect loop tied to the current mount.
+  useEffect(() => {
+    let cancelled = false;
+    triggerAutoReconnectRef.current = () => {
+      const ac = resumeAbortRef.current;
+      if (ac) {
+        ac.abort();
+        resumeAbortRef.current = null;
+      }
+      void runReconnectLoop(() => cancelled);
+    };
+    return () => {
+      cancelled = true;
+      triggerAutoReconnectRef.current = () => {};
+    };
+  }, [runReconnectLoop]);
+
   // Fetch the latest page of history once on mount / threadId change,
   // then check whether a previous turn is still streaming and reconnect
   // to its live wire format if so.
@@ -156,6 +310,7 @@ export function useLemmaChat({
     setIsInitialized(false);
     setHistoryError(null);
     setIsResuming(false);
+    setIsReconnecting(false);
 
     const previousAbort = resumeAbortRef.current;
     if (previousAbort) {
@@ -164,9 +319,8 @@ export function useLemmaChat({
     }
 
     (async () => {
-      let history: PersistedMessage[] = [];
       try {
-        const res = await fetch(historyApi(threadId), {
+        const res = await fetch(historyApiRef.current(threadId), {
           credentials: "include",
         });
         if (!res.ok) {
@@ -181,7 +335,7 @@ export function useLemmaChat({
         // Backend returns newest-first (cursor-paginated); the UI needs
         // chronological order (oldest at top, newest at bottom) so the
         // sticky-to-bottom transcript reads naturally.
-        history = [...page.messages].reverse();
+        const history = [...page.messages].reverse();
         setMessages(toUiMessages(history));
         setSeededAt(threadId);
         setOlderCursor(page.nextCursor);
@@ -196,37 +350,11 @@ export function useLemmaChat({
         return;
       }
 
-      // History is in place. Decide whether to reconnect to a still-
-      // running turn — best-effort: any failure here must never break
-      // the seeded history.
+      // History is in place. Best-effort: any failure inside the
+      // reconnect loop must never break the seeded history.
       if (cancelled) return;
       try {
-        const activeRunRes = await fetch(activeRunApi(threadId), {
-          credentials: "include",
-        });
-        if (!activeRunRes.ok) return;
-        const active = (await activeRunRes.json()) as ActiveRun | null;
-        if (!active || active.status !== "running" || !active.runId) return;
-        if (cancelled) return;
-
-        // Find the user message that started this run so we can splice
-        // off any partial assistant turn already persisted and rebuild
-        // it from the resume stream. Without this we'd append the
-        // replayed deltas on top of the partial reload state and
-        // double up every word.
-        const splice = computeResumeSplice(history, active.runId);
-        if (splice === null) return;
-
-        await resumeFromHub({
-          runId: active.runId,
-          spliceCount: splice,
-          history,
-          resumeApi,
-          setMessages,
-          setIsResuming,
-          abortRef: resumeAbortRef,
-          isCancelled: () => cancelled,
-        });
+        await runReconnectLoop(() => cancelled);
       } catch (err) {
         console.warn("[useLemmaChat] resume skipped:", err);
       }
@@ -244,7 +372,7 @@ export function useLemmaChat({
     // closure over threadId, and setMessages is stable per useChat
     // instance.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [threadId]);
+  }, [threadId, runReconnectLoop]);
 
   const messages: UIMessage[] = useMemo(
     () => (seededAt ? aiMessages : []),
@@ -260,6 +388,11 @@ export function useLemmaChat({
   );
 
   const stopGeneration = useCallback(() => {
+    // Hard stop: cancel resume + reconnect entirely so we don't quietly
+    // restart the loop the moment the user clicks Stop.
+    reconnectInFlightRef.current = false;
+    setIsReconnecting(false);
+    setIsResuming(false);
     const ac = resumeAbortRef.current;
     if (ac) {
       ac.abort();
@@ -290,15 +423,24 @@ export function useLemmaChat({
   }, [historyApi, olderCursor, setMessages, threadId]);
 
   const isLoading =
-    status === "submitted" || status === "streaming" || isResuming;
-  const isStreaming = status === "streaming" || isResuming;
+    status === "submitted" ||
+    status === "streaming" ||
+    isResuming ||
+    isReconnecting;
+  const isStreaming =
+    status === "streaming" || isResuming || isReconnecting;
 
   return {
     messages,
     status,
     isLoading,
     isStreaming,
-    error: error?.message ?? historyError,
+    isReconnecting,
+    // The live wire is errored only if the SDK reports an error AND we
+    // are NOT in the middle of an auto-reconnect attempt; otherwise the
+    // user would see a flash of red error UI between drop and retry.
+    error:
+      isReconnecting || isResuming ? historyError : error?.message ?? historyError,
     isInitialized,
     threadId,
     sendMessage: sendText,
@@ -309,6 +451,45 @@ export function useLemmaChat({
     total: Math.max(olderTotal, messages.length),
     initialLimit,
   };
+}
+
+// Auto-reconnect tuning. Six attempts at 250 ms / 500 ms / 1 s / 2 s /
+// 4 s / 4 s covers ≈12 s of dropouts — long enough for a typical
+// WiFi handover, short enough that a permanently dead run doesn't keep
+// a zombie indicator on screen forever.
+const MAX_RECONNECT_ATTEMPTS = 6;
+const RECONNECT_BACKOFFS_MS = [250, 500, 1000, 2000, 4000, 4000];
+
+function backoffDelayMs(attemptIndex: number): number {
+  const i = Math.min(attemptIndex, RECONNECT_BACKOFFS_MS.length - 1);
+  return RECONNECT_BACKOFFS_MS[i];
+}
+
+/**
+ * `setTimeout` wrapped in a polled cancel check. Returns `true` if it
+ * slept the full duration, `false` if `isCancelled()` flipped during
+ * the wait — callers can short-circuit on `false`.
+ */
+function sleepCancellable(
+  ms: number,
+  isCancelled: () => boolean,
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    const start = Date.now();
+    const tick = () => {
+      if (isCancelled()) {
+        resolve(false);
+        return;
+      }
+      const remaining = ms - (Date.now() - start);
+      if (remaining <= 0) {
+        resolve(true);
+        return;
+      }
+      setTimeout(tick, Math.min(remaining, 100));
+    };
+    tick();
+  });
 }
 
 // ---------- conversion helpers ----------
@@ -456,11 +637,24 @@ interface ResumeChunk {
   output?: unknown;
 }
 
+/** Outcome of a single resume attempt, used by the reconnect loop. */
+type ResumeOutcome = "finish" | "dropped" | "failed" | "cancelled";
+
 /**
  * Subscribe to the in-memory hub via `/api/chat/stream/resume`, parse
  * the SSE-framed Vercel AI SDK UI message stream, and rebuild the
  * partial assistant turn in place. Mutates the messages array exactly
  * once per chunk via `setMessages` so React re-renders on every delta.
+ *
+ * Returns one of:
+ *  - `"finish"`    – stream emitted its terminal `finish` chunk
+ *  - `"dropped"`   – stream ended without `finish` (network drop or
+ *                    server hub closed mid-flight) — caller should
+ *                    consider reconnecting if the run is still alive
+ *  - `"failed"`    – fetch errored or returned non-2xx; same as
+ *                    `dropped` from a retry-policy standpoint
+ *  - `"cancelled"` – the abort signal flipped (thread switch / unmount
+ *                    / user pressed Stop); caller should NOT retry
  *
  * The first `setMessages` call splices off any partial assistant turn
  * the history fetch returned (we kept it on screen long enough to
@@ -475,17 +669,15 @@ async function resumeFromHub(args: {
   setMessages: (
     next: UIMessage[] | ((prev: UIMessage[]) => UIMessage[]),
   ) => void;
-  setIsResuming: (v: boolean) => void;
   abortRef: MutableRefObject<AbortController | null>;
   isCancelled: () => boolean;
-}): Promise<void> {
+}): Promise<ResumeOutcome> {
   const {
     runId,
     spliceCount,
     history,
     resumeApi,
     setMessages,
-    setIsResuming,
     abortRef,
     isCancelled,
   } = args;
@@ -501,8 +693,6 @@ async function resumeFromHub(args: {
   const seedMessages = toUiMessages(seedRows);
   setMessages(seedMessages);
 
-  setIsResuming(true);
-
   let response: Response;
   try {
     response = await fetch(resumeApi(runId), {
@@ -510,13 +700,13 @@ async function resumeFromHub(args: {
       signal: ac.signal,
     });
   } catch {
-    setIsResuming(false);
-    return;
+    if (abortRef.current === ac) abortRef.current = null;
+    return isCancelled() ? "cancelled" : "failed";
   }
 
   if (!response.ok || !response.body) {
-    setIsResuming(false);
-    return;
+    if (abortRef.current === ac) abortRef.current = null;
+    return isCancelled() ? "cancelled" : "failed";
   }
 
   const accumulator = newAccumulator(`resume-${runId}`);
@@ -533,20 +723,25 @@ async function resumeFromHub(args: {
     ]);
   };
 
+  let sawFinish = false;
   try {
     for await (const chunk of parseUiMessageStream(response.body, ac.signal)) {
       applyResumeChunk(accumulator, chunk);
       flush();
-      if (chunk.type === "finish") break;
+      if (chunk.type === "finish") {
+        sawFinish = true;
+        break;
+      }
     }
   } catch {
     // Abort or network error — leave whatever the accumulator built so
-    // far on screen. The next mount-time history fetch will reconcile
-    // anything that finished on the backend after the connection died.
+    // far on screen. The reconnect loop will decide whether to retry.
   } finally {
-    setIsResuming(false);
     if (abortRef.current === ac) abortRef.current = null;
   }
+
+  if (isCancelled()) return "cancelled";
+  return sawFinish ? "finish" : "dropped";
 }
 
 function applyResumeChunk(

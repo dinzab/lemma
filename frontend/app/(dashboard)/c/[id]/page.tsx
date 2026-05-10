@@ -2,17 +2,11 @@
 
 import { useParams, useRouter } from "next/navigation";
 import { useState, useRef, useEffect, useCallback } from "react";
-import { AlertCircle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useLemmaChat } from "@/hooks/useChat";
 import { LemmaConversation } from "@/components/chat/LemmaConversation";
 import { getThread } from "@/lib/api/threads";
 import { PromptComposer } from "@/components/chat/PromptComposer";
-
-interface ActiveRunResponse {
-  runId: string | null;
-  status: "running" | "completed" | "failed" | "cancelled" | "idle";
-}
 
 export default function ChatThreadPage() {
   const params = useParams();
@@ -22,19 +16,17 @@ export default function ChatThreadPage() {
   const [input, setInput] = useState("");
   const [isValidating, setIsValidating] = useState(true);
   const [hasValidated, setHasValidated] = useState(false);
-  const [activeRun, setActiveRun] = useState<ActiveRunResponse | null>(null);
-  const [resumeDismissed, setResumeDismissed] = useState(false);
   const initialMessageSentRef = useRef(false);
 
   const {
     messages,
     isLoading,
     isStreaming,
+    isReconnecting,
     error,
     isInitialized,
     sendMessage,
     stopGeneration,
-    regenerateLastMessage,
     loadOlder,
     hasOlder,
   } = useLemmaChat({ threadId });
@@ -67,32 +59,11 @@ export default function ChatThreadPage() {
     validateThread();
   }, [threadId, router]);
 
-  // Resume-on-reload: once the thread is validated, ask the backend
-  // whether the most recent run is still `running` (page was reloaded
-  // mid-stream) or `failed` (server restart killed the previous turn).
-  // The full Redis Streams replay is deferred — here we only surface a
-  // banner so the user can decide whether to retry.
-  useEffect(() => {
-    if (!hasValidated) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(`/api/threads/${threadId}/active-run`, {
-          credentials: "include",
-        });
-        if (!res.ok) return;
-        const data = (await res.json()) as ActiveRunResponse;
-        if (!cancelled) {
-          setActiveRun(data);
-        }
-      } catch (err) {
-        console.warn("active-run probe failed:", err);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [hasValidated, threadId]);
+  // Resume-on-reload happens automatically inside `useLemmaChat`: it
+  // probes `/threads/:id/active-run` and re-attaches to the in-memory
+  // RunStreamHub via `/chat/stream/resume?runId=…` with auto-reconnect
+  // + exponential backoff. The page no longer needs to render an
+  // "interrupted" banner — the streaming UI just keeps going.
 
   useEffect(() => {
     if (
@@ -124,19 +95,6 @@ export default function ChatThreadPage() {
     stopGeneration();
   }, [stopGeneration]);
 
-  const handleResumeRetry = useCallback(() => {
-    setResumeDismissed(true);
-    if (!isLoading) {
-      regenerateLastMessage();
-    }
-  }, [isLoading, regenerateLastMessage]);
-
-  const showResumeBanner =
-    !resumeDismissed &&
-    activeRun !== null &&
-    !isLoading &&
-    (activeRun.status === "running" || activeRun.status === "failed");
-
   if (isValidating) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3">
@@ -152,35 +110,6 @@ export default function ChatThreadPage() {
         <div className="absolute left-1/2 top-[5%] h-72 w-[26rem] -translate-x-1/2 rounded-full bg-primary/5 blur-3xl" />
       </div>
       <div className="flex h-full flex-1 flex-col">
-        {/* Resume banner — shown when a previous run was interrupted. */}
-        {showResumeBanner && activeRun && (
-          <div className="mx-auto mt-3 flex w-full max-w-3xl items-center gap-3 rounded-xl border border-amber-300/40 bg-amber-50/60 px-4 py-2.5 text-sm text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
-            <AlertCircle className="size-4 shrink-0" />
-            <span className="flex-1 truncate">
-              {activeRun.status === "running"
-                ? "Your previous response was still streaming when this page reloaded. Stream replay isn't supported yet — retry to regenerate it."
-                : "Your previous response didn't finish. You can retry it."}
-            </span>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleResumeRetry}
-              className="h-7 px-2 text-xs hover:bg-amber-100/80 dark:hover:bg-amber-500/20"
-            >
-              <RefreshCw className="mr-1 size-3" />
-              Retry
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setResumeDismissed(true)}
-              className="h-7 px-2 text-xs hover:bg-amber-100/80 dark:hover:bg-amber-500/20"
-            >
-              Dismiss
-            </Button>
-          </div>
-        )}
-
         {/* Messages area */}
         <div className="min-h-0 flex-1 overflow-hidden">
           {!isInitialized ? (
@@ -208,6 +137,7 @@ export default function ChatThreadPage() {
                 messages={messages}
                 isLoading={isLoading}
                 isStreaming={isStreaming}
+                isReconnecting={isReconnecting}
               />
             </div>
           )}

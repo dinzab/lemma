@@ -244,9 +244,17 @@ export function buildFigureCitation(
   side: 'enonce' | 'corrige',
   index: number,
 ): Citation | null {
-  const handles = resolveHandles(ctx);
-  if (!handles) return null;
-  const { exam_handle, exercise_handle } = handles;
+  // Figure URIs are scoped to an exercise, not a single sub-question
+  // (`lemma:fig:<exam>:<exercise>:<side>:<index>`), so we only need
+  // exam_handle + exercise_handle. Mirrors `buildExerciseCitation`'s
+  // looser-than-resolveHandles fallback so the resolver can build a
+  // citation when no question handle is in scope (e.g. when resolving
+  // a `lemma:fig:…` URI that doesn't include a pair_id).
+  const parsed = parsePairId(ctx.pair_id);
+  const exam_handle = ctx.exam_handle ?? parsed?.exam_handle ?? null;
+  const exercise_handle =
+    ctx.exercise_handle ?? parsed?.exercise_handle ?? null;
+  if (!exam_handle || !exercise_handle) return null;
   const refUri = `lemma:fig:${exam_handle}:${exercise_handle}:${side}:${index}`;
   const oneBased = index + 1;
   const sideLabel = side === 'enonce' ? "l'énoncé" : 'la correction';

@@ -26,8 +26,6 @@ const TOOL_LABELS: Record<string, string> = {
   list_chapters: "Listing chapters",
   list_topics: "Listing topics",
   list_exams: "Listing exams",
-  recall_analogy: "Recalling a real-life analogy",
-  recall_pattern: "Recalling the canonical recipe",
   emit_hint_ladder: "Building a hint ladder",
   emit_solution_steps: "Laying out the worked solution",
   list_sections: "Listing Bac sections",

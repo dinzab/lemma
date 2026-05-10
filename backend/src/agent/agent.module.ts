@@ -7,8 +7,6 @@ import { QdrantClientProvider } from './tools/qdrant.client';
 import { Neo4jClientProvider } from './tools/neo4j.client';
 import { EmbeddingsClient } from './tools/embeddings.client';
 import { RerankerClient } from './tools/reranker.client';
-import { AnalogiesClient } from './tools/analogies.client';
-import { PatternsClient } from './tools/patterns.client';
 import { VisionService } from './vision.service';
 import { FigurePerceptionCacheService } from './figure-perception-cache.service';
 
@@ -31,8 +29,6 @@ import { FigurePerceptionCacheService } from './figure-perception-cache.service'
     Neo4jClientProvider,
     EmbeddingsClient,
     RerankerClient,
-    AnalogiesClient,
-    PatternsClient,
     VisionService,
     FigurePerceptionCacheService,
     AgentToolsService,

@@ -18,9 +18,11 @@ interface PastPaperChipProps {
  *
  * When the agent calls `search_questions`, render the top-1 match as a
  * soft pinned card showing year + session + chapter + a confidence
- * indicator. The chip pairs visually with `<RealLifeAnchorChip>` (A12)
- * — together they signal "this is BAC-aware AND Tunisia-anchored",
- * which is the emotional differentiator vs. generic chat assistants.
+ * indicator. Together with the structured `<QuestionCard>` (rendered
+ * for `get_question_pair`) and `<QuestionAssetsBlock>` (for
+ * `show_question_assets`), this is the canonical past-paper surface:
+ * the chip surfaces "this is BAC-aware, not generic prep" without any
+ * pedagogical scaffolding bolted on.
  *
  * Three intentional behaviours:
  *

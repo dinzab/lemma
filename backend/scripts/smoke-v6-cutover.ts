@@ -17,8 +17,6 @@ import { QdrantClientProvider } from '../src/agent/tools/qdrant.client';
 import { Neo4jClientProvider } from '../src/agent/tools/neo4j.client';
 import { EmbeddingsClient } from '../src/agent/tools/embeddings.client';
 import { RerankerClient } from '../src/agent/tools/reranker.client';
-import { AnalogiesClient } from '../src/agent/tools/analogies.client';
-import { PatternsClient } from '../src/agent/tools/patterns.client';
 import { VisionService } from '../src/agent/vision.service';
 import { FigurePerceptionCacheService } from '../src/agent/figure-perception-cache.service';
 import type { StructuredToolInterface } from '@langchain/core/tools';
@@ -49,10 +47,6 @@ async function main() {
   neo4j.onModuleInit();
   const embeddings = new EmbeddingsClient(config);
   const reranker = new RerankerClient(config);
-  const analogies = new AnalogiesClient();
-  const patterns = new PatternsClient();
-  void analogies;
-  void patterns;
 
   const vision = new VisionService(config);
   const perceptionCache = new FigurePerceptionCacheService(config);
@@ -62,8 +56,6 @@ async function main() {
     neo4j,
     embeddings,
     reranker,
-    analogies,
-    patterns,
     vision,
     perceptionCache,
     config,

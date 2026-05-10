@@ -12,8 +12,6 @@ import {
 import { Neo4jClientProvider } from './neo4j.client';
 import { EmbeddingsClient } from './embeddings.client';
 import { RerankerClient } from './reranker.client';
-import { AnalogiesClient } from './analogies.client';
-import { PatternsClient } from './patterns.client';
 import {
   VisionService,
   type FigureFocus,
@@ -83,7 +81,7 @@ const EMIT_HINT_LADDER_TOOL_DESCRIPTION = `Use this tool when a student is stuck
 
 ## When NOT to Use This Tool
 1. Pure metadata / discovery questions ("how many exam papers in 2018?", "list chapters in math", "qu'est-ce qu'une matière ?").
-2. Pure concept definitions with no specific problem to solve ("c'est quoi la mitose ?", "définis le mot dérivée"). For those, recall_analogy + recall_pattern + a normal prose explanation is the right shape.
+2. Pure concept definitions with no specific problem to solve ("c'est quoi la mitose ?", "définis le mot dérivée"). For those, a normal prose explanation is the right shape.
 3. Trivial problems where a one-line answer is enough — forcing four rungs would feel patronising.
 4. The student has explicitly asked for the full solution twice — honour the request and stepwise-walk through it instead.
 5. You don't actually have a 4-rung structure to give. If your rungs would all say the same thing in different words, this tool is the wrong shape and you should answer in prose instead.
@@ -349,14 +347,6 @@ function normalizeSection(track: string | undefined): string | undefined {
  *                            of a specific exercise ("give me all
  *                            sub-questions of Exercice 4 in 2017
  *                            contrôle info math")
- *   - recall_analogy         pull a curated Tunisian real-life anchor for
- *                            a concept (Teacher Protocol step 4 / A12
- *                            *Dans la vraie vie* render block)
- *   - recall_pattern         pull the canonical thinking-frame for a
- *                            recurring BAC exercise genre — genre +
- *                            recipe + trap (Teacher Protocol steps
- *                            2-3 / A11 *Comment penser à ça* render
- *                            block)
  *   - emit_hint_ladder       structured 4-rung scaffold for problem-
  *                            shaped help requests (A1 Hint Ladder
  *                            render block) — forces progressive
@@ -416,8 +406,6 @@ export class AgentToolsService {
     private readonly neo4j: Neo4jClientProvider,
     private readonly embeddings: EmbeddingsClient,
     private readonly reranker: RerankerClient,
-    private readonly analogies: AnalogiesClient,
-    private readonly patterns: PatternsClient,
     private readonly vision: VisionService,
     private readonly perceptionCache: FigurePerceptionCacheService,
     private readonly config: ConfigService,
@@ -452,8 +440,6 @@ export class AgentToolsService {
       this.listExamsTool(),
       this.listSectionsTool(),
       this.listExamQuestionsTool(),
-      this.recallAnalogyTool(),
-      this.recallPatternTool(),
       this.emitHintLadderTool(),
       this.emitSolutionStepsTool(),
       this.writeTodosTool(),
@@ -1999,199 +1985,6 @@ export class AgentToolsService {
             .optional()
             .describe(
               `Max questions to return (default ${AgentToolsService.LIST_EXAM_QUESTIONS_DEFAULT}, max ${AgentToolsService.LIST_EXAM_QUESTIONS_MAX}). The "total" field always reflects the unsliced count.`,
-            ),
-        }),
-      },
-    );
-  }
-
-  // ---- recall_analogy ---------------------------------------------------
-
-  /**
-   * Curated Tunisian real-life anchor for a math/physique/svt/etc.
-   * concept. This is step 4 of the Teacher Protocol (RECALL anchor) —
-   * the agent pulls a hand-curated analogy from the on-disk library
-   * BEFORE composing its reply. The frontend renders the result as the
-   * A12 *Dans la vraie vie* chip (see product-vision SKILL.md Part E.3).
-   *
-   * The tool is intentionally honest: when the library doesn't cover
-   * the concept it returns `{ covered: false }`. The system prompt
-   * forbids fabricating an anchor in that case — better to skip the
-   * chip than pollute it with a generic "imagine a pizza" analogy that
-   * defeats the whole point of being a Tunisian-specific moat.
-   */
-  private recallAnalogyTool(): StructuredToolInterface {
-    return tool(
-      async ({ concept_query, matiere }) => {
-        try {
-          const anchor = this.analogies.recall({
-            query: concept_query,
-            matiere,
-          });
-          if (!anchor) {
-            return JSON.stringify({
-              covered: false,
-              concept_query,
-            });
-          }
-          return JSON.stringify({
-            covered: true,
-            anchor: {
-              id: anchor.id,
-              concept_label: anchor.concept_label,
-              matiere: anchor.matiere,
-              label: anchor.label,
-              short: anchor.short,
-              full: anchor.full,
-              language: anchor.language,
-              tags: anchor.tags,
-            },
-          });
-        } catch (err) {
-          this.logger.warn(`recall_analogy failed: ${String(err)}`);
-          return `Error recalling analogy: ${(err as Error).message}`;
-        }
-      },
-      {
-        name: 'recall_analogy',
-        description:
-          'Pull a curated Tunisian real-life analogy for the concept ' +
-          'currently being taught. Call this BEFORE writing the main ' +
-          'explanation when the student is asking about a concrete ' +
-          'mathematical/physical/biological concept that benefits from ' +
-          'grounding (e.g. "fonction affine", "forme exponentielle", ' +
-          '"mitose", "loi de Newton", "clé étrangère"). The library is ' +
-          'small and curated — if no match is found, the tool returns ' +
-          '`covered: false` and you must NOT invent an analogy yourself: ' +
-          'just continue with the explanation without an analogy chip.',
-        schema: z.object({
-          concept_query: z
-            .string()
-            .min(2)
-            .describe(
-              'Short label for the concept being taught, in French or ' +
-                'English. Examples: "fonction affine", "forme exponentielle", ' +
-                '"mitose", "deuxième loi de Newton", "clé étrangère SQL".',
-            ),
-          matiere: z
-            .enum([
-              'math',
-              'physique',
-              'svt',
-              'gestion',
-              'technique',
-              'bd',
-              'economie',
-              'info',
-              'algorithme',
-            ])
-            .optional()
-            .describe(
-              'Matière filter. When provided, only anchors tagged with ' +
-                'this matière are eligible — useful when the same word ' +
-                '(e.g. "limite") could match different concepts across ' +
-                'subjects.',
-            ),
-        }),
-      },
-    );
-  }
-
-  // ---- recall_pattern ---------------------------------------------------
-
-  /**
-   * Curated thinking-frame for a recurring BAC exercise genre. This is
-   * steps 2 and 3 of the Teacher Protocol (RECALL the recipe / RECALL
-   * the trap) — the agent pulls a hand-curated genre + canonical
-   * recipe + typical trap from the on-disk Pattern Atlas BEFORE
-   * composing its reply. The frontend renders the result as the A11
-   * *Comment penser à ça* card pinned at the top of the assistant's
-   * turn (see product-vision SKILL.md Part E.1).
-   *
-   * The tool is intentionally honest: when the atlas doesn't cover
-   * the topic it returns `{ covered: false }`. The system prompt
-   * forbids fabricating a recipe in that case — better to skip the
-   * card than make up a generic "step 1: read the question" recipe
-   * that defeats the whole point of being a Tunisian-BAC-specific
-   * moat.
-   */
-  private recallPatternTool(): StructuredToolInterface {
-    return tool(
-      async ({ concept_query, matiere }) => {
-        try {
-          const pattern = this.patterns.recall({
-            query: concept_query,
-            matiere,
-          });
-          if (!pattern) {
-            return JSON.stringify({
-              covered: false,
-              concept_query,
-            });
-          }
-          return JSON.stringify({
-            covered: true,
-            pattern: {
-              id: pattern.id,
-              topic_label: pattern.topic_label,
-              matiere: pattern.matiere,
-              frequency_in_bac: pattern.frequency_in_bac,
-              genre: pattern.genre,
-              recipe: pattern.recipe,
-              trap: pattern.trap,
-              typical_framings: pattern.typical_framings,
-              variations: pattern.variations,
-            },
-          });
-        } catch (err) {
-          this.logger.warn(`recall_pattern failed: ${String(err)}`);
-          return `Error recalling pattern: ${(err as Error).message}`;
-        }
-      },
-      {
-        name: 'recall_pattern',
-        description:
-          'Pull the canonical thinking-frame for a recurring BAC ' +
-          'exercise genre — what *type* of exercise it is, the ' +
-          '3-step canonical procedure to solve it, and the typical ' +
-          'trap markers look for. Call this BEFORE writing your ' +
-          'main explanation when the student asks about a concept ' +
-          'that maps to a known recurring exercise type (e.g. ' +
-          '"forme exponentielle", "suite géométrique", "dipôle RC", ' +
-          '"mitose", "recherche dichotomique"). The atlas is small ' +
-          'and curated — if no match is found, the tool returns ' +
-          '`covered: false` and you must NOT invent a recipe ' +
-          'yourself: just continue with the explanation without a ' +
-          'thinking-frame card.',
-        schema: z.object({
-          concept_query: z
-            .string()
-            .min(2)
-            .describe(
-              'Short label for the exercise genre / topic, in French ' +
-                'or English. Examples: "forme exponentielle", "suite ' +
-                'géométrique", "intégration par parties", "dipôle RC ' +
-                'charge", "mitose", "recherche dichotomique", "clé ' +
-                'étrangère SQL".',
-            ),
-          matiere: z
-            .enum([
-              'math',
-              'physique',
-              'svt',
-              'gestion',
-              'technique',
-              'bd',
-              'economie',
-              'info',
-              'algorithme',
-            ])
-            .optional()
-            .describe(
-              'Matière filter. When provided, only patterns tagged ' +
-                'with this matière are eligible — useful when the ' +
-                'same word (e.g. "limite") could match different ' +
-                'concepts across subjects.',
             ),
         }),
       },

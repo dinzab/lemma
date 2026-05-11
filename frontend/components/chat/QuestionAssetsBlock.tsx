@@ -212,18 +212,22 @@ interface EnonceTabProps {
 }
 
 function EnonceTab({ figures, imageUrl, fallbackUrl, alt }: EnonceTabProps) {
-  if (figures.length > 0) {
-    return <FigureGrid figures={figures} alt={alt} />;
-  }
   const url = imageUrl ?? fallbackUrl;
-  if (!url) {
+  if (!url && figures.length === 0) {
     return (
       <p className="text-[12px] text-muted-foreground">
         Énoncé indisponible pour cet exercice.
       </p>
     );
   }
-  return <FigureThumb url={url} alt={alt} size="lg" />;
+  return (
+    <AssetsTabContent
+      stitchedUrl={url}
+      figures={figures}
+      alt={alt}
+      figuresHeading="Figures intégrées de l’énoncé"
+    />
+  );
 }
 
 interface CorrigeTabProps {
@@ -273,10 +277,14 @@ function CorrigeTab({
   };
 
   if (unlocked) {
-    if (figures.length > 0) {
-      return <FigureGrid figures={figures} alt={alt} />;
-    }
-    return <FigureThumb url={url!} alt={alt} size="lg" />;
+    return (
+      <AssetsTabContent
+        stitchedUrl={url}
+        figures={figures}
+        alt={alt}
+        figuresHeading="Figures intégrées du corrigé"
+      />
+    );
   }
 
   return (
@@ -325,6 +333,54 @@ function CorrigeTab({
           </form>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Shared layout for the Énoncé and (unlocked) Corrigé tabs.
+ *
+ * Renders the per-exercise stitched page first when it exists — that
+ * page carries the *content* of the énoncé / corrigé (statement text
+ * + equations + embedded figures + paginated layout) and is the
+ * surface a Tunisian teacher would actually point a student at. Then,
+ * if the v6 payload also ships per-figure entries (cropped close-ups
+ * of the embedded figures with their LLM-generated captions), we
+ * surface them as a complementary grid below the stitched page so
+ * the student can click-to-zoom into any specific diagram, schematic
+ * or graph without having to navigate the stitched page manually.
+ *
+ * The previous shape preferred the per-figure grid whenever it had
+ * any entries, which silently hid the stitched corrigé page on every
+ * pair with embedded figures (e.g. a complex-numbers exercise whose
+ * corrigé page bundles the equations *and* the parallelogram diagram
+ * — only the parallelogram was rendered, the equations were dropped).
+ */
+function AssetsTabContent({
+  stitchedUrl,
+  figures,
+  alt,
+  figuresHeading,
+}: {
+  stitchedUrl: string | null;
+  figures: AssetFigureEntry[];
+  alt: string;
+  figuresHeading: string;
+}) {
+  if (!stitchedUrl && figures.length > 0) {
+    return <FigureGrid figures={figures} alt={alt} />;
+  }
+  return (
+    <div className="flex flex-col gap-3">
+      {stitchedUrl && <FigureThumb url={stitchedUrl} alt={alt} size="lg" />}
+      {figures.length > 0 && (
+        <div>
+          <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            {figuresHeading}
+          </div>
+          <FigureGrid figures={figures} alt={alt} />
+        </div>
+      )}
     </div>
   );
 }

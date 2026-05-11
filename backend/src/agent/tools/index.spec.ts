@@ -196,6 +196,88 @@ describe('readFigureEntries', () => {
     expect(readFigureEntries(undefined, 'corrige')).toEqual([]);
     expect(readFigureEntries('not-a-payload', 'enonce')).toEqual([]);
   });
+
+  /**
+   * v6 omni payloads store figures as a flat list of relpaths under
+   * `figure_relpaths_{enonce,corrige}` with no per-figure captions
+   * or labels. The reader normalises them into the same FigureEntry
+   * shape, synthesising a positional label and leaving description
+   * empty. These tests pin the v6 contract so an ingest rollback to
+   * the v4 schema would still keep working (rich shape wins) but a
+   * v6 payload renders figures correctly.
+   */
+  it('reads v6 figure_relpaths_enonce as synthesised FigureEntry list', () => {
+    const out = readFigureEntries(
+      {
+        figure_relpaths_enonce: [
+          '2017_controle_sciences_ex_math/figures/enonce_p2_f1.png',
+          '2017_controle_sciences_ex_math/figures/enonce_p2_f2.png',
+        ],
+        has_figure_enonce: true,
+      },
+      'enonce',
+    );
+    expect(out).toHaveLength(2);
+    expect(out[0]).toEqual({
+      label: 'Figure 1',
+      description: '',
+      relpath: '2017_controle_sciences_ex_math/figures/enonce_p2_f1.png',
+    });
+    expect(out[1].label).toBe('Figure 2');
+    expect(out[1].relpath).toContain('enonce_p2_f2.png');
+  });
+
+  it('reads v6 figure_relpaths_corrige and drops empty / non-string entries', () => {
+    const out = readFigureEntries(
+      {
+        figure_relpaths_corrige: [
+          'a/figures/corrige_p3_f1.png',
+          '',
+          null,
+          42,
+          'a/figures/corrige_p3_f2.png',
+        ],
+      },
+      'corrige',
+    );
+    expect(out).toHaveLength(2);
+    expect(out.map((f) => f.relpath)).toEqual([
+      'a/figures/corrige_p3_f1.png',
+      'a/figures/corrige_p3_f2.png',
+    ]);
+    expect(out.map((f) => f.label)).toEqual(['Figure 1', 'Figure 2']);
+  });
+
+  it('prefers the rich v1/v4 shape when both keys are populated', () => {
+    const out = readFigureEntries(
+      {
+        enonce_figures: [
+          {
+            label: 'figure 1',
+            description: 'Rich caption from v4 ingest.',
+            relpath: 'rich/enonce_f1.png',
+          },
+        ],
+        figure_relpaths_enonce: ['flat/enonce_f1.png'],
+      },
+      'enonce',
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].relpath).toBe('rich/enonce_f1.png');
+    expect(out[0].description).toBe('Rich caption from v4 ingest.');
+  });
+
+  it('falls back to v6 flat list when v4 rich array is empty', () => {
+    const out = readFigureEntries(
+      {
+        enonce_figures: [],
+        figure_relpaths_enonce: ['flat/enonce_f1.png'],
+      },
+      'enonce',
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0].relpath).toBe('flat/enonce_f1.png');
+  });
 });
 
 /**

@@ -368,9 +368,10 @@ function normalizeSection(track: string | undefined): string | undefined {
  *                            common-mistake callout + optional
  *                            predict-next gate
  *
- * Two non-negotiable filters are baked into every Qdrant read inside
- * {@link QdrantClientProvider} (`critic_label='correct'`, `under_gate=false`),
- * so the LLM cannot accidentally pull quarantined or unverified content.
+ * The v6 omni ingest applies the grade + quarantine gates upstream
+ * of indexing (only graded-correct, non-quarantined pairs land in
+ * Qdrant), so the agent surface no longer re-enforces them at query
+ * time. See {@link MANDATORY_FILTER} for the historical context.
  *
  * Each tool catches its own errors and returns a JSON-encoded string
  * (success) or a plain-text error message — a misconfigured Qdrant /
@@ -764,8 +765,9 @@ export class AgentToolsService {
           'Semantic search over the Tunisian Baccalaureate Q/A corpus. ' +
           'Embeds the query, retrieves candidates from Qdrant with the ' +
           'requested metadata filters, and reranks with a cross-encoder. ' +
-          'Returns past exam questions matching the query. Results always ' +
-          'have critic_label="correct" and are not under quality gate. ' +
+          'Returns past exam questions matching the query — the ingest ' +
+          'pipeline only admits graded-correct, non-quarantined pairs so ' +
+          'every hit is safe to surface as a reference. ' +
           'Each result carries `figures.enonce[]` and `figures.corrige[]` ' +
           'arrays of `{label, caption, url}` — the captions are ' +
           'LLM-generated French descriptions of each figure, useful to ' +
@@ -955,10 +957,9 @@ export class AgentToolsService {
    * — so the LLM doesn't accidentally repeat the question text in
    * prose alongside the panel.
    *
-   * The mandatory `critic_label='correct' AND under_gate=false`
-   * filter is enforced inside `QdrantClientProvider.getByPairId`,
-   * so a quarantined pair is invisible here even if the agent
-   * fabricates its id.
+   * Grade + quarantine gating is applied upstream of the v6 ingest,
+   * so only graded-correct, non-quarantined pairs are reachable here
+   * even if the agent fabricates a pair_id that points at one.
    */
   private showQuestionAssetsTool(): StructuredToolInterface {
     return tool(
@@ -2164,36 +2165,53 @@ export class AgentToolsService {
 
   /**
    * Build a Qdrant filter from a flat object of agent-supplied options.
-   * Only the optional filters live here — the mandatory `critic_label` /
-   * `under_gate` clauses are injected inside the Qdrant client.
+   *
+   * The v6 omni payload renamed / dropped several v4-era fields, so
+   * each clause maps the agent's logical name onto the actual indexed
+   * v6 keyword. Fields whose v4 source was a Tag (`chapter`, `topic`,
+   * `bloom_level`, `answer_format`, `difficulty`) no longer live on
+   * the Qdrant payload — they migrated to Neo4j — and are silently
+   * dropped here. The agent can still narrow by those facets via the
+   * Cypher-backed `list_*` / Neo4j-side tools.
+   *
+   * Any future mandatory clauses are injected inside the Qdrant client
+   * (see {@link MANDATORY_FILTER}).
    */
   private buildQdrantFilterFromArgs(args: {
     matiere?: string;
+    /** No-op on v6 (chapter lives on Neo4j only). Kept for API stability. */
     chapter?: string;
+    /** No-op on v6 (topic lives on Neo4j only). */
     topic?: string;
     year?: number;
     session?: string;
     track?: string;
     exam?: string;
+    /** No-op on v6 (difficulty lives on Neo4j only). */
     difficulty_min?: number;
+    /** No-op on v6 (difficulty lives on Neo4j only). */
     difficulty_max?: number;
+    /** No-op on v6 (bloom_level lives on Neo4j only). */
     bloom_level?: string;
+    /** No-op on v6 (answer_format lives on Neo4j only). */
     answer_format?: string;
+    /**
+     * When true, restrict to pairs whose énoncé carries at least one
+     * figure (`has_figure_enonce=true`). When false, restrict to pairs
+     * with no figures on either side.
+     */
     requires_figure?: boolean;
   }): QdrantFilter | undefined {
     const must: QdrantCondition[] = [];
     if (args.matiere)
       must.push({ key: 'matiere', match: { value: args.matiere } });
-    if (args.chapter)
-      must.push({ key: 'chapter', match: { value: args.chapter } });
-    if (args.topic) must.push({ key: 'topics', match: { value: args.topic } });
     if (args.year !== undefined)
-      must.push({ key: 'year', match: { value: args.year } });
+      must.push({ key: 'exam_year', match: { value: args.year } });
     if (args.session)
       must.push({ key: 'session', match: { value: args.session } });
     if (args.track) {
       const track = normalizeSection(args.track);
-      if (track) must.push({ key: 'track', match: { value: track } });
+      if (track) must.push({ key: 'filiere', match: { value: track } });
     }
     if (args.exam) {
       // v6 hyphenated `exam_id` ("math-2017-controle-sciences-ex") and
@@ -2203,26 +2221,17 @@ export class AgentToolsService {
       const examKey = args.exam.includes('-') ? 'exam_id' : 'exam';
       must.push({ key: examKey, match: { value: args.exam } });
     }
-    if (args.bloom_level)
-      must.push({ key: 'bloom_level', match: { value: args.bloom_level } });
-    if (args.answer_format)
-      must.push({ key: 'answer_format', match: { value: args.answer_format } });
     if (typeof args.requires_figure === 'boolean') {
-      must.push({
-        key: 'requires_figure',
-        match: { value: args.requires_figure },
-      });
-    }
-    if (
-      typeof args.difficulty_min === 'number' ||
-      typeof args.difficulty_max === 'number'
-    ) {
-      const range: { gte?: number; lte?: number } = {};
-      if (typeof args.difficulty_min === 'number')
-        range.gte = args.difficulty_min;
-      if (typeof args.difficulty_max === 'number')
-        range.lte = args.difficulty_max;
-      must.push({ key: 'difficulty', range });
+      if (args.requires_figure) {
+        // Surfaces énoncé figures (the side the agent reasons about
+        // most). Pairs whose figures live only on the corrigé side
+        // are still reachable via `inspect_figure` once the agent
+        // sees the question pair.
+        must.push({ key: 'has_figure_enonce', match: { value: true } });
+      } else {
+        must.push({ key: 'has_figure_enonce', match: { value: false } });
+        must.push({ key: 'has_figure_corrige', match: { value: false } });
+      }
     }
     return must.length ? { must } : undefined;
   }
@@ -2283,14 +2292,18 @@ export function buildImageUrl(
 }
 
 /**
- * One entry in the v6 `enonce_figures` / `corrige_figures` payload
- * arrays. Each Pair carries 0..N figure entries per side; entries are
- * an LLM-generated French caption + a relative path inside the public
- * R2 bucket (the prefix is set at config time via `R2_PUBLIC_BASE`,
- * see `buildImageUrl`).
+ * One per-figure record surfaced to the agent / frontend chips. The
+ * v6 omni ingest stores figures as a flat list of R2 relpaths under
+ * `figure_relpaths_{enonce,corrige}`; the v1/v4 ingest used a rich
+ * `{label, description, relpath}` shape under `{enonce,corrige}_figures`.
+ * {@link readFigureEntries} normalises both into this single contract
+ * so downstream code (and the chip surface) doesn't have to branch.
  *
- * Captions are typically 100–600 chars; the corpus pipeline truncates
- * them at 600 chars on ingest. We treat them as opaque strings here.
+ * On v6 payloads `description` comes back as an empty string and
+ * `label` is synthesised as `"Figure N"` from the array index — the
+ * caption text the v4 ingest used to attach now lives on the wider
+ * `section_*_text` / `exercise_*_text` payload fields and the agent
+ * reasons about figures using those directly.
  */
 export interface FigureEntry {
   label: string;
@@ -2299,46 +2312,81 @@ export interface FigureEntry {
 }
 
 /**
- * Read the `enonce_figures` or `corrige_figures` array off a v6
- * Qdrant payload, defensively. Tolerates missing fields, wrong types,
- * and malformed entries — the only contract is that the returned
- * array contains valid `FigureEntry` objects, with all three string
- * fields populated. Anything else is silently dropped.
+ * Read the per-side figure entries off a Qdrant payload, defensively,
+ * normalising across the v1/v4 and v6 payload shapes:
  *
- * The arrays were added on May 9 2026 in the P1 figures fix; older
- * payloads from the cutover window may omit them, in which case this
- * returns `[]`. Callers must therefore not infer "no figure exists"
- * from a missing field — they must additionally check the four
- * `*_image_relpath` keys for the legacy per-exercise stitched image.
+ *   - v1/v4: `enonce_figures` / `corrige_figures` is an array of
+ *     `{label, description, relpath}` objects.
+ *   - v6 (omni): `figure_relpaths_enonce` / `figure_relpaths_corrige`
+ *     is a flat array of relpath strings; per-figure captions /
+ *     labels are not emitted by the v6 ingest.
+ *
+ * Tolerates missing fields, wrong types, and malformed entries — the
+ * only contract is that the returned array contains {@link FigureEntry}
+ * objects with all three string fields populated. Anything else is
+ * silently dropped. Callers must therefore not infer "no figure exists"
+ * from an empty return value alone — they must additionally check the
+ * four `*_image_relpath` keys for the legacy per-exercise stitched
+ * image.
  */
 export function readFigureEntries(
   payload: unknown,
   side: 'enonce' | 'corrige',
 ): FigureEntry[] {
-  const key = side === 'enonce' ? 'enonce_figures' : 'corrige_figures';
-  const raw =
-    payload &&
-    typeof payload === 'object' &&
-    (payload as Record<string, unknown>)[key];
-  if (!Array.isArray(raw)) return [];
-  const out: FigureEntry[] = [];
-  for (const item of raw) {
-    if (!item || typeof item !== 'object') continue;
-    const obj = item as Record<string, unknown>;
-    const label = obj.label;
-    const description = obj.description;
-    const relpath = obj.relpath;
-    if (
-      typeof label !== 'string' ||
-      typeof description !== 'string' ||
-      typeof relpath !== 'string' ||
-      relpath.length === 0
-    ) {
-      continue;
+  if (!payload || typeof payload !== 'object') return [];
+  const p = payload as Record<string, unknown>;
+
+  // Prefer the rich v1/v4 shape when it's populated — it carries the
+  // LLM-generated captions the agent reasons about most.
+  const richKey = side === 'enonce' ? 'enonce_figures' : 'corrige_figures';
+  const richRaw = p[richKey];
+  if (Array.isArray(richRaw) && richRaw.length > 0) {
+    const out: FigureEntry[] = [];
+    for (const item of richRaw) {
+      if (!item || typeof item !== 'object') continue;
+      const obj = item as Record<string, unknown>;
+      const label = obj.label;
+      const description = obj.description;
+      const relpath = obj.relpath;
+      if (
+        typeof label !== 'string' ||
+        typeof description !== 'string' ||
+        typeof relpath !== 'string' ||
+        relpath.length === 0
+      ) {
+        continue;
+      }
+      out.push({ label, description, relpath });
     }
-    out.push({ label, description, relpath });
+    if (out.length > 0) return out;
   }
-  return out;
+
+  // Fall back to the v6 flat-relpath shape. The ingest doesn't emit
+  // per-figure labels / captions, so we synthesise a positional label
+  // and leave description empty — the agent reads broader caption
+  // text from the `section_*_text` / `exercise_*_text` payload fields
+  // instead of per-figure captions on v6.
+  const flatKey =
+    side === 'enonce' ? 'figure_relpaths_enonce' : 'figure_relpaths_corrige';
+  const flatRaw = p[flatKey];
+  if (Array.isArray(flatRaw)) {
+    const out: FigureEntry[] = [];
+    for (const entry of flatRaw) {
+      if (typeof entry !== 'string' || entry.length === 0) continue;
+      // Label uses the kept-output index so it stays in sync with the
+      // `lemma:fig:…:<side>:<n>` citation index (which counts only the
+      // valid entries). Clean v6 payloads have no gaps, so this is
+      // equivalent to the raw array index in practice.
+      out.push({
+        label: `Figure ${out.length + 1}`,
+        description: '',
+        relpath: entry,
+      });
+    }
+    return out;
+  }
+
+  return [];
 }
 
 /** Max chars per caption surfaced to the LLM in non-`full` tool output. */

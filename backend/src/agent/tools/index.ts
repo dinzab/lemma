@@ -368,9 +368,10 @@ function normalizeSection(track: string | undefined): string | undefined {
  *                            common-mistake callout + optional
  *                            predict-next gate
  *
- * Two non-negotiable filters are baked into every Qdrant read inside
- * {@link QdrantClientProvider} (`critic_label='correct'`, `under_gate=false`),
- * so the LLM cannot accidentally pull quarantined or unverified content.
+ * The v6 omni ingest applies the grade + quarantine gates upstream
+ * of indexing (only graded-correct, non-quarantined pairs land in
+ * Qdrant), so the agent surface no longer re-enforces them at query
+ * time. See {@link MANDATORY_FILTER} for the historical context.
  *
  * Each tool catches its own errors and returns a JSON-encoded string
  * (success) or a plain-text error message — a misconfigured Qdrant /
@@ -764,8 +765,9 @@ export class AgentToolsService {
           'Semantic search over the Tunisian Baccalaureate Q/A corpus. ' +
           'Embeds the query, retrieves candidates from Qdrant with the ' +
           'requested metadata filters, and reranks with a cross-encoder. ' +
-          'Returns past exam questions matching the query. Results always ' +
-          'have critic_label="correct" and are not under quality gate. ' +
+          'Returns past exam questions matching the query — the ingest ' +
+          'pipeline only admits graded-correct, non-quarantined pairs so ' +
+          'every hit is safe to surface as a reference. ' +
           'Each result carries `figures.enonce[]` and `figures.corrige[]` ' +
           'arrays of `{label, caption, url}` — the captions are ' +
           'LLM-generated French descriptions of each figure, useful to ' +
@@ -955,10 +957,9 @@ export class AgentToolsService {
    * — so the LLM doesn't accidentally repeat the question text in
    * prose alongside the panel.
    *
-   * The mandatory `critic_label='correct' AND under_gate=false`
-   * filter is enforced inside `QdrantClientProvider.getByPairId`,
-   * so a quarantined pair is invisible here even if the agent
-   * fabricates its id.
+   * Grade + quarantine gating is applied upstream of the v6 ingest,
+   * so only graded-correct, non-quarantined pairs are reachable here
+   * even if the agent fabricates a pair_id that points at one.
    */
   private showQuestionAssetsTool(): StructuredToolInterface {
     return tool(
@@ -2164,36 +2165,53 @@ export class AgentToolsService {
 
   /**
    * Build a Qdrant filter from a flat object of agent-supplied options.
-   * Only the optional filters live here — the mandatory `critic_label` /
-   * `under_gate` clauses are injected inside the Qdrant client.
+   *
+   * The v6 omni payload renamed / dropped several v4-era fields, so
+   * each clause maps the agent's logical name onto the actual indexed
+   * v6 keyword. Fields whose v4 source was a Tag (`chapter`, `topic`,
+   * `bloom_level`, `answer_format`, `difficulty`) no longer live on
+   * the Qdrant payload — they migrated to Neo4j — and are silently
+   * dropped here. The agent can still narrow by those facets via the
+   * Cypher-backed `list_*` / Neo4j-side tools.
+   *
+   * Any future mandatory clauses are injected inside the Qdrant client
+   * (see {@link MANDATORY_FILTER}).
    */
   private buildQdrantFilterFromArgs(args: {
     matiere?: string;
+    /** No-op on v6 (chapter lives on Neo4j only). Kept for API stability. */
     chapter?: string;
+    /** No-op on v6 (topic lives on Neo4j only). */
     topic?: string;
     year?: number;
     session?: string;
     track?: string;
     exam?: string;
+    /** No-op on v6 (difficulty lives on Neo4j only). */
     difficulty_min?: number;
+    /** No-op on v6 (difficulty lives on Neo4j only). */
     difficulty_max?: number;
+    /** No-op on v6 (bloom_level lives on Neo4j only). */
     bloom_level?: string;
+    /** No-op on v6 (answer_format lives on Neo4j only). */
     answer_format?: string;
+    /**
+     * When true, restrict to pairs whose énoncé carries at least one
+     * figure (`has_figure_enonce=true`). When false, restrict to pairs
+     * with no figures on either side.
+     */
     requires_figure?: boolean;
   }): QdrantFilter | undefined {
     const must: QdrantCondition[] = [];
     if (args.matiere)
       must.push({ key: 'matiere', match: { value: args.matiere } });
-    if (args.chapter)
-      must.push({ key: 'chapter', match: { value: args.chapter } });
-    if (args.topic) must.push({ key: 'topics', match: { value: args.topic } });
     if (args.year !== undefined)
-      must.push({ key: 'year', match: { value: args.year } });
+      must.push({ key: 'exam_year', match: { value: args.year } });
     if (args.session)
       must.push({ key: 'session', match: { value: args.session } });
     if (args.track) {
       const track = normalizeSection(args.track);
-      if (track) must.push({ key: 'track', match: { value: track } });
+      if (track) must.push({ key: 'filiere', match: { value: track } });
     }
     if (args.exam) {
       // v6 hyphenated `exam_id` ("math-2017-controle-sciences-ex") and
@@ -2203,26 +2221,17 @@ export class AgentToolsService {
       const examKey = args.exam.includes('-') ? 'exam_id' : 'exam';
       must.push({ key: examKey, match: { value: args.exam } });
     }
-    if (args.bloom_level)
-      must.push({ key: 'bloom_level', match: { value: args.bloom_level } });
-    if (args.answer_format)
-      must.push({ key: 'answer_format', match: { value: args.answer_format } });
     if (typeof args.requires_figure === 'boolean') {
-      must.push({
-        key: 'requires_figure',
-        match: { value: args.requires_figure },
-      });
-    }
-    if (
-      typeof args.difficulty_min === 'number' ||
-      typeof args.difficulty_max === 'number'
-    ) {
-      const range: { gte?: number; lte?: number } = {};
-      if (typeof args.difficulty_min === 'number')
-        range.gte = args.difficulty_min;
-      if (typeof args.difficulty_max === 'number')
-        range.lte = args.difficulty_max;
-      must.push({ key: 'difficulty', range });
+      if (args.requires_figure) {
+        // Surfaces énoncé figures (the side the agent reasons about
+        // most). Pairs whose figures live only on the corrigé side
+        // are still reachable via `inspect_figure` once the agent
+        // sees the question pair.
+        must.push({ key: 'has_figure_enonce', match: { value: true } });
+      } else {
+        must.push({ key: 'has_figure_enonce', match: { value: false } });
+        must.push({ key: 'has_figure_corrige', match: { value: false } });
+      }
     }
     return must.length ? { must } : undefined;
   }

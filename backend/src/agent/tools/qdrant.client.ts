@@ -39,28 +39,30 @@ export interface QdrantFilter {
 }
 
 /**
- * Two non-negotiable filter conditions baked into every search:
- *   - critic_label = "correct"   → only LLM-graded correct answers
- *   - under_gate   = false       → exclude flagged/quarantined items
+ * Mandatory filter clauses prepended to every Qdrant request.
  *
- * Both conditions are stamped 100% on both v1 (`bac_qa_pairs_nim_v1`) and
- * v6 (`bac_qa_pairs_omni_v6`) collections, so they pass every point — but
- * keeping them ensures the filter is enforceable the moment the data
- * pipeline starts emitting non-correct or under-gate pairs.
+ * Historically this carried two safety filters from the v1 pipeline:
+ *   - `critic_label = "correct"` → only LLM-graded correct answers
+ *   - `under_gate   = false`     → exclude flagged/quarantined items
  *
- * NOTE for v6: both fields require Qdrant payload indexes when strict
- * mode is enabled (it is on prod). See `backend/scripts/ensure-v6-indexes.ts`
- * for the idempotent index-creation helper.
+ * The current production collection (`bac_qa_pairs_omni_v6`, ingest
+ * version `omni_v6.5`) no longer carries either field on its payload
+ * and does not index them. Because the collection runs with Qdrant
+ * strict mode enabled (`unindexed_filtering_retrieve=false`), forcing
+ * those clauses produced a `Bad request: Index required but not found
+ * for "critic_label"` on every search/scroll/count — silently breaking
+ * the agent tools and the `/api/references` resolver after the v6
+ * cutover.
  *
- * Exposed so callers can compose with the agent's optional filters via
- * {@link mergeFilter} without re-typing them and so the rules stay in one
- * place if they ever change.
+ * The grading + quarantine pass is now applied upstream of ingest
+ * (only graded-correct, non-quarantined pairs ever land in v6), so we
+ * no longer need to re-enforce it at query time. The constant stays
+ * exported so callers can keep composing with {@link mergeFilter}
+ * without code churn if a future ingest re-introduces the fields and
+ * we want to gate again.
  */
 export const MANDATORY_FILTER: QdrantFilter = {
-  must: [
-    { key: 'critic_label', match: { value: 'correct' } },
-    { key: 'under_gate', match: { value: false } },
-  ],
+  must: [],
 };
 
 /**
@@ -89,9 +91,8 @@ export function mergeFilter(extra?: QdrantFilter): QdrantFilter {
  * REST API directly keeps the dependency surface small and the build clean.
  *
  * Targets the v6 collection schema (named `dense` vector, 2048 dims,
- * cosine distance). Every read goes through {@link mergeFilter} so the
- * `critic_label='correct'` + `under_gate=false` invariants can't be
- * forgotten downstream.
+ * cosine distance). Every read goes through {@link mergeFilter} so any
+ * future mandatory clauses stay enforced in one place.
  *
  * Defers connection until first use so the backend can boot when
  * QDRANT_URL points at a dead cluster.

@@ -36,11 +36,15 @@ interface QuestionAssetsPayload {
   };
   /**
    * Per-figure entries surfaced by the v6 backend after the May 9
-   * figures injection. When at least one side has entries, the panel
-   * prefers them over the legacy single stitched image because (a)
-   * each entry has its own click-to-zoom and caption, and (b) some
-   * exercises have 4–6 figures that get washed together in the
-   * stitch.
+   * figures injection. Treated as a *supplement* to the stitched
+   * exercise page: when both are available we render the stitched
+   * page as the primary view (because it carries the actual
+   * énoncé / corrigé text + the figures already inlined) and expose
+   * the per-figure entries below in a collapsible “Figures
+   * détaillées” panel so the student can still click-to-zoom on a
+   * single figure or read its caption. When no stitched page exists
+   * (some svt / technique / economie pairs) the figures stand on
+   * their own.
    */
   figures?: {
     enonce?: AssetFigureEntry[] | null;
@@ -212,18 +216,20 @@ interface EnonceTabProps {
 }
 
 function EnonceTab({ figures, imageUrl, fallbackUrl, alt }: EnonceTabProps) {
-  if (figures.length > 0) {
-    return <FigureGrid figures={figures} alt={alt} />;
-  }
   const url = imageUrl ?? fallbackUrl;
   if (!url) {
+    // No stitched page — fall back to the figure grid for the
+    // matières that don't ship per-exercise stitches.
+    if (figures.length > 0) {
+      return <FigureGrid figures={figures} alt={alt} />;
+    }
     return (
       <p className="text-[12px] text-muted-foreground">
         Énoncé indisponible pour cet exercice.
       </p>
     );
   }
-  return <FigureThumb url={url} alt={alt} size="lg" />;
+  return <PageWithSupplementaryFigures url={url} figures={figures} alt={alt} />;
 }
 
 interface CorrigeTabProps {
@@ -273,10 +279,11 @@ function CorrigeTab({
   };
 
   if (unlocked) {
-    if (figures.length > 0) {
+    if (!url) {
+      // No stitched page — figure grid is the only available view.
       return <FigureGrid figures={figures} alt={alt} />;
     }
-    return <FigureThumb url={url!} alt={alt} size="lg" />;
+    return <PageWithSupplementaryFigures url={url} figures={figures} alt={alt} />;
   }
 
   return (
@@ -325,6 +332,51 @@ function CorrigeTab({
           </form>
         </div>
       </div>
+    </div>
+  );
+}
+
+/**
+ * Render the stitched énoncé / corrigé page as the primary view and,
+ * when the payload also carries per-figure entries, expose them in a
+ * collapsible “Figures détaillées” panel beneath. The figures grid
+ * is hidden by default so it never pushes the page itself below the
+ * fold — students who want to zoom on a single figure (or read its
+ * caption) are one click away.
+ */
+function PageWithSupplementaryFigures({
+  url,
+  figures,
+  alt,
+}: {
+  url: string;
+  figures: AssetFigureEntry[];
+  alt: string;
+}) {
+  if (figures.length === 0) {
+    return <FigureThumb url={url} alt={alt} size="lg" />;
+  }
+  return (
+    <div className="flex flex-col gap-3">
+      <FigureThumb url={url} alt={alt} size="lg" />
+      <details className="group rounded-md border border-border/60 bg-muted/20 px-3 py-1.5">
+        <summary
+          className={cn(
+            "flex cursor-pointer list-none items-center gap-1.5 text-[12px]",
+            "font-medium text-secondary [&::-webkit-details-marker]:hidden",
+          )}
+        >
+          <span className="text-foreground/80">
+            Figures détaillées ({figures.length})
+          </span>
+          <span className="text-[11px] font-normal text-muted-foreground">
+            — cliquer pour zoomer
+          </span>
+        </summary>
+        <div className="mt-3">
+          <FigureGrid figures={figures} alt={alt} />
+        </div>
+      </details>
     </div>
   );
 }

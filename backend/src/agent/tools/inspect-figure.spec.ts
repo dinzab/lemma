@@ -201,14 +201,123 @@ describe('inspect_figure tool', () => {
     expect(visionMock).not.toHaveBeenCalled();
   });
 
-  it('returns a shaped error when the side has no figures', async () => {
+  it('returns a shaped error envelope when the side has no figures', async () => {
+    // The agent uses `has_figure_*` + `images.*` from the envelope to
+    // decide what to do next: fall back to another side, or stop
+    // calling inspect_figure for this pair.
     const { service, visionMock } = buildService();
     const out = await invoke(service, {
       pair_id: 'math-2017:ex_1:q_1',
       side: 'corrige',
     });
-    expect(out.error).toMatch(/No figures on side="corrige"/);
+    expect(out.error).toMatch(/No content on side="corrige"/);
+    expect(out.error).toMatch(/Available sides: enonce/);
+    expect(out.has_figure_enonce).toBe(true);
+    expect(out.has_figure_corrige).toBe(false);
+    expect(out.images).toEqual({
+      exercise_enonce: null,
+      exercise_corrige: null,
+      exam_full_enonce: null,
+      exam_full_corrige: null,
+    });
     expect(visionMock).not.toHaveBeenCalled();
+  });
+
+  it('returns no_visual_content when the pair has no figures and no page scans on any side', async () => {
+    // The bug from the screenshot: info-2020 ex_1 q_1 ships no
+    // per-figure crops and no page-level scans. The agent was
+    // re-calling inspect_figure repeatedly; the no_visual_content
+    // signal must be loud enough that it stops.
+    const point = {
+      id: 'p2',
+      score: 1,
+      payload: {
+        pair_id: 'info-2020:ex_1:q_1',
+        pair_id_logical: 'info-2020:ex_1:q_1',
+        matiere: 'info',
+        enonce_figures: [],
+        corrige_figures: [],
+      },
+    } as unknown as QdrantPoint;
+    const { service, visionMock } = buildService({ point });
+    const out = await invoke(service, {
+      pair_id: 'info-2020:ex_1:q_1',
+      side: 'enonce',
+    });
+    expect(out.error as string).toMatch(/^no_visual_content/);
+    expect(out.has_figure_enonce).toBe(false);
+    expect(out.has_figure_corrige).toBe(false);
+    expect(out.images).toEqual({
+      exercise_enonce: null,
+      exercise_corrige: null,
+      exam_full_enonce: null,
+      exam_full_corrige: null,
+    });
+    expect(visionMock).not.toHaveBeenCalled();
+  });
+
+  it('inspects the page-level exercise_enonce scan when no per-figure crops exist', async () => {
+    // Typical of info / éco exams that ship the énoncé as one
+    // stitched scan instead of per-figure crops. The whole-page side
+    // routes through the same vision + cache + budget pipeline.
+    const point = {
+      id: 'p3',
+      score: 1,
+      payload: {
+        pair_id: 'info-2020:ex_1:q_1',
+        pair_id_logical: 'info-2020:ex_1:q_1',
+        matiere: 'info',
+        enonce_figures: [],
+        corrige_figures: [],
+        exercise_enonce_image_relpath: 'info-2020/exercises/ex_1_enonce.png',
+      },
+    } as unknown as QdrantPoint;
+    const { service, visionMock } = buildService({ point });
+    const out = await invoke(service, {
+      pair_id: 'info-2020:ex_1:q_1',
+      side: 'exercise_enonce',
+      question: 'Combien y a-t-il de sous-questions ?',
+    });
+    expect(out.error).toBeUndefined();
+    expect(visionMock).toHaveBeenCalledTimes(1);
+    const visionCall = visionMock.mock.calls[0][0] as { imageUrl: string };
+    expect(visionCall.imageUrl).toBe(
+      'https://cdn.test/ocr_omni/info-2020/exercises/ex_1_enonce.png',
+    );
+    const figs = out.figures as Array<Record<string, unknown>>;
+    expect(figs).toHaveLength(1);
+    expect(figs[0].label).toBe('exercise_enonce');
+    // Whole-page scans don't ship a `lemma:fig:…` citation — the
+    // prompt tells the agent to refer to them descriptively.
+    expect(figs[0].citation).toBeNull();
+  });
+
+  it('surfaces the available page-level scan in the error when the requested side has no crops', async () => {
+    // The agent asked for `side: "enonce"` but the pair only ships a
+    // whole-exercise scan. The error envelope must point the agent at
+    // `exercise_enonce` so it can recover on its next turn.
+    const point = {
+      id: 'p4',
+      score: 1,
+      payload: {
+        pair_id: 'info-2020:ex_1:q_1',
+        pair_id_logical: 'info-2020:ex_1:q_1',
+        matiere: 'info',
+        enonce_figures: [],
+        corrige_figures: [],
+        exercise_enonce_image_relpath: 'info-2020/exercises/ex_1_enonce.png',
+      },
+    } as unknown as QdrantPoint;
+    const { service } = buildService({ point });
+    const out = await invoke(service, {
+      pair_id: 'info-2020:ex_1:q_1',
+      side: 'enonce',
+    });
+    expect(out.error as string).toMatch(/No content on side="enonce"/);
+    expect(out.error as string).toMatch(/exercise_enonce/);
+    expect((out.images as { exercise_enonce: string | null }).exercise_enonce).toBe(
+      'https://cdn.test/ocr_omni/info-2020/exercises/ex_1_enonce.png',
+    );
   });
 
   it('returns a shaped error when the figure label is unknown', async () => {

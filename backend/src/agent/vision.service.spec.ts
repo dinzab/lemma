@@ -147,6 +147,81 @@ describe('VisionService', () => {
     };
     expect(init.headers['Authorization']).toBe('Bearer vision-key');
   });
+
+  it('falls back to NVIDIA_BASE_URL + NVIDIA_MODEL_NAME when no NIM_VISION_* is set', async () => {
+    // Models like Xiaomi MiMo-V2.5-Pro are omni-capable and served from
+    // the same OpenAI-compatible endpoint that drives the chat node;
+    // reuse it for `inspect_figure` so operators don't have to
+    // provision a separate vision endpoint.
+    const fetchMock = mockOk(
+      JSON.stringify({ analysis: 'caryotype 2n=46', confidence: 0.9 }),
+    );
+    const service = new VisionService(
+      configWith({
+        NVIDIA_API_KEY: 'shared-key',
+        NVIDIA_BASE_URL: 'https://token-plan-sgp.xiaomimimo.com/v1',
+        NVIDIA_MODEL_NAME: 'mimo-v2.5-pro',
+      }),
+    );
+    await service.analyzeFigure({
+      imageUrl: 'https://example.test/caryotype.png',
+    });
+    const [calledUrl, init] = fetchMock.mock.calls[0] as [
+      string,
+      { body: string },
+    ];
+    expect(calledUrl).toBe(
+      'https://token-plan-sgp.xiaomimimo.com/v1/chat/completions',
+    );
+    const body = JSON.parse(init.body) as { model: string };
+    expect(body.model).toBe('mimo-v2.5-pro');
+  });
+
+  it('tolerates a NVIDIA_BASE_URL that already ends in /chat/completions', async () => {
+    const fetchMock = mockOk(
+      JSON.stringify({ analysis: 'ok', confidence: 0.5 }),
+    );
+    const service = new VisionService(
+      configWith({
+        NVIDIA_API_KEY: 'k',
+        NVIDIA_BASE_URL:
+          'https://token-plan-sgp.xiaomimimo.com/v1/chat/completions/',
+        NVIDIA_MODEL_NAME: 'mimo-v2.5-pro',
+      }),
+    );
+    await service.analyzeFigure({
+      imageUrl: 'https://example.test/figure.png',
+    });
+    const [calledUrl] = fetchMock.mock.calls[0] as [string, unknown];
+    expect(calledUrl).toBe(
+      'https://token-plan-sgp.xiaomimimo.com/v1/chat/completions',
+    );
+  });
+
+  it('NIM_VISION_URL / NIM_VISION_MODEL still win over NVIDIA_* fallback', async () => {
+    const fetchMock = mockOk(
+      JSON.stringify({ analysis: 'ok', confidence: 0.5 }),
+    );
+    const service = new VisionService(
+      configWith({
+        NIM_VISION_API_KEY: 'vision-key',
+        NIM_VISION_URL: 'https://nim.example.test/v1/chat/completions',
+        NIM_VISION_MODEL: 'meta/llama-3.2-90b-vision-instruct',
+        NVIDIA_BASE_URL: 'https://token-plan-sgp.xiaomimimo.com/v1',
+        NVIDIA_MODEL_NAME: 'mimo-v2.5-pro',
+      }),
+    );
+    await service.analyzeFigure({
+      imageUrl: 'https://example.test/figure.png',
+    });
+    const [calledUrl, init] = fetchMock.mock.calls[0] as [
+      string,
+      { body: string },
+    ];
+    expect(calledUrl).toBe('https://nim.example.test/v1/chat/completions');
+    const body = JSON.parse(init.body) as { model: string };
+    expect(body.model).toBe('meta/llama-3.2-90b-vision-instruct');
+  });
 });
 
 describe('parseVisionPayload', () => {

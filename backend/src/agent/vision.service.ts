@@ -77,6 +77,19 @@ export interface VisionAnalysisResult {
 const DEFAULT_VISION_MODEL = 'meta/llama-3.2-90b-vision-instruct';
 const DEFAULT_VISION_URL =
   'https://integrate.api.nvidia.com/v1/chat/completions';
+
+/**
+ * Strip a trailing `/` and an optional trailing `/chat/completions`
+ * from an OpenAI-compatible base URL so we can always append a single
+ * canonical `/chat/completions` segment. Keeps the fallback logic
+ * tolerant of operators who configure `NVIDIA_BASE_URL` with or
+ * without the trailing slash, and with or without the path suffix.
+ */
+function toChatCompletionsUrl(base: string): string {
+  const trimmed = base.replace(/\/+$/, '');
+  if (trimmed.endsWith('/chat/completions')) return trimmed;
+  return `${trimmed}/chat/completions`;
+}
 /**
  * Vision LLMs occasionally hang or stall on huge PDF-derived crops; cap
  * the wall clock so a single bad figure can't block a tool turn.
@@ -124,18 +137,33 @@ Règles strictes :
 - \`analysis\` ne doit JAMAIS être vide.`;
 
 /**
- * NVIDIA NIM-backed vision client. Wraps the OpenAI-compatible
- * `chat/completions` endpoint with a single-image multimodal user
- * message and a strict JSON-only system prompt.
+ * Vision client backed by any OpenAI-compatible chat-completions
+ * endpoint. Wraps it with a single-image multimodal user message and
+ * a strict JSON-only system prompt.
  *
- * Endpoint: ${NIM_VISION_URL} (default
- *   `https://integrate.api.nvidia.com/v1/chat/completions`)
- * Model:    ${NIM_VISION_MODEL} (default `meta/llama-3.2-90b-vision-instruct`)
+ * Endpoint resolution order (first match wins):
+ *   1. `NIM_VISION_URL` — explicit override (legacy NVIDIA NIM
+ *      deployments still hit `https://integrate.api.nvidia.com/v1`).
+ *   2. `${NVIDIA_BASE_URL}/chat/completions` — when the chat model
+ *      itself is omni-capable (e.g. Xiaomi MiMo-V2.5-Pro served from
+ *      `https://token-plan-sgp.xiaomimimo.com/v1`), reuse the same
+ *      endpoint so a single model handles both chat and figure
+ *      perception. This is the path the prompt assumes when it tells
+ *      the agent to call `inspect_figure` aggressively.
+ *   3. `https://integrate.api.nvidia.com/v1/chat/completions` —
+ *      historical default for the standalone NIM vision model.
+ *
+ * Model resolution order:
+ *   1. `NIM_VISION_MODEL` — explicit override.
+ *   2. `NVIDIA_MODEL_NAME` — only when `NVIDIA_BASE_URL` is also set
+ *      (so we never accidentally ship a chat-only model id to the
+ *      legacy NIM vision endpoint that doesn't host it).
+ *   3. `meta/llama-3.2-90b-vision-instruct` — historical default.
  *
  * Auth: prefers `NIM_VISION_API_KEY`, falls back to `NVIDIA_API_KEY` for
- * backward compatibility with deployments that share a single NVIDIA
- * key across embed/rerank/chat/vision (matches the same auth pattern
- * the other NIM clients use). Never logs the key.
+ * deployments that share a single key across embed/rerank/chat/vision
+ * (matches the same auth pattern the other clients use). Never logs
+ * the key.
  *
  * The client is **non-fatal**: any HTTP / parse / timeout failure
  * surfaces as a stub `FigureAnalysis` whose `analysis` field carries
@@ -154,13 +182,31 @@ export class VisionService {
       this.config.get<string>('NIM_VISION_API_KEY') ??
       this.config.get<string>('NVIDIA_API_KEY') ??
       this.config.get<string>('NVIDEA_API_KEY');
-    const url = this.config.get<string>('NIM_VISION_URL') ?? DEFAULT_VISION_URL;
+
+    const explicitVisionUrl = this.config.get<string>('NIM_VISION_URL');
+    const explicitVisionModel = this.config.get<string>('NIM_VISION_MODEL');
+    const nvidiaBaseUrl = this.config.get<string>('NVIDIA_BASE_URL');
+    const nvidiaModelName = this.config.get<string>('NVIDIA_MODEL_NAME');
+
+    // When no separate vision endpoint is configured, fall back to the
+    // chat endpoint provisioned via `NVIDIA_BASE_URL`. This keeps the
+    // omni MiMo path zero-config: the same base URL + model id that
+    // drives the chat node also serves `inspect_figure`, instead of
+    // requiring operators to provision a separate NIM vision key.
+    const url =
+      explicitVisionUrl ??
+      (nvidiaBaseUrl
+        ? toChatCompletionsUrl(nvidiaBaseUrl)
+        : DEFAULT_VISION_URL);
     const model =
-      this.config.get<string>('NIM_VISION_MODEL') ?? DEFAULT_VISION_MODEL;
+      explicitVisionModel ??
+      (nvidiaBaseUrl && nvidiaModelName
+        ? nvidiaModelName
+        : DEFAULT_VISION_MODEL);
 
     if (!apiKey) {
       this.logger.warn(
-        'No NIM vision API key set (NIM_VISION_API_KEY or NVIDIA_API_KEY) — ' +
+        'No vision API key set (NIM_VISION_API_KEY or NVIDIA_API_KEY) — ' +
           'returning a stub vision analysis. Set the key to enable inspect_figure.',
       );
       return this.stub(model, 'no_api_key');

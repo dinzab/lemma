@@ -198,22 +198,28 @@ const SHOW_QUESTION_ASSETS_TOOL_DESCRIPTION = `Use this tool when the student wa
 const INSPECT_FIGURE_TOOL_DESCRIPTION = `Use this tool when **you** (the agent) need to actually *see* a figure — not when the student wants to see it (that's \`show_question_assets\`). The result is a structured perception payload (free-form analysis, axes, values, topology, OCR'd text, count, confidence) you can reason over privately before answering. Captions ship in every search hit and cover most cases; \`inspect_figure\` is the **escape hatch** for when the caption doesn't.
 
 ## When to Use This Tool
-1. The student asks you to *read* something off a figure that the caption doesn't state explicitly — "que vaut u(t=2) ?", "combien de forces sont dessinées ?", "le condensateur est en série ou en parallèle ?", "quelle est l'asymptote sur le graphe ?".
-2. Your answer hinges on a specific visual detail (axis range, branch topology, vector direction, the *value* of an embedded number, an OCR'd legend label) that the caption does not state explicitly.
+1. The student asks you to *read* something off a figure that the caption doesn't state explicitly — "que vaut u(t=2) ?", "combien de forces sont dessinées ?", "le condensateur est en série ou en parallèle ?", "quelle est l'asymptote sur le graphe ?", "combien de chromosomes sur ce caryotype ?", "quelle bande apparaît à 5 kb sur l'électrophorégramme ?".
+2. Your answer hinges on a specific visual detail (axis range, branch topology, vector direction, the *value* of an embedded number, an OCR'd legend label, a chromosome count, an arbre généalogique edge) that the caption does not state explicitly.
 3. Your hypothesis from the énoncé text disagrees with what the caption says — call \`inspect_figure\` to break the tie before answering. Do NOT silently pick one side.
-4. You are about to commit to a numeric answer that depends on reading a value from a graph. Verify before you assert.
+4. You are about to commit to a numeric answer that depends on reading a value from a figure. Verify before you assert.
 
-## When NOT to Use This Tool
-1. The caption (\`figures.{enonce,corrige}[].caption\`) already answers the question. Reading the caption is free; calling this tool is not.
-2. The turn is purely conceptual / vocabulary / theory — no figure-grounded claim. The vision pass adds latency for no benefit.
-3. You already inspected this figure in this turn (the same figure with the same focus + question is cached, so a re-call is fast — but you should not need to). Re-call only with a *different* focus if the first pass missed.
-4. You don't have a specific question about the figure. \`inspect_figure\` works much better when grounded in a concrete question; calling it with no \`question\` is allowed but produces a generic description.
-5. The student wants to *see* the figure themselves — call \`show_question_assets\` instead, which renders the dedicated panel.
+## When NOT to Use This Tool (HARD CONSTRAINT)
+1. **The pair has no visual content.** If \`has_figure_enonce\` and \`has_figure_corrige\` are both false **and** no \`images.exercise_enonce\` / \`images.exam_full_enonce\` URL ships in the search-result payload, there is nothing to inspect. The tool will return \`no_visual_content\` and you should stop calling it for that pair.
+2. **You want to read the *énoncé text*.** The énoncé is already OCR'd into \`question_text\` on every search / get_question_pair hit. Do NOT call \`inspect_figure\` to OCR the prose, count exercises on the page, or check "is there an Exercise 4?" — use \`list_exam_questions\` / \`count_questions\` / the énoncé text instead.
+3. **The caption already answers the question.** Reading \`figures.{enonce,corrige}[].caption\` is free; calling this tool is not.
+4. **The turn is purely conceptual / vocabulary / theory** — no figure-grounded claim. The vision pass adds latency for no benefit.
+5. **You already inspected this figure in this turn.** Same figure + same focus + same question is cached; a re-call is fast, but you should not need to. Re-call only with a *different* focus if the first pass missed.
+6. **You don't have a specific question about the figure.** Grounding the call in a concrete question dramatically improves the perception. Generic "look at the page" calls produce generic noise.
+7. **The student wants to *see* the figure themselves** — call \`show_question_assets\` instead.
 
 ## How to Call
 - \`pair_id\` — the canonical pair handle from \`search_questions\` / \`get_question_pair\` etc.
-- \`side\` — \`"enonce"\` or \`"corrige"\`. The corrigé side is fair game when the student is past the active-recall gate (e.g. reviewing a worked solution).
-- \`figure\` — either a label like \`"figure 1"\` (the labels match \`figures.*[].label\` in search-result payloads) or \`"all"\` to inspect every figure on the side. Defaults to \`"all"\` — pick a single label whenever you can to save tokens.
+- \`side\` — one of:
+  * \`"enonce"\` / \`"corrige"\` — inspect the per-figure crops on the énoncé / corrigé side. **Only valid when \`figures.<side>[].length > 0\` for the pair.** This is the default path.
+  * \`"exercise_enonce"\` / \`"exercise_corrige"\` — inspect the full stitched per-exercise scan (\`images.exercise_enonce\` / \`images.exercise_corrige\`). Use when the pair has no per-figure crops but ships a whole-exercise image (typical of info / éco exams).
+  * \`"exam_full_enonce"\` / \`"exam_full_corrige"\` — inspect the whole-exam scan (\`images.exam_full_*\`). Reserve this for last-resort lookups when neither per-figure nor per-exercise crops exist.
+  The corrigé sides are fair game when the student is past the active-recall gate.
+- \`figure\` — either a label like \`"figure 1"\` (the labels match \`figures.*[].label\` in search-result payloads) or \`"all"\` to inspect every figure on the side. Defaults to \`"all"\` — pick a single label whenever you can to save tokens. **Ignored** on \`exercise_*\` / \`exam_full_*\` sides (one image per side).
 - \`focus\` (optional) — steers the structured fields the model populates:
   * \`"general"\` (default) — short overall description; populates \`axes\` if the figure is a graph.
   * \`"axes"\` — read axes labels + ranges precisely.
@@ -1184,17 +1190,35 @@ export class AgentToolsService {
             full: false,
             pairContext: inspectPairContext,
           });
-          const sideFigures = allFigures[side];
+
+          // Whole-page sides (`exercise_*` / `exam_full_*`) operate on
+          // the stitched scan stored at `*_image_relpath`, not on the
+          // per-figure crops. Synthesise a single "figure" entry from
+          // the payload so the rest of the pipeline (budget, cache,
+          // perception, response shape) is identical.
+          const wholePage = buildWholePageFigure(inspectPayload, side, cdnBase);
+          const isWholePageSide = side !== 'enonce' && side !== 'corrige';
+          const sideFigures: FormattedFigure[] = isWholePageSide
+            ? wholePage
+              ? [wholePage]
+              : []
+            : allFigures[side as 'enonce' | 'corrige'];
+
           if (sideFigures.length === 0) {
-            return JSON.stringify({
-              error: `No figures on side="${side}" for pair_id="${pair_id}".`,
-              figures: [],
-              inspected_count: 0,
-              cached_count: 0,
-            });
+            return JSON.stringify(
+              buildNoFiguresOnSideError({
+                pair_id: inspectPairId,
+                side,
+                payload: inspectPayload,
+                cdnBase,
+                allFigures,
+              }),
+            );
           }
 
-          const targets = filterFiguresBySelector(sideFigures, figureSelector);
+          const targets = isWholePageSide
+            ? sideFigures
+            : filterFiguresBySelector(sideFigures, figureSelector);
           if (targets.length === 0) {
             return JSON.stringify({
               error:
@@ -1236,7 +1260,13 @@ export class AgentToolsService {
           let model = '';
 
           for (const fig of toInspect) {
-            const relpath = readRelpathForLabel(point.payload, side, fig.label);
+            const relpath = isWholePageSide
+              ? readWholePageRelpath(inspectPayload, side)
+              : readRelpathForLabel(
+                  point.payload,
+                  side as 'enonce' | 'corrige',
+                  fig.label,
+                );
             const result = await this.runInspectFigure({
               threadId,
               relpath,
@@ -1301,10 +1331,23 @@ export class AgentToolsService {
                 'e.g. "math-2017-controle-sciences-ex:ex_4:q_1.a".',
             ),
           side: z
-            .enum(['enonce', 'corrige'])
+            .enum([
+              'enonce',
+              'corrige',
+              'exercise_enonce',
+              'exercise_corrige',
+              'exam_full_enonce',
+              'exam_full_corrige',
+            ])
             .describe(
-              'Which side of the pair to inspect. "corrige" is fair game when ' +
-                'the student is past the active-recall gate.',
+              'Which surface of the pair to inspect. ' +
+                '`enonce` / `corrige` target the per-figure crops in ' +
+                '`figures.<side>[]` (only valid when that side ships at least ' +
+                'one figure). `exercise_enonce` / `exercise_corrige` target ' +
+                'the stitched per-exercise scan (`images.exercise_<side>`). ' +
+                '`exam_full_enonce` / `exam_full_corrige` target the whole-exam ' +
+                'scan (`images.exam_full_<side>`). Corrigé sides are fair game ' +
+                'when the student is past the active-recall gate.',
             ),
           figure: z
             .string()
@@ -2718,6 +2761,181 @@ function readRelpathForLabel(
     }
   }
   return null;
+}
+
+/**
+ * The expanded `side` enum for `inspect_figure`. The legacy two
+ * values target the per-figure crops in `figures.<side>[]`; the four
+ * `*_image_relpath`-backed values target the stitched whole-page
+ * scans (one image per side). Splitting the surfaces lets the agent
+ * recover gracefully on info / éco exams that ship a single
+ * exam-wide scan instead of per-figure crops.
+ */
+type InspectFigureSide =
+  | 'enonce'
+  | 'corrige'
+  | 'exercise_enonce'
+  | 'exercise_corrige'
+  | 'exam_full_enonce'
+  | 'exam_full_corrige';
+
+/**
+ * Map an `InspectFigureSide` to the Qdrant payload key carrying its
+ * R2 relpath. `null` for the per-figure sides — those resolve via
+ * `readRelpathForLabel` instead.
+ */
+function wholePageRelpathKey(
+  side: InspectFigureSide,
+): keyof PayloadShape | null {
+  switch (side) {
+    case 'exercise_enonce':
+      return 'exercise_enonce_image_relpath';
+    case 'exercise_corrige':
+      return 'exercise_corrige_image_relpath';
+    case 'exam_full_enonce':
+      return 'exam_full_enonce_relpath';
+    case 'exam_full_corrige':
+      return 'exam_full_corrige_relpath';
+    default:
+      return null;
+  }
+}
+
+interface PayloadShape {
+  exercise_enonce_image_relpath?: unknown;
+  exercise_corrige_image_relpath?: unknown;
+  exam_full_enonce_relpath?: unknown;
+  exam_full_corrige_relpath?: unknown;
+}
+
+/**
+ * Resolve the R2 relpath for a whole-page side. `null` when the
+ * payload doesn't ship a scan for that side, OR when the requested
+ * side is one of the per-figure sides (in which case the relpath
+ * comes from {@link readRelpathForLabel} instead).
+ */
+function readWholePageRelpath(
+  payload: Record<string, unknown>,
+  side: InspectFigureSide,
+): string | null {
+  const key = wholePageRelpathKey(side);
+  if (!key) return null;
+  const v = (payload as Record<string, unknown>)[key];
+  return typeof v === 'string' && v.trim() !== '' ? v : null;
+}
+
+/**
+ * Synthesise a single `FormattedFigure`-shaped entry from a whole-page
+ * scan so the rest of `inspect_figure`'s pipeline (budget, cache,
+ * perception, response shape) can treat both surfaces uniformly. The
+ * `label` mirrors the side so it's still useful in the response.
+ */
+function buildWholePageFigure(
+  payload: Record<string, unknown>,
+  side: InspectFigureSide,
+  cdnBase: string | undefined,
+): FormattedFigure | null {
+  if (side === 'enonce' || side === 'corrige') return null;
+  const relpath = readWholePageRelpath(payload, side);
+  const url = buildImageUrl(relpath, cdnBase);
+  if (!relpath || !url) return null;
+  // No caption ships for whole-page scans — the agent only reaches
+  // here when it's already decided the per-figure path failed, so a
+  // placeholder is fine.
+  const caption = `Scan complet (${side}). Pas de caption pré-générée.`;
+  // Whole-page scans don't have a stable `lemma:fig:…` URI — the
+  // citation scheme is per-figure-index inside `figures.<side>[]`.
+  // Returning `null` here keeps the rest of the pipeline happy and
+  // avoids minting a URI that wouldn't resolve.
+  return {
+    label: side,
+    caption,
+    url,
+    citation: null,
+  };
+}
+
+/**
+ * Render the rich "no figures on this side" error envelope. Surfaces
+ * the per-side figure counts AND the URLs of the whole-page scans so
+ * the agent has enough context to either pick a different side, fall
+ * back to the page-level scan, or simply stop calling the tool for
+ * this pair (the `no_visual_content` code).
+ */
+function buildNoFiguresOnSideError(args: {
+  pair_id: string;
+  side: InspectFigureSide;
+  payload: Record<string, unknown>;
+  cdnBase: string | undefined;
+  allFigures: { enonce: FormattedFigure[]; corrige: FormattedFigure[] };
+}): {
+  error: string;
+  has_figure_enonce: boolean;
+  has_figure_corrige: boolean;
+  images: {
+    exercise_enonce: string | null;
+    exercise_corrige: string | null;
+    exam_full_enonce: string | null;
+    exam_full_corrige: string | null;
+  };
+  figures: never[];
+  inspected_count: 0;
+  cached_count: 0;
+} {
+  const { pair_id, side, payload, cdnBase, allFigures } = args;
+  const has_figure_enonce = allFigures.enonce.length > 0;
+  const has_figure_corrige = allFigures.corrige.length > 0;
+  const images = {
+    exercise_enonce: buildImageUrl(
+      payload.exercise_enonce_image_relpath,
+      cdnBase,
+    ),
+    exercise_corrige: buildImageUrl(
+      payload.exercise_corrige_image_relpath,
+      cdnBase,
+    ),
+    exam_full_enonce: buildImageUrl(payload.exam_full_enonce_relpath, cdnBase),
+    exam_full_corrige: buildImageUrl(
+      payload.exam_full_corrige_relpath,
+      cdnBase,
+    ),
+  };
+  const noVisualContent =
+    !has_figure_enonce &&
+    !has_figure_corrige &&
+    !images.exercise_enonce &&
+    !images.exercise_corrige &&
+    !images.exam_full_enonce &&
+    !images.exam_full_corrige;
+  // Compose a single error string that names the failure mode and
+  // enumerates the agent's recovery options — the agent should be
+  // able to act on this without re-querying the payload.
+  const altSides: string[] = [];
+  if (side !== 'enonce' && has_figure_enonce) altSides.push('enonce');
+  if (side !== 'corrige' && has_figure_corrige) altSides.push('corrige');
+  if (side !== 'exercise_enonce' && images.exercise_enonce)
+    altSides.push('exercise_enonce');
+  if (side !== 'exercise_corrige' && images.exercise_corrige)
+    altSides.push('exercise_corrige');
+  if (side !== 'exam_full_enonce' && images.exam_full_enonce)
+    altSides.push('exam_full_enonce');
+  if (side !== 'exam_full_corrige' && images.exam_full_corrige)
+    altSides.push('exam_full_corrige');
+  const message = noVisualContent
+    ? `no_visual_content: pair_id="${pair_id}" has no figures and no page-level scans on any side. Do not call inspect_figure for this pair again — answer from question_text / answer_text instead.`
+    : `No content on side="${side}" for pair_id="${pair_id}". ` +
+      (altSides.length > 0
+        ? `Available sides: ${altSides.join(', ')}.`
+        : 'No alternative sides ship content either.');
+  return {
+    error: message,
+    has_figure_enonce,
+    has_figure_corrige,
+    images,
+    figures: [],
+    inspected_count: 0,
+    cached_count: 0,
+  };
 }
 
 function readStringPayload(p: QdrantPoint, key: string): string | undefined {

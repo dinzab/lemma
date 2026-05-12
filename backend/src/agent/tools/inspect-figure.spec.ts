@@ -315,9 +315,9 @@ describe('inspect_figure tool', () => {
     });
     expect(out.error as string).toMatch(/No content on side="enonce"/);
     expect(out.error as string).toMatch(/exercise_enonce/);
-    expect((out.images as { exercise_enonce: string | null }).exercise_enonce).toBe(
-      'https://cdn.test/ocr_omni/info-2020/exercises/ex_1_enonce.png',
-    );
+    expect(
+      (out.images as { exercise_enonce: string | null }).exercise_enonce,
+    ).toBe('https://cdn.test/ocr_omni/info-2020/exercises/ex_1_enonce.png');
   });
 
   it('returns a shaped error when the figure label is unknown', async () => {

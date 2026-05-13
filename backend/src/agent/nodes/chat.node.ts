@@ -4,6 +4,10 @@ import type { BaseMessage } from '@langchain/core/messages';
 import type { StructuredToolInterface } from '@langchain/core/tools';
 import type { ChatOpenAI } from '@langchain/openai';
 import { getSystemPrompt } from '../system-prompt';
+import {
+  collectReasoning,
+  runWithReasoningRelay,
+} from '../reasoning-content-relay';
 
 const logger = new Logger('chat_node');
 
@@ -99,10 +103,17 @@ export function makeChatNode(
         parallel_tool_calls: false,
       });
       const systemMessage = new SystemMessage(getSystemPrompt());
-      const response = await modelWithTools.invoke([
-        systemMessage,
-        ...state.messages,
-      ]);
+      // Capture `reasoning_content` from any prior AIMessages in the
+      // ReAct history and stash it in an AsyncLocalStorage that the
+      // OpenAI client's fetch hook (installed in `llm.service`)
+      // reads to re-attach the field to assistant messages on the
+      // outbound request. The 1-message offset accounts for the
+      // system prompt prepended below. See `reasoning-content-relay`
+      // for the full rationale.
+      const relayContext = collectReasoning(state.messages, 1);
+      const response = await runWithReasoningRelay(relayContext, () =>
+        modelWithTools.invoke([systemMessage, ...state.messages]),
+      );
       return { messages: [response] };
     } catch (exc) {
       logger.error(

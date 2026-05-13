@@ -1,6 +1,7 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ChatOpenAI } from '@langchain/openai';
+import { makeReasoningInjectingFetch } from './reasoning-content-relay';
 
 type Provider = 'nvidia' | 'openrouter' | 'openai';
 
@@ -83,6 +84,14 @@ export class LlmService implements OnModuleInit {
         baseURL:
           this.config.get<string>('NVIDIA_BASE_URL') ??
           'https://integrate.api.nvidia.com/v1',
+        // NIM's reasoning ("thinking") models 400 with
+        // 'reasoning_content in the thinking mode must be passed back'
+        // on the second hop of a ReAct loop unless the field they
+        // emitted on the first hop is echoed back to them. LangChain's
+        // OpenAI converter drops `additional_kwargs.reasoning_content`,
+        // so we re-attach it at the fetch boundary using the
+        // request-scoped relay populated by chat.node.
+        fetch: makeReasoningInjectingFetch(),
       },
       temperature: 0,
       streaming: true,
@@ -105,6 +114,12 @@ export class LlmService implements OnModuleInit {
           'HTTP-Referer': 'https://lemma.local',
           'X-Title': 'Lemma',
         },
+        // OpenRouter proxies a number of reasoning models that share
+        // NIM's `reasoning_content` round-trip contract. The injector
+        // is a no-op when the relay context is unset (i.e. for
+        // non-chat-node callers), so installing it unconditionally is
+        // safe.
+        fetch: makeReasoningInjectingFetch(),
       },
       temperature: 0,
       streaming: true,
@@ -119,6 +134,13 @@ export class LlmService implements OnModuleInit {
     return new ChatOpenAI({
       model: this.config.get<string>('OPENAI_MODEL_NAME') ?? 'gpt-4o-mini',
       apiKey,
+      configuration: {
+        // Stock OpenAI doesn't currently emit `reasoning_content` for
+        // chat models, but the injector is a no-op outside the relay
+        // context and tolerates any body shape — install it here too
+        // for consistency with the NVIDIA / OpenRouter paths.
+        fetch: makeReasoningInjectingFetch(),
+      },
       temperature: 0,
       streaming: true,
     });

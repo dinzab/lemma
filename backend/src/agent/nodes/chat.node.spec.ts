@@ -1,4 +1,8 @@
-import { __testing } from './chat.node';
+import { AIMessage, HumanMessage, ToolMessage } from '@langchain/core/messages';
+import type { BaseMessage } from '@langchain/core/messages';
+import type { ChatOpenAI } from '@langchain/openai';
+import { __testing, makeChatNode } from './chat.node';
+import { getCurrentReasoningContext } from '../reasoning-content-relay';
 
 const { describeLlmError } = __testing;
 
@@ -89,5 +93,86 @@ describe('describeLlmError', () => {
     });
 
     expect(() => describeLlmError(apiError)).not.toThrow();
+  });
+});
+
+describe('makeChatNode reasoning_content relay wiring', () => {
+  /**
+   * Build a `ChatOpenAI`-shaped mock just rich enough for `makeChatNode`
+   * to exercise. We don't need the real model; we just need
+   * `bindTools(…).invoke([…])` to be callable and to expose what the
+   * relay context looks like *at invoke time*. That's enough to verify
+   * the chat node:
+   *   (a) collects reasoning_content from `state.messages`, and
+   *   (b) attaches it to the AsyncLocalStorage before calling invoke().
+   */
+  function makeFakeModel(
+    onInvoke: (messages: BaseMessage[]) => Promise<AIMessage>,
+  ): { buildModel: () => ChatOpenAI; invokeCalls: BaseMessage[][] } {
+    const invokeCalls: BaseMessage[][] = [];
+    const fakeBound = {
+      invoke: async (messages: BaseMessage[]) => {
+        invokeCalls.push(messages);
+        return onInvoke(messages);
+      },
+    };
+    const fakeModel = {
+      bindTools: () => fakeBound,
+    } as unknown as ChatOpenAI;
+    return { buildModel: () => fakeModel, invokeCalls };
+  }
+
+  it('populates a relay context with reasoning_content from prior AIMessages before invoking', async () => {
+    let observedReasoning: string | undefined;
+    const { buildModel, invokeCalls } = makeFakeModel(async () => {
+      const ctx = getCurrentReasoningContext();
+      observedReasoning = ctx?.byToolCallId.get('call_abc');
+      return new AIMessage({ content: 'final answer' });
+    });
+
+    const chatNode = makeChatNode(buildModel, []);
+    const prior = new AIMessage({
+      content: '',
+      additional_kwargs: {
+        reasoning_content: 'I should search for past papers on x.',
+      },
+      tool_calls: [
+        {
+          id: 'call_abc',
+          name: 'search_questions',
+          args: { q: 'x' },
+          type: 'tool_call',
+        },
+      ],
+    });
+    await chatNode({
+      messages: [
+        new HumanMessage('please find x'),
+        prior,
+        new ToolMessage({
+          content: '{"hits":[]}',
+          tool_call_id: 'call_abc',
+        }),
+      ],
+    });
+
+    expect(invokeCalls.length).toBe(1);
+    // Should have prepended the system prompt
+    expect(invokeCalls[0].length).toBe(4);
+    expect(observedReasoning).toBe('I should search for past papers on x.');
+  });
+
+  it('still invokes the model when there is no reasoning_content to relay (no regression for non-thinking providers)', async () => {
+    let ranInsideRelay = false;
+    const { buildModel } = makeFakeModel(async () => {
+      // Even with an empty map, the relay should still be active —
+      // the fetch hook is then a no-op for messages without matches.
+      const ctx = getCurrentReasoningContext();
+      ranInsideRelay = ctx !== undefined && ctx.byToolCallId.size === 0;
+      return new AIMessage({ content: 'hello' });
+    });
+    const chatNode = makeChatNode(buildModel, []);
+    await chatNode({ messages: [new HumanMessage('hi')] });
+    expect(ranInsideRelay).toBe(true);
   });
 });

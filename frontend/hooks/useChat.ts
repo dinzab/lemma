@@ -130,6 +130,13 @@ export function useLemmaChat({
   // `isResuming` (true on the very first attach) so the UI can show a
   // “Reconnecting…” indicator only when we're actually retrying.
   const [isReconnecting, setIsReconnecting] = useState(false);
+  // Quota-exceeded error state — set when the backend returns 429.
+  // Distinct from transient errors so the UI can show a specific
+  // "limit reached" banner instead of a generic error.
+  const [quotaError, setQuotaError] = useState<{
+    bucket: "weekly" | "window";
+    resetAt: string;
+  } | null>(null);
 
   // Track the live resume controller so we can cancel cleanly when the
   // thread changes / the component unmounts; otherwise a slow reload
@@ -171,6 +178,23 @@ export function useLemmaChat({
     transport,
     onError: (err) => {
       console.error("[useLemmaChat] stream error:", err);
+
+      // Check if this is a quota-exceeded error (HTTP 429). The AI SDK
+      // wraps non-200 responses into an Error whose `message` contains
+      // the response body text.
+      try {
+        const parsed = JSON.parse(err.message) as Record<string, unknown>;
+        if (parsed.error === "quota_exceeded") {
+          setQuotaError({
+            bucket: parsed.bucket as "weekly" | "window",
+            resetAt: parsed.resetAt as string,
+          });
+          return; // Don't auto-reconnect for quota errors
+        }
+      } catch {
+        // Not JSON — fall through to the auto-reconnect path.
+      }
+
       // The live POST /chat/stream connection just dropped. The agent
       // run keeps going on the backend (see chat.service.ts — close on
       // the HTTP response is intentionally NOT wired to abort), so we
@@ -449,6 +473,10 @@ export function useLemmaChat({
     // user would see a flash of red error UI between drop and retry.
     error:
       isReconnecting || isResuming ? historyError : error?.message ?? historyError,
+    /** Non-null when the user has hit their token limit. */
+    quotaError,
+    /** Clear the quota error (e.g. after the user dismisses the banner). */
+    clearQuotaError: () => setQuotaError(null),
     isInitialized,
     threadId,
     sendMessage: sendText,

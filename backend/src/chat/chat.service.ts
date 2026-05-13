@@ -16,6 +16,7 @@ import {
   type AgentRunRecord,
 } from '../agent-runs';
 import { MessagesService, type MessageRecord } from '../messages';
+import { UsageService } from '../usage';
 import type { MessageDto, MessagesPageDto } from './dto';
 
 /**
@@ -61,6 +62,7 @@ export class ChatService {
     private readonly agentRuns: AgentRunsService,
     private readonly messages: MessagesService,
     private readonly hub: RunStreamHub,
+    private readonly usage: UsageService,
   ) {}
 
   /**
@@ -253,6 +255,7 @@ export class ChatService {
     const startedAt = Date.now();
     let chunkCount = 0;
     let toolCallCount = 0;
+    let totalTokensUsed = 0;
 
     // Reserved for an explicit, user-initiated stop signal in the
     // future. We deliberately do NOT wire response.close to abort
@@ -430,6 +433,24 @@ export class ChatService {
           if (chunk instanceof AIMessageChunk) {
             const chunkId = (chunk as { id?: string }).id;
             if (chunkId) streamedAiMessageIds.add(chunkId);
+
+            // Accumulate token usage from the LLM provider. The
+            // `usage_metadata` is typically populated on the final
+            // chunk of each model invocation.
+            const um = (
+              chunk as {
+                usage_metadata?: {
+                  input_tokens?: number;
+                  output_tokens?: number;
+                  total_tokens?: number;
+                };
+              }
+            ).usage_metadata;
+            if (um) {
+              totalTokensUsed +=
+                um.total_tokens ??
+                (um.input_tokens ?? 0) + (um.output_tokens ?? 0);
+            }
 
             const reasoningDelta = extractReasoningDelta(chunk);
             if (reasoningDelta) {
@@ -659,12 +680,30 @@ export class ChatService {
     await closeTextSegment();
     await closeReasoning();
     await this.agentRuns.completeRun(runId);
+
+    // Record token usage for quota enforcement. Fire-and-forget so
+    // a failed write doesn't block the stream close.
+    if (totalTokensUsed > 0) {
+      void this.usage
+        .recordUsage({
+          userId,
+          runId,
+          threadId,
+          tokensUsed: totalTokensUsed,
+        })
+        .catch((err) => {
+          this.logger.warn(
+            `Failed to record usage for run ${runId}: ${String(err)}`,
+          );
+        });
+    }
+
     publish({ type: 'finish' });
     this.hub.close(runId, 'completed');
     this.logger.log(
       `run=${runId} thread=${threadId} completed in ` +
         `${Date.now() - startedAt}ms chunks=${chunkCount} ` +
-        `tools=${toolCallCount}`,
+        `tools=${toolCallCount} tokens=${totalTokensUsed}`,
     );
   }
 

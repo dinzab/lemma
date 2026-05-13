@@ -7,6 +7,20 @@ import { useLemmaChat } from "@/hooks/useChat";
 import { LemmaConversation } from "@/components/chat/LemmaConversation";
 import { getThread } from "@/lib/api/threads";
 import { PromptComposer } from "@/components/chat/PromptComposer";
+import Link from "next/link";
+
+function formatTimeUntil(isoDate: string): string {
+  const diff = new Date(isoDate).getTime() - Date.now();
+  if (diff <= 0) return "soon";
+  const hours = Math.floor(diff / (1000 * 60 * 60));
+  const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+  if (hours > 24) {
+    const days = Math.floor(hours / 24);
+    return `${days}d ${hours % 24}h`;
+  }
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
 
 export default function ChatThreadPage() {
   const params = useParams();
@@ -24,6 +38,8 @@ export default function ChatThreadPage() {
     isStreaming,
     isReconnecting,
     error,
+    quotaError,
+    clearQuotaError,
     isInitialized,
     sendMessage,
     stopGeneration,
@@ -143,7 +159,37 @@ export default function ChatThreadPage() {
           )}
         </div>
 
-        {error && (
+        {quotaError && (
+          <div className="mx-auto w-full max-w-3xl px-3 pb-2 sm:px-4">
+            <div className="flex items-center justify-between rounded-xl bg-orange-500/10 px-4 py-3 text-sm text-orange-700 dark:text-orange-400">
+              <div>
+                <p className="font-medium">
+                  {quotaError.bucket === "weekly"
+                    ? "Weekly token limit reached"
+                    : "Token limit reached for this window"}
+                </p>
+                <p className="text-xs opacity-80">
+                  Refreshes{" "}
+                  {new Date(quotaError.resetAt) > new Date()
+                    ? `in ${formatTimeUntil(quotaError.resetAt)}`
+                    : "soon"}
+                  {" · "}
+                  <Link href="/settings" className="underline" onClick={clearQuotaError}>
+                    View usage
+                  </Link>
+                </p>
+              </div>
+              <button
+                onClick={clearQuotaError}
+                className="ml-3 rounded-md px-2 py-1 text-xs hover:bg-orange-500/10"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
+
+        {error && !quotaError && (
           <div className="mx-auto w-full max-w-3xl px-3 pb-2 sm:px-4">
             <div className="rounded-xl bg-destructive/10 px-4 py-2.5 text-sm text-destructive">
               {error}

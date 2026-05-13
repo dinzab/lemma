@@ -7,6 +7,7 @@ import { ThreadsModule } from './threads';
 import { AgentModule } from './agent/agent.module';
 import { ChatModule } from './chat/chat.module';
 import { ReferencesModule } from './references';
+import { UsageModule } from './usage';
 
 @Module({
   imports: [
@@ -28,6 +29,9 @@ import { ReferencesModule } from './references';
     // dead `lemma:exercise:…` clicks when the agent cites without
     // also firing the matching tool surface.
     ReferencesModule,
+    // UsageModule provides token-usage tracking, quota enforcement,
+    // and the GET /usage endpoint for the settings page.
+    UsageModule,
   ],
   controllers: [AppController],
   providers: [AppService],

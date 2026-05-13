@@ -78,7 +78,7 @@ function UsageBar({
       </div>
       <div className="flex items-center justify-between text-xs text-muted-foreground">
         <span>
-          {formatTokens(used)} / {formatTokens(limit)} tokens
+          {formatTokens(used)} / {formatTokens(limit)} response tokens
         </span>
         <span className="flex items-center gap-1">
           <Clock className="h-3 w-3" />
@@ -133,7 +133,7 @@ export default function SettingsPage() {
               </h2>
               <p className="text-sm text-muted-foreground">
                 {usage
-                  ? `${formatTokens(usage.plan.weeklyTokenLimit)} tokens/week · ${formatTokens(usage.plan.windowTokenLimit)} per ${usage.plan.windowHours}h`
+                  ? `${formatTokens(usage.plan.weeklyTokenLimit)} response tokens/week · ${formatTokens(usage.plan.windowTokenLimit)} per ${usage.plan.windowHours}h`
                   : "Loading plan details…"}
               </p>
             </div>
@@ -150,7 +150,7 @@ export default function SettingsPage() {
       {/* Usage Section */}
       <h2 className="mb-4 flex items-center gap-2 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
         <TrendingUp className="h-4 w-4" />
-        Token Usage
+        Response token usage
       </h2>
 
       {loading && (
@@ -194,8 +194,13 @@ export default function SettingsPage() {
         </h3>
         <ul className="space-y-1.5 text-sm text-muted-foreground">
           <li>
-            • <strong>Weekly allowance</strong> — total tokens you can use in a
-            rolling 7-day window. Oldest usage expires first.
+            • We only count tokens in the tutor’s <strong>responses</strong> to
+            you. The system instructions and your own messages don’t use up
+            your quota.
+          </li>
+          <li>
+            • <strong>Weekly allowance</strong> — total response tokens you can
+            use in a rolling 7-day window. Oldest usage expires first.
           </li>
           <li>
             • <strong>Short window</strong> — prevents burst usage. Refreshes

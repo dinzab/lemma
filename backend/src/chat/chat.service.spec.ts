@@ -541,6 +541,228 @@ describe('ChatService.streamRunToResponse', () => {
     expect(deltas.join('')).toContain('after.');
   });
 
+  it('meters only output tokens from the updates-mode AIMessage and ignores stream-chunk usage_metadata', async () => {
+    // Mirrors what NVIDIA NIM / OpenAI-compatible providers emit:
+    //   - several streamed AIMessageChunks each (incorrectly, for our
+    //     purposes) carrying a `usage_metadata` payload that includes
+    //     the huge `input_tokens` cost of the system prompt + tools
+    //   - one final `updates`-mode AIMessage with the authoritative
+    //     per-call usage
+    // The metering must charge ONLY the final AIMessage's output_tokens
+    // (200 here), never sum the streamed chunks (which would over-count
+    // input + output for every chunk and explode the quota).
+    async function* synthetic(): AsyncGenerator<{
+      mode: 'messages' | 'updates';
+      payload: unknown;
+    }> {
+      // Three streamed chunks. Each carries `usage_metadata` — and we
+      // want it ALL ignored.
+      const chunkUsage = {
+        input_tokens: 16_000,
+        output_tokens: 200,
+        total_tokens: 16_200,
+      };
+      yield {
+        mode: 'messages',
+        payload: [
+          Object.assign(new AIMessageChunk({ id: 'ai-1', content: 'Hi ' }), {
+            usage_metadata: chunkUsage,
+          }),
+          {},
+        ],
+      };
+      yield {
+        mode: 'messages',
+        payload: [
+          Object.assign(new AIMessageChunk({ id: 'ai-1', content: 'there' }), {
+            usage_metadata: chunkUsage,
+          }),
+          {},
+        ],
+      };
+      yield {
+        mode: 'messages',
+        payload: [
+          Object.assign(new AIMessageChunk({ id: 'ai-1', content: '.' }), {
+            usage_metadata: chunkUsage,
+          }),
+          {},
+        ],
+      };
+      // The finalised AIMessage from updates mode carries the
+      // authoritative per-call usage. Output tokens = 200.
+      yield {
+        mode: 'updates',
+        payload: {
+          chat_node: {
+            messages: [
+              Object.assign(
+                new AIMessage({ id: 'ai-1', content: 'Hi there.' }),
+                {
+                  usage_metadata: {
+                    input_tokens: 16_000,
+                    output_tokens: 200,
+                    total_tokens: 16_200,
+                  },
+                },
+              ),
+            ],
+          },
+        },
+      };
+    }
+
+    const { service, deps } = buildService(synthetic());
+    const { response } = makeMockResponse();
+
+    await service.streamRunToResponse({
+      threadId: THREAD_ID,
+      userId: USER_ID,
+      message: 'Hi there',
+      response,
+    });
+
+    // recordUsage runs after the stream closes (fire-and-forget). Give
+    // the microtask queue a turn to flush.
+    await new Promise((r) => setImmediate(r));
+
+    expect(deps.usage.recordUsage).toHaveBeenCalledTimes(1);
+    const recorded = deps.usage.recordUsage.mock.calls[0][0] as {
+      tokensUsed: number;
+      userId: string;
+      runId: string;
+      threadId: string;
+    };
+    // Critically: NOT 16_200 × 4 (sum across 3 chunks + final
+    // AIMessage), NOT 16_200 (input + output from a single chunk),
+    // but exactly 200 (output_tokens from the finalised AIMessage).
+    expect(recorded.tokensUsed).toBe(200);
+    expect(recorded.userId).toBe(USER_ID);
+    expect(recorded.runId).toBe(RUN_ID);
+    expect(recorded.threadId).toBe(THREAD_ID);
+  });
+
+  it('dedupes per AIMessage id and sums output tokens across distinct LLM calls', async () => {
+    // A multi-turn ReAct loop: chat → tool → chat. Two distinct
+    // LLM invocations, each with its own usage_metadata. Both
+    // output_tokens counts (150 + 250) must be charged; the same
+    // AIMessage id repeated in a second updates event must NOT be
+    // double-counted.
+    async function* synthetic(): AsyncGenerator<{
+      mode: 'messages' | 'updates';
+      payload: unknown;
+    }> {
+      // First LLM call → AIMessage with a tool_call. Output: 150.
+      yield {
+        mode: 'updates',
+        payload: {
+          chat_node: {
+            messages: [
+              Object.assign(
+                new AIMessage({
+                  id: 'ai-call-1',
+                  content: '',
+                  tool_calls: [
+                    { id: 'tc-1', name: 'search', args: { query: 'foo' } },
+                  ],
+                }),
+                {
+                  usage_metadata: {
+                    input_tokens: 16_000,
+                    output_tokens: 150,
+                    total_tokens: 16_150,
+                  },
+                },
+              ),
+            ],
+          },
+        },
+      };
+      // Same AIMessage re-emitted (e.g., from a downstream node that
+      // forwards state) — must be deduped on `id`.
+      yield {
+        mode: 'updates',
+        payload: {
+          forwarding_node: {
+            messages: [
+              Object.assign(
+                new AIMessage({
+                  id: 'ai-call-1',
+                  content: '',
+                  tool_calls: [
+                    { id: 'tc-1', name: 'search', args: { query: 'foo' } },
+                  ],
+                }),
+                {
+                  usage_metadata: {
+                    input_tokens: 16_000,
+                    output_tokens: 150,
+                    total_tokens: 16_150,
+                  },
+                },
+              ),
+            ],
+          },
+        },
+      };
+      // Tool result.
+      yield {
+        mode: 'updates',
+        payload: {
+          tools: {
+            messages: [
+              {
+                _getType: () => 'tool',
+                tool_call_id: 'tc-1',
+                content: '{"result":"42"}',
+              },
+            ],
+          },
+        },
+      };
+      // Second LLM call → final answer. Output: 250.
+      yield {
+        mode: 'updates',
+        payload: {
+          chat_node: {
+            messages: [
+              Object.assign(
+                new AIMessage({ id: 'ai-call-2', content: 'Done.' }),
+                {
+                  usage_metadata: {
+                    input_tokens: 16_500,
+                    output_tokens: 250,
+                    total_tokens: 16_750,
+                  },
+                },
+              ),
+            ],
+          },
+        },
+      };
+    }
+
+    const { service, deps } = buildService(synthetic());
+    const { response } = makeMockResponse();
+
+    await service.streamRunToResponse({
+      threadId: THREAD_ID,
+      userId: USER_ID,
+      message: 'do the thing',
+      response,
+    });
+
+    await new Promise((r) => setImmediate(r));
+
+    expect(deps.usage.recordUsage).toHaveBeenCalledTimes(1);
+    const recorded = deps.usage.recordUsage.mock.calls[0][0] as {
+      tokensUsed: number;
+    };
+    // 150 (first call) + 250 (second call) = 400. NOT 550 (which
+    // would mean the duplicate ai-call-1 event was counted twice).
+    expect(recorded.tokensUsed).toBe(400);
+  });
+
   it('mirrors every wire chunk into RunStreamHub for resume', async () => {
     async function* synthetic(): AsyncGenerator<{
       mode: 'messages' | 'updates';

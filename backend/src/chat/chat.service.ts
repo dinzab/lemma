@@ -255,7 +255,17 @@ export class ChatService {
     const startedAt = Date.now();
     let chunkCount = 0;
     let toolCallCount = 0;
-    let totalTokensUsed = 0;
+    // We meter only **output** (completion) tokens, read once per LLM
+    // invocation from the `updates`-mode AIMessage. Input tokens — the
+    // system prompt + tool schemas + chat history that we, the platform,
+    // re-send on every internal ReAct loop iteration — are NOT charged
+    // to the student; they're our overhead, not theirs.
+    //
+    // We dedupe by AIMessage `id` so a single LLM call cannot be
+    // counted twice if the same final AIMessage shows up in more than
+    // one `updates` event (e.g. node fan-out, retries).
+    let outputTokensUsed = 0;
+    const countedAiMessageIds = new Set<string>();
 
     // Reserved for an explicit, user-initiated stop signal in the
     // future. We deliberately do NOT wire response.close to abort
@@ -434,23 +444,12 @@ export class ChatService {
             const chunkId = (chunk as { id?: string }).id;
             if (chunkId) streamedAiMessageIds.add(chunkId);
 
-            // Accumulate token usage from the LLM provider. The
-            // `usage_metadata` is typically populated on the final
-            // chunk of each model invocation.
-            const um = (
-              chunk as {
-                usage_metadata?: {
-                  input_tokens?: number;
-                  output_tokens?: number;
-                  total_tokens?: number;
-                };
-              }
-            ).usage_metadata;
-            if (um) {
-              totalTokensUsed +=
-                um.total_tokens ??
-                (um.input_tokens ?? 0) + (um.output_tokens ?? 0);
-            }
+            // NOTE: we intentionally do NOT read `usage_metadata` off
+            // streaming chunks. Some OpenAI-compatible providers (incl.
+            // NVIDIA's `integrate.api.nvidia.com`) emit `usage_metadata`
+            // on more than one chunk, which would over-count if summed.
+            // The definitive per-call usage is read once from the
+            // `updates`-mode final AIMessage further down.
 
             const reasoningDelta = extractReasoningDelta(chunk);
             if (reasoningDelta) {
@@ -533,7 +532,26 @@ export class ChatService {
                     args?: Record<string, unknown>;
                   }>;
                   additional_kwargs?: { reasoning_content?: unknown };
+                  usage_metadata?: {
+                    input_tokens?: number;
+                    output_tokens?: number;
+                    total_tokens?: number;
+                  };
                 };
+
+                // Read the LLM call's output-token cost from the
+                // finalised AIMessage. This event fires exactly once
+                // per chat-node invocation with the provider's
+                // authoritative usage numbers, so it's the right
+                // place to charge the run's quota.
+                if (ai.id && !countedAiMessageIds.has(ai.id)) {
+                  const um = ai.usage_metadata;
+                  const outputTokens = um?.output_tokens;
+                  if (typeof outputTokens === 'number' && outputTokens > 0) {
+                    outputTokensUsed += outputTokens;
+                    countedAiMessageIds.add(ai.id);
+                  }
+                }
                 const toolCalls = ai.tool_calls ?? [];
                 if (toolCalls.length > 0) {
                   for (const tc of toolCalls) {
@@ -681,15 +699,15 @@ export class ChatService {
     await closeReasoning();
     await this.agentRuns.completeRun(runId);
 
-    // Record token usage for quota enforcement. Fire-and-forget so
-    // a failed write doesn't block the stream close.
-    if (totalTokensUsed > 0) {
+    // Record output-token usage for quota enforcement. Fire-and-forget
+    // so a failed write doesn't block the stream close.
+    if (outputTokensUsed > 0) {
       void this.usage
         .recordUsage({
           userId,
           runId,
           threadId,
-          tokensUsed: totalTokensUsed,
+          tokensUsed: outputTokensUsed,
         })
         .catch((err) => {
           this.logger.warn(
@@ -703,7 +721,7 @@ export class ChatService {
     this.logger.log(
       `run=${runId} thread=${threadId} completed in ` +
         `${Date.now() - startedAt}ms chunks=${chunkCount} ` +
-        `tools=${toolCallCount} tokens=${totalTokensUsed}`,
+        `tools=${toolCallCount} output_tokens=${outputTokensUsed}`,
     );
   }
 

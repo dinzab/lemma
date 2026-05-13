@@ -10,12 +10,17 @@ import type {
 /**
  * Default plan used when a user has no `user_plans` row yet.
  * Matches the seed in migration 004.
+ *
+ * Limits cover **output (completion) tokens only** — the system prompt,
+ * tool schemas, and chat history that we re-send on every internal
+ * ReAct loop iteration are platform overhead and are NOT charged to
+ * the student. See `ChatService.runAgentAndPublish` for the metering.
  */
 const DEFAULT_PLAN: PlanRecord = {
   id: 'free',
   label: 'Free',
-  weeklyTokenLimit: 100_000,
-  windowTokenLimit: 20_000,
+  weeklyTokenLimit: 300_000,
+  windowTokenLimit: 50_000,
   windowHours: 5,
 };
 

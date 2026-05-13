@@ -11,10 +11,15 @@
 --
 -- Rationale: Lemma needs usage-based rate limiting so free-tier students
 -- cannot exceed their token allowance. Two buckets enforce the limits:
---   1. Rolling 7-day window  (e.g. 100 000 tokens / week)
---   2. Rolling 5-hour window (e.g.  20 000 tokens / 5 h)
+--   1. Rolling 7-day window  (e.g. 300 000 tokens / week)
+--   2. Rolling 5-hour window (e.g.  50 000 tokens / 5 h)
 -- A chat request is blocked (HTTP 429) when either bucket is exhausted.
 -- The backend sums usage_events over the relevant windows at request time.
+--
+-- Limits cover **output (completion) tokens only** — the system prompt,
+-- tool schemas, and chat history we re-send on every internal ReAct
+-- loop iteration are platform overhead and are NOT charged to the
+-- student. See backend/src/chat/chat.service.ts for the metering.
 -- =============================================================================
 
 -- ── plans ───────────────────────────────────────────────────────────────────
@@ -28,10 +33,16 @@ CREATE TABLE IF NOT EXISTS public.plans (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Seed the free plan
+-- Seed the free plan. Re-running the migration also updates the
+-- limits on an existing row — cheap and matches the upsert that
+-- runs on every backend boot in `UsageService.onApplicationBootstrap`.
 INSERT INTO public.plans (id, label, weekly_token_limit, window_token_limit, window_hours)
-VALUES ('free', 'Free', 100000, 20000, 5)
-ON CONFLICT (id) DO NOTHING;
+VALUES ('free', 'Free', 300000, 50000, 5)
+ON CONFLICT (id) DO UPDATE SET
+    label              = EXCLUDED.label,
+    weekly_token_limit = EXCLUDED.weekly_token_limit,
+    window_token_limit = EXCLUDED.window_token_limit,
+    window_hours       = EXCLUDED.window_hours;
 
 -- ── user_plans ──────────────────────────────────────────────────────────────
 -- Maps each user to their active plan. Defaults to 'free' on first insert.

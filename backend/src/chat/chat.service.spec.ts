@@ -160,6 +160,10 @@ interface MockDeps {
     getThreadMessages: jest.Mock;
   };
   hub: RunStreamHub;
+  usage: {
+    recordUsage: jest.Mock;
+    checkQuota: jest.Mock;
+  };
 }
 
 function buildService(events: AsyncIterable<unknown>): {
@@ -192,15 +196,20 @@ function buildService(events: AsyncIterable<unknown>): {
       })),
     },
     hub: new RunStreamHub(),
+    usage: {
+      recordUsage: jest.fn(async () => undefined),
+      checkQuota: jest.fn(async () => ({ allowed: true, remaining: 100000 })),
+    },
   };
 
-  // Constructor positional order: agent, threads, agentRuns, messages, hub.
+  // Constructor positional order: agent, threads, agentRuns, messages, hub, usage.
   const service = new ChatService(
     deps.agent as never,
     deps.threads as never,
     deps.agentRuns as never,
     deps.messages as never,
     deps.hub,
+    deps.usage as never,
   );
   return { service, deps };
 }

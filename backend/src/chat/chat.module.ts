@@ -5,6 +5,7 @@ import { AgentModule } from '../agent/agent.module';
 import { ThreadsModule } from '../threads/threads.module';
 import { AgentRunsModule } from '../agent-runs';
 import { MessagesModule } from '../messages';
+import { UsageModule } from '../usage';
 
 /**
  * ChatModule wires the streaming + paginated chat endpoints. It depends on:
@@ -17,7 +18,13 @@ import { MessagesModule } from '../messages';
  *     paginated history endpoint.
  */
 @Module({
-  imports: [AgentModule, ThreadsModule, AgentRunsModule, MessagesModule],
+  imports: [
+    AgentModule,
+    ThreadsModule,
+    AgentRunsModule,
+    MessagesModule,
+    UsageModule,
+  ],
   controllers: [ChatController],
   providers: [ChatService],
 })

@@ -14,7 +14,7 @@ import {
   GraduationCap,
   Home,
   Search,
-  Sparkles,
+  Settings,
   MessageSquare,
   Loader2,
 } from "lucide-react";
@@ -288,6 +288,7 @@ const SidebarContent = ({ setIsSidebarOpen }: SidebarContentProps) => {
   const threadGroups = useMemo(() => groupThreadsByRecency(threads), [threads]);
   const currentTheme = theme === "dark" ? "dark" : "light";
   const onHome = pathname === "/new";
+  const onSettings = pathname === "/settings";
 
   const handleRenameThread = async (thread: Thread, nextTitle: string) => {
     try {
@@ -341,7 +342,7 @@ const SidebarContent = ({ setIsSidebarOpen }: SidebarContentProps) => {
       <nav className="flex flex-col gap-0.5 px-2">
         <NavRow icon={Home} label="Home" href="/new" active={onHome} />
         <NavRow icon={Search} label="Search" />
-        <NavRow icon={Sparkles} label="Upgrade" badge="New" />
+        <NavRow icon={Settings} label="Settings" href="/settings" active={onSettings} />
       </nav>
 
       {/* Scrollable sections */}

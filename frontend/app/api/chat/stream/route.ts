@@ -57,11 +57,21 @@ export async function POST(request: NextRequest) {
     });
 
     if (!upstream.ok || !upstream.body) {
-      const text = await upstream.text().catch(() => '');
-      return NextResponse.json(
-        { error: 'Backend Error', message: text || upstream.statusText },
-        { status: upstream.status || 502 },
-      );
+      // Pass through the status and body so the client can distinguish
+      // quota errors (429) from transient failures (5xx).
+      const responseText = await upstream.text().catch(() => '');
+      let errorBody: Record<string, unknown>;
+      try {
+        errorBody = JSON.parse(responseText) as Record<string, unknown>;
+      } catch {
+        errorBody = {
+          error: 'Backend Error',
+          message: responseText || upstream.statusText,
+        };
+      }
+      return NextResponse.json(errorBody, {
+        status: upstream.status || 502,
+      });
     }
 
     return new Response(upstream.body, {

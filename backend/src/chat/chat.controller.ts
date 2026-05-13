@@ -2,6 +2,8 @@ import {
   Body,
   Controller,
   Get,
+  HttpException,
+  HttpStatus,
   NotFoundException,
   Param,
   ParseUUIDPipe,
@@ -22,6 +24,7 @@ import { SupabaseAuthGuard, type SupabaseJwtPayload } from '../auth';
 import { CurrentUser } from '../decorators';
 import { AgentRunsService, type ActiveRunDto } from '../agent-runs';
 import { ThreadsService } from '../threads/threads.service';
+import { UsageService } from '../usage';
 
 /**
  * ChatController — owns the streaming + history endpoints that replace
@@ -48,6 +51,7 @@ export class ChatController {
     private readonly chat: ChatService,
     private readonly threads: ThreadsService,
     private readonly agentRuns: AgentRunsService,
+    private readonly usage: UsageService,
   ) {}
 
   @Post('chat/stream')
@@ -56,6 +60,20 @@ export class ChatController {
     @Body() body: StreamChatDto,
     @Res() response: Response,
   ): Promise<void> {
+    // Pre-flight quota check — reject before we start the agent run.
+    const quota = await this.usage.checkQuota(user.sub);
+    if (!quota.allowed) {
+      throw new HttpException(
+        {
+          error: 'quota_exceeded',
+          bucket: quota.bucket,
+          resetAt: quota.resetAt,
+          remaining: 0,
+        },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
     await this.chat.streamRunToResponse({
       threadId: body.threadId,
       userId: user.sub,

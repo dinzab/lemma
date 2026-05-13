@@ -19,9 +19,25 @@ The agent run lifecycle is **decoupled** from the HTTP response lifecycle. Don't
 - `runAgentAndPublish` owns its own `AbortController`, but **nothing wires `response.on('close')` to it** — that's intentional. Closing the tab / reloading the page must NOT abort the LLM call. If you ever add a real "stop" feature, do it as a separate `POST /chat/stream/stop` route that calls `abortController.abort()` on the background loop.
 - `RunStreamHub` is an in-memory pub/sub that buffers wire chunks (`UIMessageChunk`) per `runId`, so a late subscriber (post-reload) replays the full message stream.
 - Every terminal path of `runAgentAndPublish` MUST call `this.hub.close(runId, …)` — leaving the channel open leaks memory, leaving subscribers hanging.
-- `runAgentAndPublish` writes a `[ChatService] run=<id> thread=<id> completed in <N>ms chunks=<M>` log on success. Watch this when verifying reload behaviour: success = `completed`, NOT `cancelled` / `failed`.
+- `runAgentAndPublish` writes a `[ChatService] run=<id> thread=<id> completed in <N>ms chunks=<M> tools=<T> output_tokens=<O>` log on success. Watch this when verifying reload behaviour: success = `completed`, NOT `cancelled` / `failed`. `output_tokens` is read from the `updates`-mode final `AIMessage` (PR #77) — see §Usage metering below.
 
 Tests in `backend/src/chat/chat.service.spec.ts` cover the disconnect-doesn't-cancel and resume-re-attaches paths. If you change `streamRunToResponse` / `resumeRunToResponse` / `runAgentAndPublish`, keep those tests honest — invert them only with strong justification.
+
+## Usage metering (PR #77 — `chat.service.ts` ~lines 258-543)
+
+The metering charges **only output (completion) tokens**, read once from the `updates`-mode final `AIMessage`. NEVER sum `usage_metadata` off streamed `AIMessageChunk`s — some OpenAI-compatible providers (incl. NVIDIA NIM) emit `usage_metadata` on more than one chunk and you will over-count.
+
+Dedup is by `AIMessage.id` in a `countedAiMessageIds` Set so a finalised message re-emitted across multiple `updates` events can't be double-counted.
+
+Plan limits live in TWO places that should stay in sync:
+
+- `DEFAULT_PLAN` in `backend/src/usage/usage.service.ts` — boot-time upsert source of truth; `onApplicationBootstrap` runs an `INSERT … ON CONFLICT DO UPDATE` so existing rows reset to current defaults on every backend boot.
+- Seed clause in `backend/supabase/migrations/004_create_usage_events.sql` — for clean DB setup. If you change one, change both.
+
+The two specs that protect this in `chat.service.spec.ts`:
+
+- `meters only output tokens from the updates-mode AIMessage and ignores stream-chunk usage_metadata`
+- `dedupes per AIMessage id and sums output tokens across distinct LLM calls`
 
 ## Markdown / math / code rendering
 
@@ -157,6 +173,40 @@ Save the email/password you used, then sign in at `http://localhost:3000/login`.
 3. **Typing indicator persistence** — avatar + bouncing dots should remain visible throughout streaming, including when assistant text is partially rendered. They should NOT vanish the instant the SDK creates the assistant placeholder.
 4. **Math rendering** — paste a prompt like the 2022 BAC exponential-form question. Sqrt bars should be hugged tightly to their radicand, fractions should render stacked with a horizontal bar, exponents should be small and superscripted. If anything looks linearised, check the KaTeX CSS import (above).
 5. **Inline citation chips** — ask a question that triggers `search_questions` / `get_question_pair` (e.g. "Bac 2020 principale Math Ex 3 Q2"). Each `Bac 20XX … Ex N Q…` reference in the prose should render as a small clickable secondary-coloured pill (the `<LemmaInlineCitation>` chip), NOT as plain text followed by `[blocked]`. If you do see `[blocked]`, the rehype-sanitize allow-list is the first place to look (see §3 above).
+6. **Usage quota (`/settings`)** — send a one-line "Hi there" in a fresh thread and inspect the latest `usage_events` row for that user. `tokens_used` MUST be in the **low hundreds** (output tokens only, PR #77), NOT in the tens of thousands. `/settings` plan card should read "X / 300K response tokens" (weekly) and "X / 50K response tokens" (5h window). The "How usage limits work" section should mention input tokens are NOT counted.
+
+## Connecting to the user's Supabase Postgres from this VM
+
+**Gotcha**: the direct host `db.<ref>.supabase.co` resolves only IPv6 from this VM, and outbound IPv6 is unreachable. `getent ahostsv4 db.<ref>.supabase.co` returns empty. Trying to connect produces `ENETUNREACH`.
+
+**Workaround**: use the Supavisor session-mode pooler. For dinzab/lemma (ref `szcbozklmyoftpbijejq`) the project lives in **`eu-west-1`**:
+
+```
+host = aws-0-eu-west-1.pooler.supabase.com
+port = 5432
+user = postgres.szcbozklmyoftpbijejq    # NB: dot-separated
+password = <project DB password>
+database = postgres
+ssl = { rejectUnauthorized: false }
+```
+
+If you're on a different project, probe each region by calling `SELECT 1` until one accepts the credentials — the others return `Tenant or user not found` immediately. Common regions: `eu-central-1`, `eu-west-1/2/3`, `us-east-1/2`, `us-west-1/2`, `ap-southeast-1/2`, `ap-northeast-1`, `ap-south-1`, `sa-east-1`, `ca-central-1`.
+
+If `psql` is not installed and `apt-get` fails (Devin's `apt` repos are sometimes 404), use the backend's bundled `pg` library via a small Node script: `import pg from '/home/ubuntu/lemma/backend/node_modules/pg/lib/index.js'; const { Client } = pg;`. Note: that file is CommonJS, so a default import + destructure is required — `import { Client } from '…'` won't work.
+
+## Migration 004 — re-run gotcha
+
+`backend/supabase/migrations/004_create_usage_events.sql` is NOT fully idempotent. Re-running the whole file on a DB that's already been seeded (PR #75 era) fails at:
+
+```
+ERROR: policy "Users can view their own plan" for table "user_plans" already exists
+```
+
+The `CREATE POLICY` statements on `user_plans` and `usage_events` lack `IF NOT EXISTS` guards. To apply just PR #77's actual change (the seed `INSERT … ON CONFLICT (id) DO UPDATE …`), copy the INSERT clause out and run it standalone in the Supabase SQL editor — that's what PR #77 actually changed in the SQL file.
+
+Alternatively, `UsageService.onApplicationBootstrap` runs the same upsert from `DEFAULT_PLAN` every backend boot, so re-deploying the backend will also flip the row to current defaults.
+
+Long-term fix (separate from PR #77): precede each `CREATE POLICY` with `DROP POLICY IF EXISTS "<name>" ON public.<table>;` so the file is fully re-runnable.
 
 ### Lint, typecheck, test, build
 
@@ -179,6 +229,8 @@ Save the email/password you used, then sign in at `http://localhost:3000/login`.
 
 Frontend uses `--legacy-peer-deps` because `@ai-sdk/react` peer-dep fights with React 19. Don't replace with `--force`.
 
-## Available Devin secrets
+## Available Devin secrets — verify before assuming
 
-The org/user has these chat-relevant secrets pre-provisioned: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `MODEL_PROVIDER`, `NVIDIA_API_KEY`, `NVIDIA_BASE_URL`, `NVIDIA_MODEL_NAME`, `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD`, `QDRANT_URL`, `QDRANT_API_KEY`, `QDRANT_COLLECTION`, `QDRANT_DENSE_VECTOR_NAME`, `NIM_EMBED_URL`, `NIM_EMBED_MODEL`, `NIM_EMBED_DIM`, `NIM_RERANK_URL`, `NIM_RERANK_MODEL`, `POSTGRES_URI`, `PORT`, `NODE_ENV`. They are auto-injected as env vars; reference them as `$SUPABASE_URL` etc. Do NOT echo them into committed files.
+The org **may** have these chat-relevant secrets provisioned: `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `MODEL_PROVIDER`, `NVIDIA_API_KEY`, `NVIDIA_BASE_URL`, `NVIDIA_MODEL_NAME`, `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD`, `QDRANT_URL`, `QDRANT_API_KEY`, `QDRANT_COLLECTION`, `QDRANT_DENSE_VECTOR_NAME`, `NIM_EMBED_URL`, `NIM_EMBED_MODEL`, `NIM_EMBED_DIM`, `NIM_RERANK_URL`, `NIM_RERANK_MODEL`, `POSTGRES_URI`, `PORT`, `NODE_ENV`. Reference them as `$SUPABASE_URL` etc. Do NOT echo them into committed files.
+
+**However:** the auto-injection is not guaranteed in every session. First check: run `secrets list` AND `env | grep -E 'SUPABASE_URL|NVIDIA_API_KEY'` before assuming. If the values are not present, ask the user using the standard three-option pattern (skip / temporary / permanent org scope). The `SUPABASE_DB_PASSWORD` for the direct Postgres connection is currently NOT in the org-secret list — request it explicitly when you need to apply migrations.

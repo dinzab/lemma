@@ -74,18 +74,50 @@ export class LlmService implements OnModuleInit {
           'switch MODEL_PROVIDER to openrouter / openai.',
       );
     }
+    const baseURL =
+      this.config.get<string>('NVIDIA_BASE_URL') ??
+      'https://integrate.api.nvidia.com/v1';
+
+    /**
+     * Xiaomi MiMo (`token-plan-sgp.xiaomimimo.com`) defaults to *thinking
+     * mode*: each completion streams a `reasoning_content` field on the
+     * `choices[].delta` next to `content`, and on subsequent turns the
+     * server enforces that the same `reasoning_content` is echoed back
+     * inside the corresponding `assistant` message — otherwise it
+     * rejects the next call with:
+     *
+     *   400 Param Incorrect — "The reasoning_content in the thinking
+     *   mode must be passed back to the API."
+     *
+     * In practice this means the very first tool-using turn succeeds
+     * (no prior assistant message in history), but the *second*
+     * chat-node invocation — after `tool_node` appends `ToolMessage`s
+     * — blows up, because @langchain/openai's
+     * `convertMessagesToCompletionsMessageParams` only re-emits
+     * `content` + `tool_calls` and drops
+     * `additional_kwargs.reasoning_content`.
+     *
+     * Until we wire a proper `reasoning_content` round-trip (would
+     * require either monkey-patching the converter or subclassing
+     * `ChatOpenAI`), we disable MiMo's thinking mode via
+     * `chat_template_kwargs.enable_thinking=false`. Internal model
+     * reasoning still runs — it just isn't surfaced as a separate
+     * stream so the API no longer requires the echo.
+     */
+    const modelKwargs: Record<string, unknown> = {};
+    if (/xiaomimimo\.com/i.test(baseURL)) {
+      modelKwargs.chat_template_kwargs = { enable_thinking: false };
+    }
+
     return new ChatOpenAI({
       model:
         this.config.get<string>('NVIDIA_MODEL_NAME') ??
         'meta/llama-3.3-70b-instruct',
       apiKey,
-      configuration: {
-        baseURL:
-          this.config.get<string>('NVIDIA_BASE_URL') ??
-          'https://integrate.api.nvidia.com/v1',
-      },
+      configuration: { baseURL },
       temperature: 0,
       streaming: true,
+      ...(Object.keys(modelKwargs).length > 0 ? { modelKwargs } : {}),
     });
   }
 

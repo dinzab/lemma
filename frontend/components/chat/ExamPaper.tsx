@@ -171,6 +171,30 @@ export function ExamPaper({ part }: ExamPaperProps) {
           .forEach((el) => el.remove());
       }
 
+      // Inject the mode heading directly above the exercises so the
+      // printed paper carries an explicit "ÉNONCÉ / SUJET + CORRIGÉ
+      // / CORRIGÉ" banner — a real Tunisian BAC sujet always has
+      // one and it's how the teacher / corrector tells them apart.
+      // The heading is `display: none` on-screen via globals.css and
+      // surfaces only inside `@media print`.
+      const modeLabel =
+        mode === "enonce"
+          ? "Énoncé"
+          : mode === "corrige"
+            ? "Corrigé"
+            : "Sujet + corrigé";
+      const heading = document.createElement("div");
+      heading.className = "exam-print-mode-heading";
+      heading.textContent = modeLabel;
+      const surface = clone.querySelector(".exam-paper-surface");
+      const insertionTarget = surface ?? clone;
+      const banner = insertionTarget.querySelector(".exam-banner");
+      if (banner && banner.parentNode === insertionTarget) {
+        banner.insertAdjacentElement("afterend", heading);
+      } else {
+        insertionTarget.insertBefore(heading, insertionTarget.firstChild);
+      }
+
       document
         .querySelectorAll("[data-exam-paper-print-portal]")
         .forEach((el) => el.remove());
@@ -652,21 +676,26 @@ function CorrectionDisclosure({
 
         {correction.marks_breakdown &&
         correction.marks_breakdown.length > 0 ? (
-          <div className="mt-2 rounded-md bg-muted/40 px-2 py-1.5 sm:px-2.5 sm:py-2">
+          <div className="exam-bareme mt-2 rounded-md bg-muted/40 px-2 py-1.5 sm:px-2.5 sm:py-2">
             <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
               Barème
             </div>
-            <ul className="mt-1 flex flex-col gap-0.5">
+            <ul className="mt-1 flex flex-col gap-1">
               {correction.marks_breakdown.map((row, idx) => (
                 <li
                   key={idx}
-                  className="flex items-baseline gap-2 text-[12px] sm:text-[12.5px]"
+                  className="exam-bareme-row text-[12px] sm:text-[12.5px]"
                 >
-                  <span className="font-medium text-foreground/80">
+                  <span className="exam-bareme-marks mr-2 font-medium text-foreground/85">
                     {formatMarks(row.marks)} pt
                     {row.marks > 1 ? "s" : ""}
+                    {" :"}
                   </span>
-                  <span className="text-foreground/75">— {row.reason}</span>
+                  <span className="exam-bareme-reason text-foreground/80">
+                    <MessageResponse>
+                      {wrapBareLatex(row.reason)}
+                    </MessageResponse>
+                  </span>
                 </li>
               ))}
             </ul>

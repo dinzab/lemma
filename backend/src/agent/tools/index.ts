@@ -114,6 +114,46 @@ const EMIT_HINT_LADDER_TOOL_DESCRIPTION = `Use this tool when a student is stuck
 `;
 
 /**
+ * Description for the emit_exam pedagogical tool. Forces the model to
+ * emit a renderable exam paper (or a single exercise / short revision
+ * set) as a structured payload — header banner, numbered exercises
+ * with marks, recursively-nested questions, and per-leaf-question
+ * corrigé — instead of authoring the paper as plain markdown prose.
+ * The frontend renders the result as the *Exam Paper* surface: an
+ * A4-aspect paper with the real Tunisian BAC banner, KaTeX math, and
+ * per-question "Voir la correction" disclosures so the student can
+ * self-check after working on paper.
+ */
+const EMIT_EXAM_TOOL_DESCRIPTION = `Use this tool to emit a renderable exam paper, single exercise, or short revision set as a structured payload. The frontend renders the output as a real Tunisian BAC-format paper — banner, numbered exercises with marks, recursively-nested questions, and a per-question "Voir la correction" disclosure the student opens to self-check after working on paper offline. Use this tool **every time** the student asks you to author exam-shaped content — never write the paper as plain markdown prose, that will render as a chat bubble instead of a paper.
+
+## When to Use This Tool
+1. The student asks for a mock paper / full sujet ("donne-moi un sujet BAC math 2024 style", "fais-moi un mock de 4h sur les complexes et la trigonométrie") → \`kind: "full_paper"\`.
+2. The student asks for a single focused exercise ("donne-moi un exercice sur les suites", "construis-moi un exo difficile sur la dérivation", "un exo type BAC sur les complexes") → \`kind: "single_exercise"\`.
+3. The student asks for a short revision set / drill ("fais-moi 3 exos rapides sur les limites", "quelques questions de révision sur l'arithmétique") → \`kind: "short_set"\`.
+
+## When NOT to Use This Tool
+1. The student asks for help on ONE specific question they're stuck on — that is \`emit_hint_ladder\`. The exam paper is for content the student will work on by themselves; the hint ladder is for content they're stuck on right now.
+2. The student wants the full worked solution to a SINGLE question they already have in front of them — that is \`emit_solution_steps\`.
+3. The student is asking for past-paper retrieval ("show me a 2022 controle question") — that is \`search_questions\` / \`get_question_pair\`.
+4. The student is asking a pure concept / definition question.
+
+## How to Structure the Payload
+- **kind** — pick honestly. \`full_paper\` ONLY when the student asked for a full mock (3+ exercises, ~20 marks, with header). \`single_exercise\` when it's one exercise (even if it's long with sub-questions). \`short_set\` for a 2–3 exercise revision drill.
+- **language** — match the student's language. Default \`fr\` for the Tunisian BAC corpus.
+- **header** — populate only when \`kind === "full_paper"\`. \`matiere\` is the only required header field, but realistic mocks set \`year\`, \`session\`, \`section\`, \`duration_hours\`, \`coefficient\`, \`calculator_allowed\`. Skip the header object entirely for \`single_exercise\` / \`short_set\`.
+- **exercises[].parts[]** — the recursive question tree. A part can either be a leaf (carries \`prompt_md\` + an optional \`correction\`) OR an inner node (carries its own \`prompt_md\` for the intro and a \`parts\` array of children — like 1) with sub-parts a) b) c) underneath). Mirror the real Tunisian BAC numbering: \`1.\`, \`1.a)\`, \`II.2.b)\`, etc. Use the \`label\` field for the visible numbering and the \`id\` for the machine identifier.
+- **correction (per leaf part)** — fill it with the worked solution unless the student explicitly asked for "le sujet sans correction" / "paper only". \`solution_md\` is required when correction is present; \`marks_breakdown\`, \`remark_md\`, and \`common_mistake_md\` are optional pedagogical extras. **All-or-no rule**: if any leaf part carries a \`correction\`, every leaf part must — partial corrigés break the disclosure UI.
+- **prompt_md / solution_md** — LaTeX-in-markdown. EVERY piece of mathematical notation MUST be wrapped in math delimiters: \`$...$\` for inline math, \`$$...$$\` for display math. Bare LaTeX without delimiters renders as raw source on the student's screen — the most common failure mode of this field.
+
+## Important Notes
+- Emit \`emit_exam\` exactly ONCE per turn. Never split a paper across multiple tool calls — the frontend can't reassemble the tree.
+- **Self-contained prompts.** \`prompt_md\` must not reference "see the figure above" or "as in part 1)" without the figure / cross-reference being attached on the same part — the frontend renders parts independently and orphan refs will confuse the student.
+- **Marks should sum.** \`sum(exercise.parts[].marks) === exercise.marks\` and \`sum(exercises[].marks) === footer.total_marks\` (default 20). The frontend tolerates a mismatch but will visually flag it; emit clean sums.
+- **The paper IS the artefact.** Your prose must NOT restate the exercises or the corrigé in markdown after the tool call. A single short framing sentence before the tool call ("Voici un mock de 4h, format BAC math principale.") is fine; restating the questions or the answers in prose is the bug.
+- Match the student's language in every field (FR by default; EN if the student writes in English).
+`;
+
+/**
  * Description for the emit_solution_steps pedagogical tool. Forces
  * the model to emit a worked solution as a structured stack of
  * numbered cards (each with its own title, working, and justification)
@@ -471,6 +511,7 @@ export class AgentToolsService {
       this.listExamQuestionsTool(),
       this.emitHintLadderTool(),
       this.emitSolutionStepsTool(),
+      this.emitExamTool(),
       this.writeTodosTool(),
     ];
   }
@@ -714,6 +755,384 @@ export class AgentToolsService {
             .describe(
               'Ordered list of step cards. 3-8 is the sweet spot. ' +
                 'Order matters — the frontend auto-numbers in array order.',
+            ),
+        }),
+      },
+    );
+  }
+
+  // ---- emit_exam --------------------------------------------------------
+
+  /**
+   * *Exam Paper* surface. Forces the model to emit exam-shaped
+   * content as a structured tree — header banner, numbered
+   * exercises with marks, recursively-nested questions, and an
+   * optional per-leaf-question corrigé — instead of authoring the
+   * paper as plain markdown prose. The frontend renders the result
+   * as an A4-aspect Tunisian BAC paper with KaTeX math and per-
+   * question "Voir la correction" disclosures, plus print modes
+   * (sujet seul / sujet + corrigé / corrigé seul) so the student
+   * can hit *Imprimer* and work the paper offline before peeking.
+   *
+   * Like {@link writeTodosTool}, {@link emitHintLadderTool} and
+   * {@link emitSolutionStepsTool}, this is a no-op on the server.
+   * The authoritative state lives on the wire as the
+   * `tool-emit_exam` part input — the frontend reads
+   * `part.input.exercises`, `part.input.header`, etc. directly off
+   * the message stream. The server-side function just echoes a
+   * count back to keep the agent loop happy.
+   */
+  private emitExamTool(): StructuredToolInterface {
+    // Recursive part schema — a part can be a leaf (carries
+    // `prompt_md` + an optional `correction`) OR an inner node
+    // (carries `prompt_md` as an intro plus a `parts` array of
+    // children). `z.lazy()` is the canonical way to express a
+    // recursive Zod schema; the explicit `z.ZodTypeAny` annotation
+    // is needed because TypeScript can't infer a recursive type
+    // through the lazy closure on its own.
+    const PartSchema: z.ZodTypeAny = z.lazy(() =>
+      z.object({
+        id: z
+          .string()
+          .min(1)
+          .describe(
+            'Stable machine identifier for this part. Used by the ' +
+              'frontend as a React key and (in future versions) by ' +
+              'the grading layer. Example: "ex1_q2_b".',
+          ),
+        label: z
+          .string()
+          .min(1)
+          .describe(
+            'Visible BAC-style numbering as shown on the paper. ' +
+              'Examples: "1.", "1.a)", "II.2.b)". Mirror real ' +
+              'Tunisian BAC papers — the numbering carries the ' +
+              'nesting visually.',
+          ),
+        marks: z
+          .number()
+          .optional()
+          .describe(
+            'Marks awarded to this leaf part, e.g. 1.5 or 0.5. ' +
+              'Only set on leaf parts. Inner nodes inherit the sum ' +
+              'of their children. The frontend renders these on ' +
+              'the right margin like real BAC papers.',
+          ),
+        prompt_md: z
+          .string()
+          .min(1)
+          .describe(
+            'The question statement / sub-question prompt as ' +
+              'LaTeX-in-markdown. EVERY piece of mathematical ' +
+              'notation MUST be wrapped in math delimiters — ' +
+              '`$...$` for inline math and `$$...$$` for display ' +
+              'math. Self-contained — no "see the figure above" ' +
+              'unless the figure is attached on this same part.',
+          ),
+        expected_answer_format: z
+          .enum([
+            'numeric',
+            'short_text',
+            'long_text',
+            'mcq',
+            'proof',
+            'symbolic',
+            'figure',
+            'none',
+          ])
+          .optional()
+          .describe(
+            'Optional. Forward-compatibility hint for v2 grading — ' +
+              "what shape the student's answer is expected to take. " +
+              'Unused by v1 rendering. Set "none" on inner nodes.',
+          ),
+        parts: z
+          .array(PartSchema)
+          .optional()
+          .describe(
+            'Optional. Child sub-parts for inner nodes (a question ' +
+              'with sub-questions a), b), c) underneath). Leaf ' +
+              'parts omit this field. Recursion depth is ' +
+              'intentionally unbounded — match the depth of the ' +
+              'real paper.',
+          ),
+        correction: z
+          .object({
+            solution_md: z
+              .string()
+              .min(1)
+              .describe(
+                'The full worked solution for this leaf part. ' +
+                  'LaTeX-in-markdown, with all math wrapped in ' +
+                  'delimiters. This is what the student sees when ' +
+                  'they tap "Voir la correction".',
+              ),
+            marks_breakdown: z
+              .array(
+                z.object({
+                  marks: z
+                    .number()
+                    .describe(
+                      'Points awarded by this rubric line ' +
+                        '(e.g. 0.25, 0.5, 1).',
+                    ),
+                  reason: z
+                    .string()
+                    .min(1)
+                    .describe(
+                      'What the student must produce to earn ' +
+                        "these points (Tunisian BAC corrector's " +
+                        'shorthand). Example: "Mise en équation."',
+                    ),
+                }),
+              )
+              .optional()
+              .describe(
+                'Optional. Tunisian-style barème breakdown — short ' +
+                  '"0.25 pour la mise en équation, 0.5 pour la ' +
+                  'résolution, 0.25 pour la vérification" lines.',
+              ),
+            remark_md: z
+              .string()
+              .optional()
+              .describe(
+                'Optional pedagogical aside — a one or two sentence ' +
+                  'remark about why this question matters, the ' +
+                  'theorem in play, the technique to remember. ' +
+                  'Renders as a soft callout under the solution.',
+              ),
+            common_mistake_md: z
+              .string()
+              .optional()
+              .describe(
+                'Optional. The typical Tunisian-BAC trap on this ' +
+                  'question. Renders as a "⚠ Erreur classique" ' +
+                  'callout. Skip when the question has no notable ' +
+                  'trap — do not pad.',
+              ),
+          })
+          .optional()
+          .describe(
+            'Optional worked correction for this leaf part. Skip ' +
+              'when the student explicitly asked for the paper ' +
+              'without corrigé. ALL-OR-NO rule: if any leaf carries ' +
+              'a correction, every leaf must — partial corrigés ' +
+              'break the disclosure UI.',
+          ),
+      }),
+    );
+
+    return tool(
+      async ({ exercises }) => {
+        const exerciseCount = Array.isArray(exercises) ? exercises.length : 0;
+        let leafCount = 0;
+        let leavesWithCorrection = 0;
+        const walk = (parts: unknown): void => {
+          if (!Array.isArray(parts)) return;
+          for (const p of parts) {
+            if (!p || typeof p !== 'object') continue;
+            const part = p as {
+              parts?: unknown;
+              correction?: unknown;
+            };
+            const children = part.parts;
+            if (Array.isArray(children) && children.length > 0) {
+              walk(children);
+            } else {
+              leafCount += 1;
+              if (part.correction && typeof part.correction === 'object') {
+                leavesWithCorrection += 1;
+              }
+            }
+          }
+        };
+        if (Array.isArray(exercises)) {
+          for (const ex of exercises) {
+            if (ex && typeof ex === 'object') {
+              walk((ex as { parts?: unknown }).parts);
+            }
+          }
+        }
+        return JSON.stringify({
+          ok: true,
+          exercise_count: exerciseCount,
+          leaf_count: leafCount,
+          leaves_with_correction: leavesWithCorrection,
+        });
+      },
+      {
+        name: 'emit_exam',
+        description: EMIT_EXAM_TOOL_DESCRIPTION,
+        schema: z.object({
+          kind: z
+            .enum(['full_paper', 'single_exercise', 'short_set'])
+            .describe(
+              'Discriminator for layout. `full_paper` for a 3+ ' +
+                'exercise mock with the BAC banner. `single_exercise` ' +
+                'for one focused exercise (no banner). `short_set` ' +
+                'for a 2-3 exercise revision drill (no banner).',
+            ),
+          language: z
+            .enum(['fr', 'en', 'ar'])
+            .optional()
+            .describe(
+              'Language of every prose / LaTeX field. Match the ' +
+                'student. Default `fr` for the Tunisian BAC corpus.',
+            ),
+          header: z
+            .object({
+              matiere: z
+                .string()
+                .optional()
+                .describe(
+                  'Subject as it would appear on a real Tunisian ' +
+                    'BAC paper. Examples: "Mathématiques", "Sciences ' +
+                    'Physiques", "Sciences de la Vie et de la Terre".',
+                ),
+              year: z
+                .number()
+                .int()
+                .optional()
+                .describe(
+                  'Year shown on the banner. Use the current ' +
+                    'academic year if the student did not specify.',
+                ),
+              session: z
+                .enum(['principale', 'controle', 'rattrapage'])
+                .optional()
+                .describe(
+                  'BAC session (principale = June, controle = July ' +
+                    'retake, rattrapage = orientation re-sit).',
+                ),
+              section: z
+                .string()
+                .optional()
+                .describe(
+                  'Section / track. Examples: "Mathématiques", ' +
+                    '"Sciences Expérimentales", "Sciences Techniques", ' +
+                    '"Économie et Gestion", "Lettres".',
+                ),
+              duration_hours: z
+                .number()
+                .optional()
+                .describe(
+                  'Duration of the paper in hours (e.g. 3, 3.5, 4). ' +
+                    'Renders as "Durée : 4h" on the banner.',
+                ),
+              coefficient: z
+                .number()
+                .optional()
+                .describe(
+                  'BAC coefficient for this matière in the ' +
+                    "student's section (e.g. 4 for math in " +
+                    'Mathématiques, 2 for math in Lettres).',
+                ),
+              calculator_allowed: z
+                .boolean()
+                .optional()
+                .describe(
+                  'Whether non-programmable calculators are ' +
+                    'allowed. Default behaviour matches real BAC ' +
+                    'papers (almost always true for STEM matières).',
+                ),
+              notes_md: z
+                .string()
+                .optional()
+                .describe(
+                  'Optional free-text notes shown below the banner ' +
+                    '("Le sujet comporte X pages.", citations of ' +
+                    'past papers using `lemma:exam:...` URIs, etc.).',
+                ),
+            })
+            .optional()
+            .describe(
+              'Banner metadata. Populate when `kind === ' +
+                '"full_paper"`; skip the whole object for ' +
+                '`single_exercise` / `short_set`.',
+            ),
+          exercises: z
+            .array(
+              z.object({
+                id: z
+                  .string()
+                  .min(1)
+                  .describe(
+                    'Stable machine identifier for this exercise. ' +
+                      'Example: "ex1".',
+                  ),
+                label: z
+                  .string()
+                  .min(1)
+                  .describe(
+                    'Visible heading. Example: "Exercice 1" or ' +
+                      '"Exercice I". Numbering matches the visible ' +
+                      'numbering on the paper.',
+                  ),
+                title: z
+                  .string()
+                  .optional()
+                  .describe(
+                    'Optional short topic title for the exercise. ' +
+                      'Example: "Nombres complexes" or "Suites ' +
+                      'récurrentes". Renders next to the label.',
+                  ),
+                marks: z
+                  .number()
+                  .optional()
+                  .describe(
+                    'Total marks for this exercise. Should equal ' +
+                      'the sum of its leaf parts. Renders on the ' +
+                      'right margin next to the label.',
+                  ),
+                intro_md: z
+                  .string()
+                  .optional()
+                  .describe(
+                    'Optional intro paragraph for the exercise — ' +
+                      'context that applies to every sub-question ' +
+                      '("Le plan est rapporté à un repère ' +
+                      'orthonormé..."). LaTeX-in-markdown.',
+                  ),
+                parts: z
+                  .array(PartSchema)
+                  .min(1)
+                  .describe(
+                    'Ordered list of questions for this exercise. ' +
+                      'Each part can recurse with its own `parts` ' +
+                      'array to match BAC-style sub-question nesting.',
+                  ),
+              }),
+            )
+            .min(1)
+            .describe(
+              'Ordered list of exercises. For `full_paper`, expect ' +
+                '3+ exercises totalling ~20 marks. For ' +
+                '`single_exercise`, exactly one. For `short_set`, ' +
+                '2-3.',
+            ),
+          footer: z
+            .object({
+              total_marks: z
+                .number()
+                .optional()
+                .describe(
+                  'Total marks for the paper (default 20 for the ' +
+                    'Tunisian BAC). Should equal sum of ' +
+                    'exercises[].marks.',
+                ),
+              closing_note_md: z
+                .string()
+                .optional()
+                .describe(
+                  'Optional closing note ("Bon courage !", ' +
+                    '"Bonne réflexion."). Renders after the last ' +
+                    'exercise.',
+                ),
+            })
+            .optional()
+            .describe(
+              'Optional footer block. Skip entirely for ' +
+                '`single_exercise` / `short_set`.',
             ),
         }),
       },

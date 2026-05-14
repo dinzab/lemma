@@ -3,16 +3,18 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
+  Download,
   Eye,
   EyeOff,
   FileText,
-  Printer,
+  Loader2,
   ScrollText,
   Sparkles,
 } from "lucide-react";
 import type { DynamicToolUIPart, ToolUIPart } from "ai";
 
 import { MessageResponse } from "@/components/ai-elements/message";
+import { buildExamPdfFilename, downloadExamPdf } from "@/lib/exam-pdf";
 import { wrapBareLatex } from "@/lib/latex";
 import { cn } from "@/lib/utils";
 
@@ -38,10 +40,17 @@ interface ExamPaperProps {
  *  - per-leaf-question *Voir la correction* disclosure, collapsed
  *    by default (Active-Recall Gate pattern — student is forced to
  *    attempt before peeking);
- *  - top toolbar with *Tout afficher / Tout masquer / Imprimer*
- *    buttons. Print modes (sujet seul / corrigé seul / sujet +
- *    corrigé) toggle a body class which the print stylesheet in
- *    `globals.css` reads to hide / show the matching blocks.
+ *  - top toolbar with *Tout afficher / Tout masquer / Télécharger*
+ *    buttons. Each download mode (sujet seul / corrigé seul /
+ *    sujet + corrigé) builds a per-mode A4 PDF via
+ *    `downloadExamPdf` — see `lib/exam-pdf.ts` for the pipeline.
+ *    We deliberately *do not* call `window.print()` anymore:
+ *    mobile browsers crop the BAC paper at the viewport edge and
+ *    the desktop print dialog has fought us for several PRs over
+ *    pagination + theme leakage. A real downloadable PDF gives
+ *    the student the same paginated, monochrome BAC paper on
+ *    every device (and they can hit print on the resulting file
+ *    when they actually want a paper copy).
  *
  * Two intentional behaviours mirror the other emit_* chips:
  *
@@ -64,10 +73,17 @@ export function ExamPaper({ part }: ExamPaperProps) {
   // gently nudged to try the question before peeking.
   const [revealed, setRevealed] = useState<Set<string>>(() => new Set());
 
-  // Ref to the rendered <aside data-exam-paper> so the print
-  // handler can clone it into a top-level portal — see
-  // `handlePrint` below for why this matters.
+  // Ref to the rendered <aside data-exam-paper> so the download
+  // handler can clone it for the off-screen PDF render — see
+  // `handleDownload` below.
   const paperRef = useRef<HTMLElement>(null);
+
+  // Per-mode loading state — disables the toolbar buttons while a
+  // PDF is being rasterised so the student doesn't queue up
+  // multiple renders by tapping repeatedly on a slow phone.
+  const [downloadingMode, setDownloadingMode] = useState<
+    null | "enonce" | "corrige" | "both"
+  >(null);
 
   // Pre-compute the flat list of leaf-part IDs that *have* a
   // correction. Used by the global *Tout afficher / Tout masquer*
@@ -104,49 +120,38 @@ export function ExamPaper({ part }: ExamPaperProps) {
     setRevealed(new Set());
   }, []);
 
-  // Print handler — clones the rendered paper, mutates the clone
-  // so it already reflects the chosen print mode (énoncé / corrigé
-  // / both), appends it into a top-level
-  // `[data-exam-paper-print-portal]` attached directly to <body>,
-  // adds the `print-mode-active` body class (the stylesheet keys
-  // off of it to hide every other body child), fires
-  // `window.print()`, then cleans up after the browser finishes
-  // the print lifecycle.
+  // Download handler — clones the rendered paper, mutates the
+  // clone to reflect the chosen export mode (énoncé / corrigé /
+  // both), and hands it off to `downloadExamPdf` which mounts it
+  // off-screen, screenshots it with html2canvas-pro, and emits a
+  // paginated A4 PDF the student can download.
   //
-  // Why the portal? The dashboard wraps everything in a
-  // `fixed inset-0 overflow-hidden` shell with nested
-  // `overflow: hidden` + `h-full` scrollers; trying to print the
-  // paper from its in-place position traps it inside a single
-  // viewport-sized page (the containing block is the fixed shell,
-  // not the document) so anything past page 1 gets clipped. The
-  // portal lives as a direct child of <body>, free of those
-  // ancestor constraints, so the printed paper paginates
-  // naturally across as many pages as it needs.
-  //
-  // Cleanup is deliberately tied to `afterprint` / print-media
-  // exit instead of a synchronous `finally`: mobile browsers and
-  // Chromium print preview can return from `window.print()` before
-  // the print engine has captured the portal, and removing it too
-  // early falls back to printing the chat page or a cropped shell.
-  const handlePrint = useCallback(
-    (mode: "enonce" | "corrige" | "both") => {
+  // We don't use `window.print()` anymore. The previous flow
+  // (clone → top-level portal → body class → window.print →
+  // afterprint cleanup) fought for several PRs against mobile
+  // browsers that crop at the viewport edge, theme variables
+  // bleeding into the cloned DOM, and desktop print dialogs
+  // returning from `window.print()` before the portal was
+  // captured. A real PDF download is portable, identical on
+  // every device, and the student can still hit print on the
+  // resulting file when they want a hard copy.
+  const handleDownload = useCallback(
+    async (mode: "enonce" | "corrige" | "both") => {
       if (typeof window === "undefined") return;
       const node = paperRef.current;
       if (!node) return;
+      if (downloadingMode) return;
 
       // Clone the rendered paper, then mutate the clone so the
-      // portal already reflects the requested print mode. Pre-
-      // processing the DOM is more robust than trying to override
-      // the React-managed `hidden` attribute through `@media print`
-      // CSS — print engines have historically been inconsistent
-      // about resolving `[hidden]` selectors against attribute
-      // overrides, and clones lose any associated event handlers
-      // anyway, so there's no behavioural downside to baking the
-      // mode into the clone.
+      // off-screen render already reflects the requested export
+      // mode. Pre-processing the DOM (rather than trying to drive
+      // visibility through CSS on the clone) keeps the export
+      // robust against any future Tailwind utility / `[hidden]`
+      // edge cases — the rasteriser only sees the elements we
+      // actually want in the PDF.
       const clone = node.cloneNode(true) as HTMLElement;
 
       if (mode === "enonce") {
-        // Drop the disclosure trigger + correction body entirely.
         clone
           .querySelectorAll(".exam-correction-wrapper")
           .forEach((el) => el.remove());
@@ -156,7 +161,7 @@ export function ExamPaper({ part }: ExamPaperProps) {
         clone
           .querySelectorAll(".exam-correction[hidden]")
           .forEach((el) => el.removeAttribute("hidden"));
-        // Hide the disclosure trigger button — the printed paper
+        // Drop the disclosure trigger button — the exported paper
         // doesn't need a clickable "Voir la correction" affordance.
         clone
           .querySelectorAll(".exam-correction-trigger")
@@ -172,11 +177,9 @@ export function ExamPaper({ part }: ExamPaperProps) {
       }
 
       // Inject the mode heading directly above the exercises so the
-      // printed paper carries an explicit "ÉNONCÉ / SUJET + CORRIGÉ
+      // exported paper carries an explicit "ÉNONCÉ / SUJET + CORRIGÉ
       // / CORRIGÉ" banner — a real Tunisian BAC sujet always has
       // one and it's how the teacher / corrector tells them apart.
-      // The heading is `display: none` on-screen via globals.css and
-      // surfaces only inside `@media print`.
       const modeLabel =
         mode === "enonce"
           ? "Énoncé"
@@ -195,46 +198,26 @@ export function ExamPaper({ part }: ExamPaperProps) {
         insertionTarget.insertBefore(heading, insertionTarget.firstChild);
       }
 
-      document
-        .querySelectorAll("[data-exam-paper-print-portal]")
-        .forEach((el) => el.remove());
+      const filename = buildExamPdfFilename(paper?.header, mode);
 
-      const portal = document.createElement("div");
-      portal.setAttribute("data-exam-paper-print-portal", "");
-      portal.appendChild(clone);
-      document.body.appendChild(portal);
-
-      document.body.classList.add("print-mode-active");
-
-      const mediaQuery =
-        typeof window.matchMedia === "function"
-          ? window.matchMedia("print")
-          : null;
-
-      const cleanup = () => {
-        window.removeEventListener("afterprint", cleanup);
-        mediaQuery?.removeEventListener("change", handlePrintMediaChange);
-        window.clearTimeout(fallbackTimer);
-        document.body.classList.remove("print-mode-active");
-        portal.remove();
-      };
-
-      const handlePrintMediaChange = (event: MediaQueryListEvent) => {
-        if (!event.matches) cleanup();
-      };
-
-      const fallbackTimer = window.setTimeout(cleanup, 60_000);
-      window.addEventListener("afterprint", cleanup, { once: true });
-      mediaQuery?.addEventListener("change", handlePrintMediaChange);
-
+      setDownloadingMode(mode);
       try {
-        window.print();
+        await downloadExamPdf({ paperEl: clone, filename });
       } catch (error) {
-        cleanup();
-        throw error;
+        // Surface the failure on the console so we get a stack
+        // trace in production telemetry. We deliberately don't
+        // depend on a toast library here — the toolbar's loading
+        // state clears below and the student is free to retry.
+        console.error("[ExamPaper] PDF download failed", error);
+      } finally {
+        setDownloadingMode(null);
       }
     },
-    [],
+    // `paper` is only read for the filename header, and we keep
+    // the dep list narrow so React doesn't re-create the handler
+    // every time `revealed` changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [downloadingMode, paper?.header?.matiere, paper?.header?.section, paper?.header?.year, paper?.header?.session],
   );
 
   if (!paper) return null;
@@ -258,7 +241,8 @@ export function ExamPaper({ part }: ExamPaperProps) {
         allRevealed={allRevealed}
         onRevealAll={revealAll}
         onHideAll={hideAll}
-        onPrint={handlePrint}
+        onDownload={handleDownload}
+        downloadingMode={downloadingMode}
       />
 
       <div className="exam-paper-surface bg-background/40 px-3 py-4 sm:px-8 sm:py-7">
@@ -295,25 +279,30 @@ interface ExamToolbarProps {
   allRevealed: boolean;
   onRevealAll: () => void;
   onHideAll: () => void;
-  onPrint: (mode: "enonce" | "corrige" | "both") => void;
+  onDownload: (mode: "enonce" | "corrige" | "both") => void;
+  downloadingMode: null | "enonce" | "corrige" | "both";
 }
 
 /**
  * Top toolbar — show/hide-all (when the paper has any corrigé)
- * and the three print modes. Hidden in print via globals.css so
- * the printed paper carries no UI chrome.
+ * and the three download modes. Each download mode produces an
+ * A4 PDF via `downloadExamPdf`. Hidden in the off-screen export
+ * tree via the `.exam-pdf-export` rules in `globals.css`, so the
+ * exported paper carries no UI chrome.
  */
 function ExamToolbar({
   hasAnyCorrection,
   allRevealed,
   onRevealAll,
   onHideAll,
-  onPrint,
+  onDownload,
+  downloadingMode,
 }: ExamToolbarProps) {
   // On mobile, the toolbar buttons would either crowd the toolbar
   // off the right edge or wrap into a tall stack — we shorten the
   // visible labels to fit two rows max while keeping a screen-reader
   // friendly full label in `aria-label` / a hidden `<span>`.
+  const isBusy = downloadingMode !== null;
   return (
     <div className="exam-paper-toolbar flex flex-wrap items-center justify-between gap-1.5 border-b border-border bg-muted/30 px-2 py-2 text-xs sm:gap-2 sm:px-3">
       <div className="flex items-center gap-1.5">
@@ -344,42 +333,90 @@ function ExamToolbar({
         ) : null}
       </div>
       <div className="flex flex-wrap items-center gap-1.5">
-        <button
-          type="button"
-          onClick={() => onPrint("enonce")}
-          aria-label="Imprimer le sujet"
-          className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1 font-medium text-foreground/80 hover:bg-muted"
-        >
-          <Printer className="size-3.5" aria-hidden />
-          <span className="hidden sm:inline">Imprimer le sujet</span>
-          <span className="sm:hidden">Sujet</span>
-        </button>
+        <DownloadButton
+          mode="enonce"
+          label="Sujet (PDF)"
+          shortLabel="Sujet"
+          ariaLabel="Télécharger le sujet en PDF"
+          icon={<Download className="size-3.5" aria-hidden />}
+          onDownload={onDownload}
+          busy={downloadingMode === "enonce"}
+          disabled={isBusy && downloadingMode !== "enonce"}
+        />
         {hasAnyCorrection ? (
           <>
-            <button
-              type="button"
-              onClick={() => onPrint("both")}
-              aria-label="Imprimer le sujet et le corrigé"
-              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1 font-medium text-foreground/80 hover:bg-muted"
-            >
-              <FileText className="size-3.5" aria-hidden />
-              <span className="hidden sm:inline">Sujet + corrigé</span>
-              <span className="sm:hidden">Sujet+Corr.</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => onPrint("corrige")}
-              aria-label="Imprimer le corrigé seul"
-              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1 font-medium text-foreground/80 hover:bg-muted"
-            >
-              <ScrollText className="size-3.5" aria-hidden />
-              <span className="hidden sm:inline">Corrigé seul</span>
-              <span className="sm:hidden">Corrigé</span>
-            </button>
+            <DownloadButton
+              mode="both"
+              label="Sujet + corrigé (PDF)"
+              shortLabel="Sujet+Corr."
+              ariaLabel="Télécharger le sujet et le corrigé en PDF"
+              icon={<FileText className="size-3.5" aria-hidden />}
+              onDownload={onDownload}
+              busy={downloadingMode === "both"}
+              disabled={isBusy && downloadingMode !== "both"}
+            />
+            <DownloadButton
+              mode="corrige"
+              label="Corrigé (PDF)"
+              shortLabel="Corrigé"
+              ariaLabel="Télécharger le corrigé seul en PDF"
+              icon={<ScrollText className="size-3.5" aria-hidden />}
+              onDownload={onDownload}
+              busy={downloadingMode === "corrige"}
+              disabled={isBusy && downloadingMode !== "corrige"}
+            />
           </>
         ) : null}
       </div>
     </div>
+  );
+}
+
+interface DownloadButtonProps {
+  mode: "enonce" | "corrige" | "both";
+  label: string;
+  shortLabel: string;
+  ariaLabel: string;
+  icon: React.ReactNode;
+  busy: boolean;
+  disabled: boolean;
+  onDownload: (mode: "enonce" | "corrige" | "both") => void;
+}
+
+/**
+ * A single download button. Renders a spinner in place of the
+ * leading icon while a PDF is being rasterised for this specific
+ * mode; the other two buttons grey out via `disabled` so the
+ * student doesn't queue up multiple concurrent renders on a slow
+ * device.
+ */
+function DownloadButton({
+  mode,
+  label,
+  shortLabel,
+  ariaLabel,
+  icon,
+  busy,
+  disabled,
+  onDownload,
+}: DownloadButtonProps) {
+  return (
+    <button
+      type="button"
+      onClick={() => onDownload(mode)}
+      aria-label={ariaLabel}
+      aria-busy={busy || undefined}
+      disabled={busy || disabled}
+      className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1 font-medium text-foreground/80 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-60"
+    >
+      {busy ? (
+        <Loader2 className="size-3.5 animate-spin" aria-hidden />
+      ) : (
+        icon
+      )}
+      <span className="hidden sm:inline">{label}</span>
+      <span className="sm:hidden">{shortLabel}</span>
+    </button>
   );
 }
 

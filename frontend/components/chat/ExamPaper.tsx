@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
   Eye,
@@ -64,6 +64,11 @@ export function ExamPaper({ part }: ExamPaperProps) {
   // gently nudged to try the question before peeking.
   const [revealed, setRevealed] = useState<Set<string>>(() => new Set());
 
+  // Ref to the rendered <aside data-exam-paper> so the print
+  // handler can clone it into a top-level portal — see
+  // `handlePrint` below for why this matters.
+  const paperRef = useRef<HTMLElement>(null);
+
   // Pre-compute the flat list of leaf-part IDs that *have* a
   // correction. Used by the global *Tout afficher / Tout masquer*
   // toolbar buttons and to suppress those buttons entirely when
@@ -99,21 +104,42 @@ export function ExamPaper({ part }: ExamPaperProps) {
     setRevealed(new Set());
   }, []);
 
-  // Print handler — toggles a body class (`print-mode-enonce` /
-  // `print-mode-corrige` / `print-mode-both`) which the print
-  // stylesheet keys off of, fires `window.print()`, then cleans
-  // up. The cleanup runs synchronously after the (blocking)
-  // print dialog returns; if the user cancels, the body class is
-  // still removed so subsequent interactions are unaffected.
+  // Print handler — clones the rendered paper into a top-level
+  // `[data-exam-paper-print-portal]` appended directly to <body>,
+  // toggles a `print-mode-*` body class which the print stylesheet
+  // keys off of, fires `window.print()`, then cleans up.
+  //
+  // Why the portal? The dashboard wraps everything in a
+  // `fixed inset-0 overflow-hidden` shell with nested
+  // `overflow: hidden` + `h-full` scrollers; trying to print the
+  // paper from its in-place position traps it inside a single
+  // viewport-sized page (the containing block is the fixed shell,
+  // not the document) so anything past page 1 gets clipped. The
+  // portal lives as a direct child of <body>, free of those
+  // ancestor constraints, so the printed paper paginates
+  // naturally across as many pages as it needs.
+  //
+  // The cleanup runs synchronously after the (blocking) print
+  // dialog returns; if the user cancels, the portal + body class
+  // are still removed so subsequent interactions are unaffected.
   const handlePrint = useCallback(
     (mode: "enonce" | "corrige" | "both") => {
       if (typeof window === "undefined") return;
+      const node = paperRef.current;
+      if (!node) return;
+
+      const portal = document.createElement("div");
+      portal.setAttribute("data-exam-paper-print-portal", "");
+      portal.appendChild(node.cloneNode(true));
+      document.body.appendChild(portal);
+
       const cls = `print-mode-${mode}`;
       document.body.classList.add(cls);
       try {
         window.print();
       } finally {
         document.body.classList.remove(cls);
+        portal.remove();
       }
     },
     [],
@@ -125,6 +151,7 @@ export function ExamPaper({ part }: ExamPaperProps) {
 
   return (
     <aside
+      ref={paperRef}
       aria-label="Exam paper"
       data-exam-paper
       className={cn(

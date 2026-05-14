@@ -67,7 +67,7 @@ export default function UsageAndLimitsPage() {
 
   return (
     <TooltipProvider delayDuration={200}>
-      <div className="mx-auto h-full w-full max-w-4xl overflow-y-auto px-4 py-6 sm:px-6 sm:py-10">
+      <div className="no-scrollbar mx-auto h-full w-full max-w-4xl overflow-y-auto px-4 py-6 sm:px-6 sm:py-10">
         <Link
           href="/settings"
           className="mb-3 inline-flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground"

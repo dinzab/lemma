@@ -32,7 +32,7 @@ const CATEGORIES: SettingsCategory[] = [
 
 export default function SettingsPage() {
   return (
-    <div className="mx-auto h-full w-full max-w-3xl overflow-y-auto px-4 py-6 sm:px-6 sm:py-10">
+    <div className="no-scrollbar mx-auto h-full w-full max-w-3xl overflow-y-auto px-4 py-6 sm:px-6 sm:py-10">
       <h1 className="text-xl font-semibold tracking-tight text-foreground sm:text-2xl">
         Settings
       </h1>

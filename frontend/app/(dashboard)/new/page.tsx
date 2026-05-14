@@ -2,23 +2,17 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { motion } from "motion/react";
 import {
   Sparkles,
   BookOpen,
   FileText,
-  Calculator,
-  FlaskConical,
-  Globe,
-  History,
-  ArrowRight,
   Languages,
   TimerReset,
-  type LucideIcon,
 } from "lucide-react";
 import { createThread, extractTitleFromMessage } from "@/lib/api/threads";
 import { useUser } from "@/context/user-context";
 import { PromptComposer, type PromptComposerMode } from "@/components/chat/PromptComposer";
+import { TutorShowcase } from "@/components/chat/TutorShowcase";
 import { cn } from "@/lib/utils";
 
 const capabilities: PromptComposerMode[] = [
@@ -35,75 +29,6 @@ const MODE_PLACEHOLDERS: Record<string, string> = {
 
 const DEFAULT_PLACEHOLDER =
   "Example: Explain derivatives from the Bac Math section…";
-
-interface QuickAction {
-  label: string;
-  prompt: string;
-}
-
-interface TopicCard {
-  icon: LucideIcon;
-  title: string;
-  description: string;
-  gradient: string;
-  accentColor: string;
-  actions: QuickAction[];
-}
-
-const topics: TopicCard[] = [
-  {
-    icon: Calculator,
-    title: "Mathematics",
-    description:
-      "Solve equations, understand theorems, and practice calculus problems.",
-    gradient: "from-primary/15 via-primary/5 to-transparent",
-    accentColor: "text-primary",
-    actions: [
-      { label: "Solve a problem", prompt: "Walk me through solving a Bac-level calculus problem step by step" },
-      { label: "Past Bac paper", prompt: "Show me a past Bac math paper question on derivatives" },
-      { label: "Concept explainer", prompt: "Explain limits and continuity for the Bac Math section" },
-    ],
-  },
-  {
-    icon: FlaskConical,
-    title: "Sciences",
-    description:
-      "Explore physics, chemistry, and biology concepts with clear explanations.",
-    gradient: "from-secondary/15 via-secondary/5 to-transparent",
-    accentColor: "text-secondary",
-    actions: [
-      { label: "Physics problem", prompt: "Help me solve a mechanics problem from a past Bac Sciences exam" },
-      { label: "Chemistry equation", prompt: "Explain how to balance this chemical equation for the Bac" },
-      { label: "Biology summary", prompt: "Summarise the genetics chapter for Bac Sciences" },
-    ],
-  },
-  {
-    icon: Globe,
-    title: "History & Geography",
-    description:
-      "Review key events, analyze movements, and prepare for essay questions.",
-    gradient: "from-chart-3/15 via-chart-3/5 to-transparent",
-    accentColor: "text-chart-3",
-    actions: [
-      { label: "Essay outline", prompt: "Help me outline a Bac essay on decolonisation in North Africa" },
-      { label: "Key events recap", prompt: "Summarise the key events of the Cold War for the Bac" },
-      { label: "Past Bac essay", prompt: "Show me a past Bac history essay question and model answer" },
-    ],
-  },
-  {
-    icon: History,
-    title: "Philosophy",
-    description:
-      "Understand thinkers, build arguments, and structure your dissertation.",
-    gradient: "from-chart-5/15 via-chart-5/5 to-transparent",
-    accentColor: "text-chart-5",
-    actions: [
-      { label: "Dissertation plan", prompt: "Help me plan a philosophy dissertation on freedom and responsibility" },
-      { label: "Thinker explainer", prompt: "Explain Descartes\' method of doubt for the Bac" },
-      { label: "Argument coach", prompt: "Coach me through building a philosophical argument on justice" },
-    ],
-  },
-];
 
 export default function NewChatPage() {
   const router = useRouter();
@@ -145,12 +70,12 @@ export default function NewChatPage() {
     }
   };
 
-  const handleActionClick = (prompt: string) => {
+  const handlePickPrompt = (prompt: string) => {
     setMessage(prompt);
   };
 
   return (
-    <div className="relative flex h-full min-h-0 flex-1 flex-col overflow-y-auto">
+    <div className="no-scrollbar relative flex h-full min-h-0 flex-1 flex-col overflow-y-auto">
       {/* Top toolbar — inline at the top on mobile, absolute-positioned on
           ≥sm so it doesn't steal vertical space from the hero. */}
       <div className="flex items-center justify-end gap-2 px-4 pt-3 sm:absolute sm:right-6 sm:top-5 sm:z-10 sm:px-0 sm:pt-0">
@@ -173,15 +98,12 @@ export default function NewChatPage() {
         </button>
       </div>
 
-      {/* Hero / composer / topic-suggestion column.
-          - On mobile we anchor to the top of the scroll container so the
-            entire hero, composer, and suggestion cards are reachable
-            without any of them being pushed below the fold by
-            justify-center.
-          - From sm and up there's plenty of viewport height, so we
-            re-enable vertical centering for the classic ChatGPT-style
-            empty-state layout. */}
-      <div className="mx-auto flex w-full max-w-2xl flex-1 flex-col items-center justify-start gap-6 px-4 pb-10 pt-6 text-center sm:max-w-3xl sm:justify-center sm:gap-10 sm:px-6 sm:py-10 lg:px-8">
+      {/* Hero / composer column. We deliberately do NOT vertically centre
+          the whole page anymore — the showcase below the composer is the
+          tall element that justifies always anchoring to the top of the
+          scroll container, otherwise the composer would jump up/down as
+          the user scrolls between the hero and the showcase. */}
+      <div className="mx-auto flex w-full max-w-2xl flex-col items-center justify-start gap-6 px-4 pb-10 pt-6 text-center sm:max-w-3xl sm:gap-10 sm:px-6 sm:pt-12 lg:px-8">
         {/* Hero */}
         <div className="flex flex-col items-center gap-3 sm:gap-4">
           <span className="inline-flex max-w-full items-center gap-2 rounded-full border border-border/60 px-3 py-1 text-xs font-medium text-muted-foreground">
@@ -232,85 +154,14 @@ export default function NewChatPage() {
           )}
         </div>
 
-        {/* Topic Suggestions — redesigned to match landing-page vibe */}
+        {/* Capability showcase — same rotating-tabs + WorkflowAnimation
+            surface as the marketing FeaturesSection, sharing tab specs via
+            `TUTOR_CAPABILITY_TABS`. The CTA prefills the composer above. */}
         <div className="w-full text-left">
-          <div className="mb-4 flex items-center justify-between">
-            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-              Explore topics
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            {topics.map((topic, idx) => {
-              const Icon = topic.icon;
-              return (
-                <motion.div
-                  key={topic.title}
-                  initial={{ opacity: 0, filter: "blur(8px)" }}
-                  animate={{ opacity: 1, filter: "blur(0px)" }}
-                  transition={{ duration: 0.4, delay: 0.1 * idx }}
-                  className={cn(
-                    "group relative overflow-hidden rounded-2xl border border-border/60 transition-colors duration-200",
-                    "hover:border-primary/30",
-                  )}
-                >
-                  {/* Gradient backdrop + dot grid (landing-page pattern) */}
-                  <div
-                    className={cn(
-                      "pointer-events-none absolute inset-0 bg-gradient-to-br opacity-60",
-                      topic.gradient,
-                    )}
-                  />
-                  <div className="pointer-events-none absolute inset-0 [background-image:radial-gradient(circle,var(--border)_1px,transparent_1px)] [background-size:16px_16px] opacity-30" />
-
-                  {/* Ghost icon */}
-                  <Icon className="pointer-events-none absolute -right-4 -top-4 size-28 text-foreground/[0.04] transition-transform duration-500 group-hover:scale-110 sm:size-32" />
-
-                  {/* Content */}
-                  <div className="relative flex flex-col gap-3 p-4 sm:p-5">
-                    <div className="flex items-center gap-2.5">
-                      <div
-                        className={cn(
-                          "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border/60 bg-background/80 backdrop-blur",
-                        )}
-                      >
-                        <Icon className={cn("h-4 w-4", topic.accentColor)} />
-                      </div>
-                      <div>
-                        <p className="text-sm font-semibold text-foreground">
-                          {topic.title}
-                        </p>
-                      </div>
-                    </div>
-
-                    <p className="text-xs leading-relaxed text-muted-foreground">
-                      {topic.description}
-                    </p>
-
-                    {/* Quick-action chips */}
-                    <div className="flex flex-wrap gap-1.5">
-                      {topic.actions.map((action) => (
-                        <button
-                          key={action.label}
-                          type="button"
-                          onClick={() => handleActionClick(action.prompt)}
-                          disabled={isLoading}
-                          className={cn(
-                            "group/chip inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/70 px-2.5 py-1 text-[11px] font-medium text-muted-foreground backdrop-blur transition-colors",
-                            "hover:border-primary/40 hover:text-primary",
-                            "disabled:cursor-not-allowed disabled:opacity-50",
-                          )}
-                        >
-                          {action.label}
-                          <ArrowRight className="h-3 w-3 opacity-0 transition-all group-hover/chip:translate-x-0.5 group-hover/chip:opacity-100" />
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </motion.div>
-              );
-            })}
-          </div>
+          <TutorShowcase
+            onPickPrompt={handlePickPrompt}
+            disabled={isLoading}
+          />
         </div>
       </div>
     </div>

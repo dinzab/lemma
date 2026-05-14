@@ -41,7 +41,8 @@ interface PromptComposerProps {
   autoFocus?: boolean;
 }
 
-const MAX_HEIGHT_PX = 200;
+const COMPACT_MAX_HEIGHT_PX = 200;
+const HERO_MAX_HEIGHT_PX = 280;
 
 /**
  * Shared composer used on the empty `/new` page and inside an active chat.
@@ -73,14 +74,16 @@ export function PromptComposer({
   const isSelectable = typeof onSelectMode === "function";
   const hasModes = !!modes && modes.length > 0;
 
+  const maxHeightPx = size === "hero" ? HERO_MAX_HEIGHT_PX : COMPACT_MAX_HEIGHT_PX;
+
   const resize = React.useCallback(() => {
     const el = textareaRef.current;
     if (!el) return;
     el.style.height = "auto";
-    const next = Math.min(el.scrollHeight, MAX_HEIGHT_PX);
+    const next = Math.min(el.scrollHeight, maxHeightPx);
     el.style.height = `${next}px`;
-    el.style.overflowY = el.scrollHeight > MAX_HEIGHT_PX ? "auto" : "hidden";
-  }, []);
+    el.style.overflowY = el.scrollHeight > maxHeightPx ? "auto" : "hidden";
+  }, [maxHeightPx]);
 
   React.useLayoutEffect(() => {
     resize();
@@ -129,14 +132,19 @@ export function PromptComposer({
             "block w-full resize-none border-0 bg-transparent text-foreground",
             "placeholder:text-muted-foreground/70 focus:outline-none",
             size === "hero"
-              ? "px-5 pt-4 pb-1 text-[15px] leading-6 sm:text-base sm:leading-7"
+              ? "px-5 pt-5 pb-2 text-base leading-7 sm:px-6 sm:pt-6 sm:text-[17px] sm:leading-8"
               : "px-4 pt-3 pb-1 text-[15px] leading-6 sm:px-5",
             textareaClassName,
           )}
-          style={{ minHeight: size === "hero" ? "44px" : "28px" }}
+          style={{ minHeight: size === "hero" ? "96px" : "28px" }}
         />
 
-        <div className="flex items-end justify-between gap-2 px-2 pb-2 pt-1 sm:px-2.5">
+        <div
+          className={cn(
+            "flex items-end justify-between gap-2 pb-2 pt-1",
+            size === "hero" ? "px-2.5 pb-3 sm:px-3.5" : "px-2 sm:px-2.5",
+          )}
+        >
           <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
             {/* Attach is hidden on xs so the mode chips have room to breathe
                 on a 360px viewport. The button is still disabled-only today
@@ -146,11 +154,14 @@ export function PromptComposer({
               aria-label="Attach (coming soon)"
               disabled
               className={cn(
-                "hidden h-9 w-9 shrink-0 items-center justify-center rounded-full text-muted-foreground/70 sm:flex",
+                "hidden shrink-0 items-center justify-center rounded-full text-muted-foreground/70 sm:flex",
+                size === "hero" ? "h-10 w-10" : "h-9 w-9",
                 "transition-colors hover:text-foreground disabled:opacity-50",
               )}
             >
-              <Paperclip className="h-[17px] w-[17px]" />
+              <Paperclip
+                className={cn(size === "hero" ? "h-[19px] w-[19px]" : "h-[17px] w-[17px]")}
+              />
             </button>
 
             {hasModes && (
@@ -159,9 +170,12 @@ export function PromptComposer({
                   const Icon = mode.icon;
                   const isActive = selectedModeId === mode.id;
                   const baseClass = cn(
-                    "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-[12px] font-medium sm:gap-1.5 sm:px-2.5 sm:text-[12.5px]",
-                    "transition-colors",
+                    "inline-flex shrink-0 items-center gap-1 rounded-full font-medium transition-colors sm:gap-1.5",
+                    size === "hero"
+                      ? "px-2.5 py-1.5 text-[13px] sm:px-3 sm:text-sm"
+                      : "px-2 py-1 text-[12px] sm:px-2.5 sm:text-[12.5px]",
                   );
+                  const iconClass = size === "hero" ? "h-4 w-4" : "h-3.5 w-3.5";
 
                   if (!isSelectable) {
                     return (
@@ -169,7 +183,7 @@ export function PromptComposer({
                         key={mode.id}
                         className={cn(baseClass, "text-muted-foreground")}
                       >
-                        <Icon className="h-3.5 w-3.5" />
+                        <Icon className={iconClass} />
                         {mode.label}
                       </span>
                     );
@@ -189,7 +203,7 @@ export function PromptComposer({
                           : "text-muted-foreground hover:bg-muted/60 hover:text-foreground",
                       )}
                     >
-                      <Icon className="h-3.5 w-3.5" />
+                      <Icon className={iconClass} />
                       {mode.label}
                     </button>
                   );
@@ -205,9 +219,14 @@ export function PromptComposer({
                 onClick={onStop}
                 size="icon"
                 aria-label="Stop generating"
-                className="h-9 w-9 rounded-full bg-foreground text-background hover:bg-foreground/90"
+                className={cn(
+                  "rounded-full bg-foreground text-background hover:bg-foreground/90",
+                  size === "hero" ? "h-11 w-11" : "h-9 w-9",
+                )}
               >
-                <Square className="h-3 w-3 fill-current" />
+                <Square
+                  className={cn(size === "hero" ? "h-3.5 w-3.5" : "h-3 w-3", "fill-current")}
+                />
               </Button>
             ) : (
               <Button
@@ -217,16 +236,20 @@ export function PromptComposer({
                 size="icon"
                 aria-label="Send message"
                 className={cn(
-                  "h-9 w-9 rounded-full transition-all",
+                  "rounded-full transition-all",
+                  size === "hero" ? "h-11 w-11" : "h-9 w-9",
                   trimmed && !isSubmitting
                     ? "bg-primary text-primary-foreground hover:bg-primary/90"
                     : "cursor-not-allowed bg-muted text-muted-foreground/60 hover:bg-muted",
                 )}
               >
                 {isSubmitting ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <Loader2 className={cn(size === "hero" ? "h-5 w-5" : "h-4 w-4", "animate-spin")} />
                 ) : (
-                  <ArrowUp className="h-4 w-4" strokeWidth={2.5} />
+                  <ArrowUp
+                    className={cn(size === "hero" ? "h-5 w-5" : "h-4 w-4")}
+                    strokeWidth={2.5}
+                  />
                 )}
               </Button>
             )}

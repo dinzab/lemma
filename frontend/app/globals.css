@@ -317,25 +317,31 @@
  *
  * The `<ExamPaper>` chip renders a Tunisian BAC-format paper inline
  * in the chat transcript. When the student hits one of the
- * `[Imprimer …]` toolbar buttons, the chip clones the rendered
- * paper into a `[data-exam-paper-print-portal]` appended directly
- * to <body>, then adds a `print-mode-*` body class
- * (`print-mode-enonce` / `print-mode-corrige` / `print-mode-both`)
- * and calls `window.print()` — the rules below take it from there:
+ * `[Imprimer …]` toolbar buttons, the chip:
+ *   1. clones the rendered paper,
+ *   2. pre-processes the clone to bake the chosen print mode into
+ *      the DOM (drop corrections for "énoncé", drop prompts for
+ *      "corrigé", reveal hidden correction blocks for "corrigé" /
+ *      "both"),
+ *   3. appends the clone into a `[data-exam-paper-print-portal]`
+ *      attached directly to <body>,
+ *   4. adds the `print-mode-active` body class,
+ *   5. calls `window.print()`.
  *
- *  1. Hide every direct child of <body> except the print portal
- *     (so the printed output isn't a screenshot of the chat —
- *     sidebar, toolbar, message bubbles, hint ladders, etc. all
- *     disappear).
- *  2. Strip cards / borders / shadows from the paper itself so it
- *     reads as a clean monochrome BAC paper, not a chat card.
- *  3. Toggle `.exam-prompt` / `.exam-correction` visibility based on
- *     the body class — `print-mode-enonce` hides every correction
- *     block (even ones currently revealed on screen) and
- *     `print-mode-corrige` hides every prompt. `print-mode-both`
- *     keeps both visible.
- *  4. Set @page A4 with sensible margins; avoid splitting an
- *     exercise across pages when feasible.
+ * The rules below take it from there:
+ *  - Hide every direct child of <body> except the print portal
+ *    (so the printed output isn't a screenshot of the chat —
+ *    sidebar, toolbar, message bubbles, hint ladders, etc. all
+ *    disappear).
+ *  - Strip cards / borders / shadows from the paper itself so it
+ *    reads as a clean monochrome BAC paper, not a chat card.
+ *  - Set @page A4 with sensible margins; avoid splitting an
+ *    exercise across pages when feasible.
+ *
+ * Per-mode visibility (énoncé / corrigé / both) is handled in the
+ * React component, NOT here — pre-processing the cloned DOM is
+ * more robust than fighting `[hidden]` attribute overrides through
+ * `@media print` CSS.
  *
  * Why the portal? The dashboard wraps the chat in a
  * `fixed inset-0 overflow-hidden` shell with nested `overflow:
@@ -347,10 +353,10 @@
  * layout, so the printed paper paginates across as many pages as
  * it needs.
  *
- * When NONE of the print-mode body classes is set, `@media print`
- * still applies (e.g. if the user fires the browser-native Ctrl/Cmd+P
- * over the page) — default to printing the page as-is, but with the
- * paper styled cleanly.
+ * When `print-mode-active` is NOT set, `@media print` still
+ * applies (e.g. if the user fires the browser-native Ctrl/Cmd+P
+ * over the page) — default to printing the page as-is, but with
+ * the paper styled cleanly.
  */
 @media print {
   @page {
@@ -358,19 +364,20 @@
     margin: 18mm 15mm;
   }
 
-  /* When a print mode is active, hide every direct child of <body>
+  /* When a print is active, hide every direct child of <body>
    * except the print portal. `display: none` (rather than
    * `visibility: hidden`) is intentional — it removes the chat
    * chrome from layout entirely, so the printed paper starts at
-   * the top of page 1 instead of after pages of blank chat. */
-  body.print-mode-enonce > *,
-  body.print-mode-corrige > *,
-  body.print-mode-both > * {
+   * the top of page 1 instead of after pages of blank chat.
+   *
+   * Per-mode visibility (énoncé / corrigé / both) is handled in
+   * the React component by pre-processing the cloned DOM before
+   * the portal is appended; there are no `[hidden]` overrides to
+   * fight here. */
+  body.print-mode-active > * {
     display: none !important;
   }
-  body.print-mode-enonce > [data-exam-paper-print-portal],
-  body.print-mode-corrige > [data-exam-paper-print-portal],
-  body.print-mode-both > [data-exam-paper-print-portal] {
+  body.print-mode-active > [data-exam-paper-print-portal] {
     display: block !important;
   }
 
@@ -399,35 +406,8 @@
     page-break-inside: avoid;
     break-inside: avoid;
   }
-  .exam-correction-trigger {
-    display: none !important;
-  }
   .exam-correction-wrapper {
     margin-left: 0 !important;
-  }
-
-  /* Per-mode visibility:
-   *  - `print-mode-enonce` keeps the énoncé, drops every correction.
-   *  - `print-mode-corrige` drops every prompt, keeps every
-   *    correction (overrides the `[hidden]` attribute that React
-   *    sets on collapsed correction blocks).
-   *  - `print-mode-both` keeps everything visible, including
-   *    correction blocks that are collapsed on screen. */
-  body.print-mode-enonce .exam-correction {
-    display: none !important;
-  }
-  body.print-mode-corrige .exam-prompt {
-    display: none !important;
-  }
-  body.print-mode-corrige .exam-correction[hidden],
-  body.print-mode-both .exam-correction[hidden] {
-    display: block !important;
-  }
-
-  /* On `print-mode-corrige` we also drop the exercise intro
-   * paragraph alongside the prompts (it's part of the énoncé). */
-  body.print-mode-corrige .exam-exercise > .exam-prompt {
-    display: none !important;
   }
 }
 

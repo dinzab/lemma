@@ -262,6 +262,24 @@
   .katex-display::-webkit-scrollbar {
     height: 4px;
   }
+
+  /*
+   * `<ExamPaper>` nested-part indentation — driven by the
+   * `--exam-depth` CSS custom property set inline on each
+   * `.exam-part` `<li>` (capped at depth 4 in the component).
+   * Mobile gets a tighter 10 px per level so the prompts don't
+   * get squeezed off the right edge on narrow viewports; the
+   * sm+ breakpoint matches the BAC paper's visual indentation
+   * at 18 px per level.
+   */
+  .exam-part {
+    padding-left: calc(var(--exam-depth, 0) * 10px);
+  }
+  @media (min-width: 640px) {
+    .exam-part {
+      padding-left: calc(var(--exam-depth, 0) * 18px);
+    }
+  }
 }
 
 @layer base {

@@ -41,6 +41,10 @@ import {
   type LemmaSolutionStepsToolPart,
 } from "@/components/chat/StepwiseSolutionCards";
 import {
+  ExamPaper,
+  type LemmaEmitExamToolPart,
+} from "@/components/chat/ExamPaper";
+import {
   QuestionAssetsBlock,
   type LemmaShowQuestionAssetsToolPart,
 } from "@/components/chat/QuestionAssetsBlock";
@@ -301,6 +305,24 @@ function ConversationInner({
                     />
                   );
                 }
+                if (isEmitExamPart(part)) {
+                  // *Exam Paper* surface — render the agent's
+                  // structured `emit_exam` payload as a real
+                  // Tunisian BAC-format paper with header banner,
+                  // numbered exercises with marks, recursively-
+                  // nested questions, per-question *Voir la
+                  // correction* disclosure, and a top toolbar
+                  // with print modes (sujet seul / sujet +
+                  // corrigé / corrigé seul). Suppresses itself
+                  // while streaming, so a half-built paper never
+                  // reaches the student.
+                  return (
+                    <ExamPaper
+                      key={key}
+                      part={part as LemmaEmitExamToolPart}
+                    />
+                  );
+                }
                 if (isShowQuestionAssetsPart(part)) {
                   // *Voir l'épreuve* surface — render the figure
                   // panel (énoncé / corrigé gated / exam complet)
@@ -436,6 +458,16 @@ function isEmitHintLadderPart(part: {
     return true;
   }
   return part.type === "tool-emit_hint_ladder";
+}
+
+function isEmitExamPart(part: {
+  type?: string;
+  toolName?: string;
+}): boolean {
+  if (part.type === "dynamic-tool" && part.toolName === "emit_exam") {
+    return true;
+  }
+  return part.type === "tool-emit_exam";
 }
 
 function isSearchQuestionsPart(part: {

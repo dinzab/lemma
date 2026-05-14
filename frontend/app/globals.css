@@ -293,3 +293,121 @@
     color: #FFFFFF !important;
   }
 }
+
+/*
+ * --- Exam Paper print stylesheet -------------------------------------
+ *
+ * The `<ExamPaper>` chip renders a Tunisian BAC-format paper inline
+ * in the chat transcript. When the student hits one of the
+ * `[Imprimer …]` toolbar buttons we temporarily add a body class
+ * (`print-mode-enonce` / `print-mode-corrige` / `print-mode-both`)
+ * and call `window.print()` — the rules below take it from there:
+ *
+ *  1. Hide ALL chrome except the active exam paper (so the printed
+ *     output isn't a screenshot of the chat — sidebar, toolbar,
+ *     message bubbles, hint ladders, etc. all disappear).
+ *  2. Strip cards / borders / shadows from the paper itself so it
+ *     reads as a clean monochrome BAC paper, not a chat card.
+ *  3. Toggle `.exam-prompt` / `.exam-correction` visibility based on
+ *     the body class — `print-mode-enonce` hides every correction
+ *     block (even ones currently revealed on screen) and
+ *     `print-mode-corrige` hides every prompt. `print-mode-both`
+ *     keeps both visible.
+ *  4. Set @page A4 with sensible margins; avoid splitting an
+ *     exercise across pages when feasible.
+ *
+ * When NONE of the print-mode body classes is set, `@media print`
+ * still applies (e.g. if the user fires the browser-native Ctrl/Cmd+P
+ * over the page) — default to printing the page as-is, but with the
+ * paper styled cleanly.
+ */
+@media print {
+  @page {
+    size: A4;
+    margin: 18mm 15mm;
+  }
+
+  /* When a print mode is active, hide everything outside the paper
+   * (sidebar, chat header, toolbars, other messages, etc.) so the
+   * printed output is just the paper itself. We don't need the
+   * granularity of "hide this, hide that" — we hide the body's
+   * direct children by default and re-show the ancestor chain of
+   * any `[data-exam-paper]` so the paper survives. */
+  body.print-mode-enonce *,
+  body.print-mode-corrige *,
+  body.print-mode-both * {
+    visibility: hidden;
+  }
+  body.print-mode-enonce [data-exam-paper],
+  body.print-mode-enonce [data-exam-paper] *,
+  body.print-mode-corrige [data-exam-paper],
+  body.print-mode-corrige [data-exam-paper] *,
+  body.print-mode-both [data-exam-paper],
+  body.print-mode-both [data-exam-paper] * {
+    visibility: visible;
+  }
+  body.print-mode-enonce [data-exam-paper],
+  body.print-mode-corrige [data-exam-paper],
+  body.print-mode-both [data-exam-paper] {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+  }
+
+  /* Strip the chat-card chrome from the paper itself — a printed
+   * BAC paper has no rounded corners, no border, no toolbar, no
+   * shadow. */
+  .exam-paper {
+    background: #fff !important;
+    color: #111 !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    margin: 0 !important;
+  }
+  .exam-paper-toolbar {
+    display: none !important;
+  }
+  .exam-paper-surface {
+    background: #fff !important;
+    padding: 0 !important;
+  }
+  .exam-banner {
+    border-color: #444 !important;
+  }
+  .exam-exercise {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+  .exam-correction-trigger {
+    display: none !important;
+  }
+  .exam-correction-wrapper {
+    margin-left: 0 !important;
+  }
+
+  /* Per-mode visibility:
+   *  - `print-mode-enonce` keeps the énoncé, drops every correction.
+   *  - `print-mode-corrige` drops every prompt, keeps every
+   *    correction (overrides the `[hidden]` attribute that React
+   *    sets on collapsed correction blocks).
+   *  - `print-mode-both` keeps everything visible, including
+   *    correction blocks that are collapsed on screen. */
+  body.print-mode-enonce .exam-correction {
+    display: none !important;
+  }
+  body.print-mode-corrige .exam-prompt {
+    display: none !important;
+  }
+  body.print-mode-corrige .exam-correction[hidden],
+  body.print-mode-both .exam-correction[hidden] {
+    display: block !important;
+  }
+
+  /* On `print-mode-corrige` we also drop the exercise intro
+   * paragraph alongside the prompts (it's part of the énoncé). */
+  body.print-mode-corrige .exam-exercise > .exam-prompt {
+    display: none !important;
+  }
+}
+

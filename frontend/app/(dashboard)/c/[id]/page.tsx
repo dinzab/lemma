@@ -174,7 +174,7 @@ export default function ChatThreadPage() {
                     ? `in ${formatTimeUntil(quotaError.resetAt)}`
                     : "soon"}
                   {" · "}
-                  <Link href="/settings" className="underline" onClick={clearQuotaError}>
+                  <Link href="/settings/usage" className="underline" onClick={clearQuotaError}>
                     View usage
                   </Link>
                 </p>

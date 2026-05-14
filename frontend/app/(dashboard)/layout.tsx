@@ -288,7 +288,10 @@ const SidebarContent = ({ setIsSidebarOpen }: SidebarContentProps) => {
   const threadGroups = useMemo(() => groupThreadsByRecency(threads), [threads]);
   const currentTheme = theme === "dark" ? "dark" : "light";
   const onHome = pathname === "/new";
-  const onSettings = pathname === "/settings";
+  // `/settings/usage` and any future sub-pages should still light
+  // up the Settings nav row.
+  const onSettings =
+    pathname === "/settings" || (pathname?.startsWith("/settings/") ?? false);
 
   const handleRenameThread = async (thread: Thread, nextTitle: string) => {
     try {

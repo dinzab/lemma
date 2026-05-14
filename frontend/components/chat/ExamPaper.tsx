@@ -110,7 +110,8 @@ export function ExamPaper({ part }: ExamPaperProps) {
   // `[data-exam-paper-print-portal]` attached directly to <body>,
   // adds the `print-mode-active` body class (the stylesheet keys
   // off of it to hide every other body child), fires
-  // `window.print()`, then cleans up.
+  // `window.print()`, then cleans up after the browser finishes
+  // the print lifecycle.
   //
   // Why the portal? The dashboard wraps everything in a
   // `fixed inset-0 overflow-hidden` shell with nested
@@ -122,9 +123,11 @@ export function ExamPaper({ part }: ExamPaperProps) {
   // ancestor constraints, so the printed paper paginates
   // naturally across as many pages as it needs.
   //
-  // The cleanup runs synchronously after the (blocking) print
-  // dialog returns; if the user cancels, the portal + body class
-  // are still removed so subsequent interactions are unaffected.
+  // Cleanup is deliberately tied to `afterprint` / print-media
+  // exit instead of a synchronous `finally`: mobile browsers and
+  // Chromium print preview can return from `window.print()` before
+  // the print engine has captured the portal, and removing it too
+  // early falls back to printing the chat page or a cropped shell.
   const handlePrint = useCallback(
     (mode: "enonce" | "corrige" | "both") => {
       if (typeof window === "undefined") return;
@@ -168,17 +171,43 @@ export function ExamPaper({ part }: ExamPaperProps) {
           .forEach((el) => el.remove());
       }
 
+      document
+        .querySelectorAll("[data-exam-paper-print-portal]")
+        .forEach((el) => el.remove());
+
       const portal = document.createElement("div");
       portal.setAttribute("data-exam-paper-print-portal", "");
       portal.appendChild(clone);
       document.body.appendChild(portal);
 
       document.body.classList.add("print-mode-active");
-      try {
-        window.print();
-      } finally {
+
+      const mediaQuery =
+        typeof window.matchMedia === "function"
+          ? window.matchMedia("print")
+          : null;
+
+      const cleanup = () => {
+        window.removeEventListener("afterprint", cleanup);
+        mediaQuery?.removeEventListener("change", handlePrintMediaChange);
+        window.clearTimeout(fallbackTimer);
         document.body.classList.remove("print-mode-active");
         portal.remove();
+      };
+
+      const handlePrintMediaChange = (event: MediaQueryListEvent) => {
+        if (!event.matches) cleanup();
+      };
+
+      const fallbackTimer = window.setTimeout(cleanup, 60_000);
+      window.addEventListener("afterprint", cleanup, { once: true });
+      mediaQuery?.addEventListener("change", handlePrintMediaChange);
+
+      try {
+        window.print();
+      } catch (error) {
+        cleanup();
+        throw error;
       }
     },
     [],

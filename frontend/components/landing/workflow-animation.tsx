@@ -62,16 +62,16 @@ const widthClasses: Record<NonNullable<WorkflowCardData["width"]>, string> = {
   lg: "w-80",
 };
 
-type CardKind = "input" | "action" | "output" | "source" | "feed" | "chart";
+export type WorkflowCardKind = "input" | "action" | "output" | "source" | "feed" | "chart";
 
-function WorkflowCard({
+export function WorkflowCard({
   data,
   type,
   delay,
   className,
 }: {
   data: WorkflowCardData;
-  type: CardKind;
+  type: WorkflowCardKind;
   delay: number;
   className?: string;
 }) {

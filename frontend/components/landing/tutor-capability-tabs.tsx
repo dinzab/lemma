@@ -23,25 +23,30 @@ import {
   TrendingUp,
   Zap,
   GraduationCap,
+  type LucideIcon,
 } from "lucide-react";
 import type { WorkflowSpec } from "./workflow-animation";
 
 /**
  * Shared capability tab data used by both the marketing FeaturesSection
- * (`/`) and the in-app TutorShowcase on `/new`. Keep both surfaces in lock-step
- * by editing here only.
+ * (`/`) and the in-app capability chips inside the composer on `/new`. Keep
+ * both surfaces in lock-step by editing here only.
  *
- * `prefillPrompt` is consumed by TutorShowcase to feed the composer when a
- * student clicks "Try this prompt" on a tab; the marketing site ignores it.
+ * `prefillPrompt` is consumed by `/new` when a student clicks a capability
+ * chip — the composer textarea is set to this string. The marketing
+ * FeaturesSection ignores it.
  */
 export type TutorCapabilityTab = {
   id: string;
+  /** Full capability name used on the marketing FeaturesSection tabs. */
   label: string;
-  icon: React.ComponentType<{ className?: string }>;
+  /** Compact label used on the in-app composer chip strip (`/new`). */
+  shortLabel?: string;
+  icon: LucideIcon;
   spec: WorkflowSpec;
   /** Short prompt prefilled into the composer when the in-app CTA is clicked. */
   prefillPrompt: string;
-  /** Short CTA label (defaults to "Try this prompt" in TutorShowcase). */
+  /** Reserved for any future inline CTA next to a tab. */
   ctaLabel?: string;
 };
 
@@ -113,6 +118,7 @@ export const TUTOR_CAPABILITY_TABS: TutorCapabilityTab[] = [
   {
     id: "concept-explainer",
     label: "Concept Explainer",
+    shortLabel: "Explain",
     icon: Compass,
     prefillPrompt: "Explain limits and continuity for the Bac Math section",
     spec: {
@@ -156,6 +162,7 @@ export const TUTOR_CAPABILITY_TABS: TutorCapabilityTab[] = [
   {
     id: "past-exam",
     label: "Past Exam Practice",
+    shortLabel: "Practice",
     icon: ClipboardList,
     prefillPrompt: "Show me Exercice 1 from Bac 2023 Math principale and grade my attempt",
     spec: {
@@ -212,6 +219,7 @@ export const TUTOR_CAPABILITY_TABS: TutorCapabilityTab[] = [
   {
     id: "smart-summaries",
     label: "Smart Summaries",
+    shortLabel: "Summarise",
     icon: FileText,
     prefillPrompt: "Summarise the genetics chapter for Bac Sciences with definitions and likely questions",
     spec: {
@@ -262,6 +270,7 @@ export const TUTOR_CAPABILITY_TABS: TutorCapabilityTab[] = [
   {
     id: "study-plan",
     label: "Study Plan",
+    shortLabel: "Plan",
     icon: Pencil,
     prefillPrompt: "Build me a 2-week Bac revision plan — I want a 16/20 in Math, 12 weeks to go",
     spec: {
@@ -294,6 +303,7 @@ export const TUTOR_CAPABILITY_TABS: TutorCapabilityTab[] = [
   {
     id: "multilingual",
     label: "Multilingual Q&A",
+    shortLabel: "Multilingual",
     icon: Languages,
     prefillPrompt: "اشرح لي الدوال المثلثية بالعربية مع أمثلة محلولة",
     spec: {
@@ -347,6 +357,7 @@ export const TUTOR_CAPABILITY_TABS: TutorCapabilityTab[] = [
   {
     id: "progress",
     label: "Progress Tracker",
+    shortLabel: "Progress",
     icon: LineChart,
     prefillPrompt: "Review my last week's quiz results and tell me what to focus on next",
     spec: {

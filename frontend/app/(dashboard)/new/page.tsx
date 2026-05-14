@@ -1,34 +1,33 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import {
-  Sparkles,
-  BookOpen,
-  FileText,
-  Languages,
-  TimerReset,
-} from "lucide-react";
+import { Languages, TimerReset } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
+
 import { createThread, extractTitleFromMessage } from "@/lib/api/threads";
 import { useUser } from "@/context/user-context";
-import { PromptComposer, type PromptComposerMode } from "@/components/chat/PromptComposer";
-import { TutorShowcase } from "@/components/chat/TutorShowcase";
+import {
+  PromptComposer,
+  type PromptComposerMode,
+} from "@/components/chat/PromptComposer";
+import { CapabilityPreviewTile } from "@/components/chat/CapabilityPreviewTile";
+import {
+  TUTOR_CAPABILITY_TABS,
+  type TutorCapabilityTab,
+} from "@/components/landing/tutor-capability-tabs";
 import { cn } from "@/lib/utils";
-
-const capabilities: PromptComposerMode[] = [
-  { id: "reasoning", label: "Reasoning", icon: Sparkles },
-  { id: "exam", label: "Exam Prep", icon: BookOpen },
-  { id: "summaries", label: "Summaries", icon: FileText },
-];
-
-const MODE_PLACEHOLDERS: Record<string, string> = {
-  reasoning: "Walk me through this problem step by step…",
-  exam: "Generate a past-paper style question on…",
-  summaries: "Summarise this lesson / chapter on…",
-};
 
 const DEFAULT_PLACEHOLDER =
   "Example: Explain derivatives from the Bac Math section…";
+
+const CAPABILITY_PLACEHOLDERS: Record<string, string> = TUTOR_CAPABILITY_TABS.reduce(
+  (acc, tab) => {
+    acc[tab.id] = `Example: ${tab.prefillPrompt}`;
+    return acc;
+  },
+  {} as Record<string, string>,
+);
 
 export default function NewChatPage() {
   const router = useRouter();
@@ -36,21 +35,59 @@ export default function NewChatPage() {
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Selected capability mode (Reasoning / Exam Prep / Summaries). Currently
-  // a UI-only signal — the backend agent doesn't branch on it yet — but
-  // wiring the selection state means the chips actually toggle and the
-  // placeholder updates so users get tangible feedback when they pick one.
-  const [selectedModeId, setSelectedModeId] = useState<string | null>(null);
+  // Currently-selected capability chip inside the composer. Drives the
+  // composer placeholder text, the chip-active styling, and whether the
+  // companion preview tile renders next to the composer.
+  const [selectedCapabilityId, setSelectedCapabilityId] = useState<string | null>(
+    null,
+  );
 
-  const placeholder = selectedModeId
-    ? (MODE_PLACEHOLDERS[selectedModeId] ?? DEFAULT_PLACEHOLDER)
+  // Map TUTOR_CAPABILITY_TABS into the PromptComposer's `modes` shape. Using
+  // `shortLabel` keeps the chip strip from overflowing at small viewports.
+  const capabilityModes: PromptComposerMode[] = useMemo(
+    () =>
+      TUTOR_CAPABILITY_TABS.map((tab) => ({
+        id: tab.id,
+        label: tab.shortLabel ?? tab.label,
+        icon: tab.icon,
+      })),
+    [],
+  );
+
+  const activeCapability: TutorCapabilityTab | null = useMemo(
+    () =>
+      selectedCapabilityId
+        ? TUTOR_CAPABILITY_TABS.find((t) => t.id === selectedCapabilityId) ?? null
+        : null,
+    [selectedCapabilityId],
+  );
+
+  const placeholder = selectedCapabilityId
+    ? CAPABILITY_PLACEHOLDERS[selectedCapabilityId] ?? DEFAULT_PLACEHOLDER
     : DEFAULT_PLACEHOLDER;
 
-  const handleSelectMode = (id: string) => {
-    setSelectedModeId((current) => (current === id ? null : id));
-  };
-
   const firstName = userDetails?.fullName?.split(" ")[0] || "there";
+
+  const handleSelectCapability = (id: string) => {
+    // Click an active chip = deselect (and clear the prefilled prompt if it
+    // hasn't been edited away). Otherwise activate the chip and prefill the
+    // composer with the capability's example.
+    const tab = TUTOR_CAPABILITY_TABS.find((t) => t.id === id);
+    if (!tab) return;
+
+    setSelectedCapabilityId((current) => {
+      if (current === id) {
+        // Deselecting the active chip — clear the message only if it still
+        // matches the prefill (don't blow away the user's own edits).
+        setMessage((prev) => (prev === tab.prefillPrompt ? "" : prev));
+        return null;
+      }
+      // Activating a chip — prefill the composer with this capability's
+      // example so the student sees a concrete starting point.
+      setMessage(tab.prefillPrompt);
+      return id;
+    });
+  };
 
   const handleSendMessage = async () => {
     if (!message.trim() || isLoading) return;
@@ -65,19 +102,19 @@ export default function NewChatPage() {
       router.push(`/c/${thread.id}`);
     } catch (err) {
       console.error("Failed to create thread:", err);
-      setError(err instanceof Error ? err.message : "Failed to create thread. Please try again.");
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Failed to create thread. Please try again.",
+      );
       setIsLoading(false);
     }
-  };
-
-  const handlePickPrompt = (prompt: string) => {
-    setMessage(prompt);
   };
 
   return (
     <div className="no-scrollbar relative flex h-full min-h-0 flex-1 flex-col overflow-y-auto">
       {/* Top toolbar — inline at the top on mobile, absolute-positioned on
-          ≥sm so it doesn't steal vertical space from the hero. */}
+          ≥sm so it doesn't steal vertical space from the centered composer. */}
       <div className="flex items-center justify-end gap-2 px-4 pt-3 sm:absolute sm:right-6 sm:top-5 sm:z-10 sm:px-0 sm:pt-0">
         <button
           type="button"
@@ -98,12 +135,11 @@ export default function NewChatPage() {
         </button>
       </div>
 
-      {/* Hero / composer column. We deliberately do NOT vertically centre
-          the whole page anymore — the showcase below the composer is the
-          tall element that justifies always anchoring to the top of the
-          scroll container, otherwise the composer would jump up/down as
-          the user scrolls between the hero and the showcase. */}
-      <div className="mx-auto flex w-full max-w-2xl flex-col items-center justify-start gap-6 px-4 pb-10 pt-6 text-center sm:max-w-3xl sm:gap-10 sm:px-6 sm:pt-12 lg:px-8">
+      {/* Centered hero + composer column. We vertically center on the viewport
+          so the composer is the focal point. The optional companion preview
+          tile floats to the right on lg+ — at narrower widths it stacks below
+          the composer. */}
+      <div className="relative mx-auto flex w-full max-w-2xl flex-1 flex-col items-center justify-center gap-6 px-4 pb-10 pt-6 text-center sm:max-w-3xl sm:gap-8 sm:px-6 sm:pt-12 lg:px-8">
         {/* Hero */}
         <div className="flex flex-col items-center gap-3 sm:gap-4">
           <span className="inline-flex max-w-full items-center gap-2 rounded-full border border-border/60 px-3 py-1 text-xs font-medium text-muted-foreground">
@@ -114,8 +150,6 @@ export default function NewChatPage() {
             <span className="font-semibold uppercase tracking-wide text-primary">
               AI Tutor
             </span>
-            {/* The session-status tail is decorative; on narrow viewports
-                we drop it so the pill never forces horizontal scroll. */}
             <span className="hidden h-3 w-px bg-border/70 sm:inline-block" aria-hidden />
             <span className="hidden sm:inline">Ready for today&apos;s Bac session</span>
           </span>
@@ -128,21 +162,23 @@ export default function NewChatPage() {
             , what should we master today?
           </h1>
           <p className="max-w-2xl text-pretty text-sm leading-6 text-muted-foreground sm:text-base">
-            Ask for explanations, past-paper practice, summaries, or a study plan tuned to your section.
+            Pick a capability to prefill an example, or just ask anything.
           </p>
         </div>
 
-        {/* Composer */}
-        <div className="w-full">
+        {/* Composer + companion preview tile. `lg:relative` lets the tile
+            anchor its absolute position to this wrapper so it sits to the
+            right of the composer without disturbing horizontal centring. */}
+        <div className="relative w-full lg:relative">
           <PromptComposer
             value={message}
             onChange={setMessage}
             onSubmit={handleSendMessage}
             placeholder={placeholder}
             isSubmitting={isLoading}
-            modes={capabilities}
-            selectedModeId={selectedModeId ?? undefined}
-            onSelectMode={handleSelectMode}
+            modes={capabilityModes}
+            selectedModeId={selectedCapabilityId ?? undefined}
+            onSelectMode={handleSelectCapability}
             size="hero"
             autoFocus
           />
@@ -152,16 +188,29 @@ export default function NewChatPage() {
               {error}
             </div>
           )}
-        </div>
 
-        {/* Capability showcase — same rotating-tabs + WorkflowAnimation
-            surface as the marketing FeaturesSection, sharing tab specs via
-            `TUTOR_CAPABILITY_TABS`. The CTA prefills the composer above. */}
-        <div className="w-full text-left">
-          <TutorShowcase
-            onPickPrompt={handlePickPrompt}
-            disabled={isLoading}
-          />
+          {/* Companion preview tile.
+              - On lg+ the tile is absolutely positioned to the right of the
+                composer (floating, decoupled from the centred column flow).
+              - On <lg it stacks below the composer in normal flow.
+              - Only renders when a capability chip is active. */}
+          <AnimatePresence>
+            {activeCapability && (
+              <motion.div
+                key="capability-preview"
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 4 }}
+                transition={{ duration: 0.22, ease: "easeOut" }}
+                className={cn(
+                  "mt-6 flex justify-center text-left",
+                  "lg:absolute lg:left-full lg:top-1/2 lg:mt-0 lg:ml-6 lg:-translate-y-1/2 lg:justify-start",
+                )}
+              >
+                <CapabilityPreviewTile capability={activeCapability} />
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       </div>
     </div>

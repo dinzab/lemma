@@ -101,11 +101,32 @@ export interface ResolvedExamResponse {
   exam_full_corrige_url: string | null;
 }
 
+export interface ResolvedDossierFigure {
+  id: string;
+  label: string;
+  description: string;
+  page_index: number;
+  page_png: string | null;
+  bbox_pct: [number, number, number, number] | null;
+  citation: LemmaCitation | null;
+}
+
+export interface ResolvedDossierFigureResponse {
+  kind: "dossier_figure";
+  uri: string;
+  citation: LemmaCitation | null;
+  exam: LemmaExamMeta;
+  reference_doc_kind: string;
+  reference_doc_kind_label: string;
+  figure: ResolvedDossierFigure;
+}
+
 export type ResolvedReference =
   | ResolvedFigureResponse
   | ResolvedExerciseResponse
   | ResolvedPairResponse
-  | ResolvedExamResponse;
+  | ResolvedExamResponse
+  | ResolvedDossierFigureResponse;
 
 /**
  * Process-local memoisation so a chip rendered once doesn't re-fetch

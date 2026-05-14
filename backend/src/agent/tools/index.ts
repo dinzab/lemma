@@ -27,6 +27,11 @@ import {
   type Citation,
   type CitationContext,
 } from '../citations';
+import {
+  formatReferenceDocForLLM,
+  readReferenceDoc,
+  referenceDocKindLabel,
+} from './reference-doc';
 
 /**
  * Description for the write_todos planning tool. Mirrors the public
@@ -1029,11 +1034,30 @@ export class AgentToolsService {
             full: true,
             pairContext,
           });
+          // Surface the per-exam *reference document* (dossier
+          // technique on technique exams, dossier comptable on
+          // gestion exams, etc.) when the v6.6 ingest emitted one.
+          // The full text + figures + page PNGs come back here so
+          // the frontend `<QuestionAssetsBlock>` can render the
+          // "Dossier" tab without an extra round-trip to the
+          // references resolver.
+          const referenceDocRaw = readReferenceDoc(payload);
+          const referenceDoc = referenceDocRaw
+            ? formatReferenceDocForLLM(referenceDocRaw, {
+                cdnBase,
+                examHandle:
+                  typeof payload.exam_id === 'string' &&
+                  payload.exam_id.length > 0
+                    ? payload.exam_id
+                    : null,
+              })
+            : null;
           const hasAnyFigure =
             figures.enonce.length > 0 ||
             figures.corrige.length > 0 ||
             images.exercise_enonce !== null ||
-            images.exercise_corrige !== null;
+            images.exercise_corrige !== null ||
+            (referenceDoc?.n_pages ?? 0) > 0;
           return JSON.stringify({
             pair_id: resolvedPairId,
             citation: buildPairCitation(pairContext),
@@ -1062,6 +1086,7 @@ export class AgentToolsService {
             source_pages_corrige: payload.source_pages_corrige ?? [],
             has_any_figure: hasAnyFigure,
             default_side: side ?? 'enonce',
+            reference_doc: referenceDoc,
             images,
             figures,
           });
@@ -1083,13 +1108,16 @@ export class AgentToolsService {
                 'get_question_pair output.',
             ),
           side: z
-            .enum(['enonce', 'corrige', 'both', 'exam_full'])
+            .enum(['enonce', 'corrige', 'both', 'exam_full', 'dossier'])
             .optional()
             .describe(
               'Which tab the panel opens to first. Default "enonce". ' +
                 '"corrige" pre-opens the corrigé tab (the active-recall reveal ' +
                 'gate still renders). "both" places énoncé + corrigé side-by-side. ' +
-                '"exam_full" defaults to the full-exam page view.',
+                '"exam_full" defaults to the full-exam page view. ' +
+                '"dossier" opens the per-exam reference document (dossier ' +
+                'technique on technique exams, dossier comptable on gestion ' +
+                'exams, etc.) — only useful when the pair has has_reference_doc=true.',
             ),
         }),
       },
@@ -2611,7 +2639,37 @@ export function formatPairForLLM(
       ),
     },
     figures,
+    reference_doc: buildReferenceDocSummary(payload),
     score: typeof point.score === 'number' ? point.score : undefined,
+  };
+}
+
+/**
+ * Compact `reference_doc` summary emitted on every `formatPairForLLM`
+ * result. The full dossier text + figures live behind
+ * `show_question_assets` and the agent's LLM-context builder
+ * (`collectReferenceDocsForLLM`) — search hits only need the
+ * "this exam has a dossier, here's how big" signal so the agent
+ * knows when to fetch it. Returns `null` when the pair doesn't ship
+ * a dossier (non-technique matières today).
+ */
+function buildReferenceDocSummary(payload: Record<string, unknown>): {
+  kind: string;
+  kind_label: string;
+  n_pages: number;
+  n_figures: number;
+  text_full_length: number;
+  split_method: string | null;
+} | null {
+  const raw = readReferenceDoc(payload);
+  if (!raw) return null;
+  return {
+    kind: raw.kind,
+    kind_label: referenceDocKindLabel(raw.kind),
+    n_pages: raw.pages.length,
+    n_figures: raw.figures.length,
+    text_full_length: raw.text.length,
+    split_method: raw.split_method,
   };
 }
 

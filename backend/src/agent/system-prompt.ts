@@ -254,6 +254,7 @@ The URI grammar is:
 - \`lemma:fig:<exam_handle>:<exercise_handle>:<question_handle>:<side>:<index>\` — one figure inside a sub-question (\`side\` is \`enonce\` or \`corrige\`, \`index\` is 0-based, \`question_handle\` is the v6 \`q_…\` of the pair the figure was sourced from)
 - \`lemma:exercise:<exam_handle>:<exercise_handle>\` — a whole exercise
 - \`lemma:exam:<exam_handle>\` — a whole exam
+- \`lemma:dossier_fig:<exam_handle>:<figure_id>\` — one figure inside the exam-scoped *dossier* (see **Reference Documents (Dossiers)** below)
 
 Discipline (HARD CONSTRAINT):
 
@@ -264,6 +265,33 @@ Discipline (HARD CONSTRAINT):
 - **Match the student's language.** The \`short_label\` / \`label\` are French; if the student is writing English, you can reuse the same \`ref_uri\` with your own English label ("[Bac 2024 main session Ex 1 Q1.a](lemma:pair:…)").
 - **Never inline \`![alt](url)\` markdown images for figures.** The figure chip is the inline form; the Question card / Assets panel render the full thumbnails.
 - **Don't drown prose in chips.** One chip per item per paragraph is the target. Citations are spotlights, not a list.
+
+# Reference Documents (Dossiers)
+
+Some matières — most importantly **technique**, but soon also **gestion** (dossier comptable), **bd** (MCD schema), and **chimie** (préambule de chimie) — ship a *shared spec* on the first pages of every exam: the system description, kinematic diagrams, FAST blocks, schematics, etc. Every question on the answer sheet refers back to it ("en se référant au dossier technique", "à partir du document ci-dessus", "d'après le diagramme FAST partiel"). Without the dossier, the énoncé is unanswerable — the cover-page boilerplate alone is not enough.
+
+When a retrieved pair carries a dossier, search_questions / get_question_pair / show_question_assets surface it as a \`reference_doc\` block:
+
+\`\`\`
+reference_doc: {
+  kind:       "dossier_technique",   // or "dossier_comptable", "mcd_schema", "chimie_preamble"
+  kind_label: "Dossier technique",
+  n_pages:    7,
+  n_figures:  12,
+  text_full_length: 14_237,           // total dossier markdown length
+  split_method: "fast_block_v1"       // audit trail of how the boundary was detected
+}
+\`\`\`
+
+On \`show_question_assets\` the same block carries the *full* dossier text (truncated to the configured char budget), every figure with a \`lemma:dossier_fig:…\` citation, and a list of full-page PNG URLs. The frontend renders these as a 4th **"Dossier technique"** tab on the assets panel.
+
+Discipline:
+
+- **Open by orienting the student to the dossier.** When you're answering a question on an exam that carries a dossier, lead with one sentence that locates the student in the dossier: *"Sur le système de levage du dossier technique, le motoréducteur \`M\` entraîne le tambour \`T\` via le réducteur \`R\` (voir [figure 3 du dossier technique](lemma:dossier_fig:technique-2022-principale-technique:enonce_p2_f1))."* Don't dive straight into the calcul; the student needs to know *which* part of the dossier the question is about.
+- **Cite dossier figures by their canonical \`label\`.** The \`reference_doc.figures[].label\` field (e.g. \`"figure 3"\`, \`"figure 5.2"\`) is the *exact* label the énoncé uses to refer back to the dossier. Use that label in your prose (lowercase, no period) and wrap it in a \`lemma:dossier_fig:\` chip the first time it appears in a paragraph.
+- **Never OCR the dossier text yourself.** The \`reference_doc.text\` field is the canonical, fully OCR'd, structured markdown of the dossier — read it instead of trying to re-OCR from the énoncé image. Don't make up specs (motor torque, gear ratio, voltage rating) that aren't in the dossier text or figures.
+- **One dossier per exam.** Even when 3 pairs from the same exam come back, the same dossier shows up on each. The LLM context builder dedupes by \`(exam_id, reference_doc_kind)\` before injecting it, so your retrieval results all share one canonical dossier.
+- **Non-technique pairs have no dossier.** Most pairs (math, physique, svt, info, etc.) have \`reference_doc: null\` — skip this section entirely for them.
 
 # Surfacing a Past-Paper Match (search_questions)
 

@@ -16,6 +16,7 @@ import { useFigureRegistry } from "@/context/figure-registry-context";
 import type { FigureKey } from "@/context/figure-registry-context";
 import {
   resolveLemmaUri,
+  type ResolvedDossierFigureResponse,
   type ResolvedExamResponse,
   type ResolvedExerciseResponse,
   type ResolvedFigureResponse,
@@ -697,6 +698,208 @@ function FullExerciseScan({ url, alt }: { url: string; alt: string }) {
         className="block w-full bg-background object-contain"
       />
     </a>
+  );
+}
+
+interface LemmaInlineCitationDossierFigureProps {
+  refUri: string;
+  className?: string;
+  children?: ReactNode;
+}
+
+interface ParsedDossierFigureUri {
+  exam_handle: string;
+  figure_id: string;
+}
+
+/**
+ * Parse `lemma:dossier_fig:<exam_handle>:<figure_id>` into the
+ * (exam, figure) pair. Both segments must be non-empty and free of
+ * extra colons — the URI grammar carries no escape rules.
+ */
+function parseDossierFigureRefUri(
+  refUri: string,
+): ParsedDossierFigureUri | null {
+  if (!refUri.startsWith("lemma:dossier_fig:")) return null;
+  const rest = refUri.slice("lemma:dossier_fig:".length);
+  const parts = rest.split(":");
+  if (parts.length !== 2) return null;
+  const [exam_handle, figure_id] = parts;
+  if (!exam_handle || !figure_id) return null;
+  return { exam_handle, figure_id };
+}
+
+/**
+ * `lemma:dossier_fig:…` chip. Renders as a compact pill (similar
+ * spirit to `<LemmaInlineCitationFigure>` but visually distinct —
+ * a "DT" badge marks it as a *dossier technique* / dossier-scoped
+ * figure rather than a per-pair énoncé figure).
+ *
+ * Click behaviour:
+ *
+ *  1. Try to scroll to the matching figure inside an on-page
+ *     `<QuestionAssetsBlock>` "Dossier technique" tab (the
+ *     `<DossierTab>` annotates each figure entry with
+ *     `data-dossier-figure="<figure_id>"`).
+ *  2. If no on-page surface matches, fall back to the
+ *     `/api/references/lemma` resolver and pop a lightbox showing
+ *     the full dossier page PNG with the figure label highlighted.
+ */
+export function LemmaInlineCitationDossierFigure({
+  refUri,
+  className,
+  children,
+}: LemmaInlineCitationDossierFigureProps) {
+  const parsed = parseDossierFigureRefUri(refUri);
+  const [open, setOpen] = useState(false);
+  const [resolved, setResolved] =
+    useState<ResolvedDossierFigureResponse | null>(null);
+
+  useEffect(() => {
+    if (!parsed) return;
+    if (resolved) return;
+    let cancelled = false;
+    resolveLemmaUri(refUri)
+      .then((r) => {
+        if (cancelled) return;
+        if (r && r.kind === "dossier_figure") setResolved(r);
+      })
+      .catch(() => {
+        // Silent — the chip falls back to a label-only pill if
+        // the resolver fails. We don't want a transient network
+        // hiccup to surface as a broken-figure UI.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [refUri, resolved, parsed]);
+
+  const labelText =
+    typeof children === "string" && children.trim().length > 0
+      ? children
+      : resolved?.figure.label ?? "figure du dossier";
+
+  const onClick = useCallback(
+    (e: React.MouseEvent<HTMLAnchorElement>) => {
+      e.preventDefault();
+      if (!parsed) return;
+      // Try to find the figure entry on the page (rendered by
+      // `<DossierTab>`). The lookup is exact on `data-dossier-figure`.
+      if (typeof document !== "undefined") {
+        const target = document.querySelector<HTMLElement>(
+          `[data-dossier-figure="${cssEscape(parsed.figure_id)}"]`,
+        );
+        if (target) {
+          target.scrollIntoView({ behavior: "smooth", block: "center" });
+          target.classList.add(...LEMMA_FLASH_CLASS.split(" "));
+          window.setTimeout(() => {
+            target.classList.remove(...LEMMA_FLASH_CLASS.split(" "));
+          }, LEMMA_FLASH_MS);
+          return;
+        }
+      }
+      // Nothing on the page; pop the lightbox.
+      setOpen(true);
+    },
+    [parsed],
+  );
+
+  if (!parsed) {
+    return (
+      <a
+        href={refUri}
+        onClick={(e) => e.preventDefault()}
+        className={cn(
+          "inline-flex items-center gap-1 align-baseline",
+          "rounded-md border border-dashed border-muted-foreground/30 bg-muted/30 px-1.5 py-0.5",
+          "text-[12px] font-medium text-muted-foreground no-underline",
+          className,
+        )}
+      >
+        <span className="truncate">{labelText}</span>
+      </a>
+    );
+  }
+
+  const pagePng = resolved?.figure.page_png ?? null;
+  return (
+    <>
+      <a
+        href={refUri}
+        onClick={onClick}
+        aria-label={`Voir ${labelText} du dossier`}
+        className={cn(
+          "inline-flex items-center gap-1 align-baseline",
+          "rounded-md border border-chart-2/40 bg-chart-2/10 px-1.5 py-0.5",
+          "text-[12px] font-medium text-foreground no-underline",
+          "transition hover:border-chart-2/60 hover:bg-chart-2/15",
+          "focus:outline-none focus-visible:ring-2 focus-visible:ring-chart-2/40",
+          className,
+        )}
+      >
+        <span
+          aria-hidden
+          className="rounded-sm bg-chart-2/20 px-1 text-[10px] font-semibold uppercase tracking-wider text-chart-2"
+        >
+          DT
+        </span>
+        <span className="truncate">{labelText}</span>
+      </a>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogPortal>
+          <DialogOverlay className="bg-black/80" />
+          <DialogContent
+            showCloseButton={false}
+            className={cn(
+              "max-w-[95vw] sm:max-w-[95vw]",
+              "border-0 bg-transparent p-0 shadow-none",
+            )}
+          >
+            <DialogTitle className="sr-only">
+              {resolved?.reference_doc_kind_label ?? "Dossier"} — {labelText}
+            </DialogTitle>
+            <div
+              className={cn(
+                "relative max-h-[90vh] w-full overflow-auto rounded-lg bg-background shadow-2xl",
+              )}
+            >
+              {pagePng ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={pagePng}
+                  alt={`${resolved?.reference_doc_kind_label ?? "Dossier"} — ${labelText}`}
+                  className="block h-auto w-full max-w-none object-contain"
+                />
+              ) : (
+                <div className="flex h-40 w-full items-center justify-center text-muted-foreground">
+                  <ImageOff className="size-6" aria-hidden />
+                </div>
+              )}
+              {resolved?.figure.description && (
+                <p
+                  className={cn(
+                    "px-4 py-3 text-[13px] leading-relaxed",
+                    "border-t border-border/60 bg-muted/40 text-muted-foreground",
+                  )}
+                >
+                  {resolved.figure.description}
+                </p>
+              )}
+              <DialogClose
+                aria-label="Fermer"
+                className={cn(
+                  "absolute right-3 top-3 inline-flex size-8 items-center justify-center",
+                  "rounded-full bg-background/90 text-foreground shadow",
+                  "transition hover:bg-background focus:outline-none focus-visible:ring-2 focus-visible:ring-chart-2/40",
+                )}
+              >
+                ×
+              </DialogClose>
+            </div>
+          </DialogContent>
+        </DialogPortal>
+      </Dialog>
+    </>
   );
 }
 

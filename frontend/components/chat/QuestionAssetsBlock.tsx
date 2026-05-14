@@ -27,7 +27,13 @@ interface QuestionAssetsPayload {
   has_figure_enonce?: boolean;
   has_figure_corrige?: boolean;
   has_any_figure?: boolean;
-  default_side?: "enonce" | "corrige" | "both" | "exam_full" | string;
+  default_side?:
+    | "enonce"
+    | "corrige"
+    | "both"
+    | "exam_full"
+    | "dossier"
+    | string;
   images?: {
     exercise_enonce?: string | null;
     exercise_corrige?: string | null;
@@ -50,6 +56,16 @@ interface QuestionAssetsPayload {
     enonce?: AssetFigureEntry[] | null;
     corrige?: AssetFigureEntry[] | null;
   };
+  /**
+   * Exam-scoped reference document (e.g. *dossier technique* on
+   * technique exams). Present when the v6.6 Qdrant payload carries
+   * a `reference_doc_*` family of fields. Null on every non-technique
+   * pair today; future ingest runs will populate it for gestion
+   * (dossier comptable), bd (MCD schema), and chimie
+   * (chimie_preamble) too. The rendering is kind-agnostic — we read
+   * `kind_label` for the tab label and `kind` only for analytics.
+   */
+  reference_doc?: ReferenceDocPayload | null;
 }
 
 interface AssetFigureEntry {
@@ -58,7 +74,34 @@ interface AssetFigureEntry {
   url: string | null;
 }
 
-type TabKey = "enonce" | "corrige" | "exam_full";
+interface ReferenceDocFigurePayload {
+  id: string;
+  label: string;
+  description: string;
+  page_index: number;
+  page_png: string | null;
+  bbox_pct?: [number, number, number, number] | null;
+}
+
+interface ReferenceDocPagePayload {
+  page_index: number;
+  url: string | null;
+}
+
+interface ReferenceDocPayload {
+  kind: string;
+  kind_label: string;
+  text?: string;
+  text_truncated?: boolean;
+  text_full_length?: number;
+  figures?: ReferenceDocFigurePayload[];
+  pages?: ReferenceDocPagePayload[];
+  n_figures?: number;
+  n_pages?: number;
+  split_method?: string | null;
+}
+
+type TabKey = "enonce" | "corrige" | "exam_full" | "dossier";
 
 interface TabDef {
   key: TabKey;
@@ -199,6 +242,12 @@ export function QuestionAssetsBlock({ part }: QuestionAssetsBlockProps) {
                 alt={formatAlt(payload, "Exam complet")}
                 corrigeUnlocked={corrigeUnlocked}
                 onUnlockCorrige={() => setCorrigeUnlocked(true)}
+              />
+            )}
+            {currentTab === "dossier" && payload.reference_doc && (
+              <DossierTab
+                doc={payload.reference_doc}
+                alt={formatAlt(payload, payload.reference_doc.kind_label)}
               />
             )}
           </div>
@@ -492,6 +541,94 @@ function ExamFullTab({
   );
 }
 
+interface DossierTabProps {
+  doc: ReferenceDocPayload;
+  alt: string;
+}
+
+/**
+ * Render the exam-scoped reference document (dossier technique on
+ * technique exams, future dossier comptable / MCD / chimie
+ * préambule). Lays out the dossier as a vertical stack of
+ * full-page PNG scans with a per-figure caption strip underneath
+ * each page. Kind-agnostic — the only kind-specific bit is the tab
+ * label which is read off `doc.kind_label` upstream.
+ *
+ * v1 deliberately renders **page PNGs only**, not bbox_pct crops —
+ * the dossier scans are dense and a per-figure crop loses the
+ * spatial context the énoncé references ("le repère sur la figure
+ * 3 …"). A future iteration can add per-figure zoom on top of the
+ * full page using `figure.bbox_pct`.
+ */
+function DossierTab({ doc, alt }: DossierTabProps) {
+  const pages = (doc.pages ?? []).filter(
+    (p): p is ReferenceDocPagePayload & { url: string } =>
+      typeof p.url === "string" && p.url.length > 0,
+  );
+  const figuresByPage = new Map<number, ReferenceDocFigurePayload[]>();
+  for (const fig of doc.figures ?? []) {
+    const arr = figuresByPage.get(fig.page_index) ?? [];
+    arr.push(fig);
+    figuresByPage.set(fig.page_index, arr);
+  }
+
+  if (pages.length === 0) {
+    // Fallback path: dossier text only, no scanned pages (defensive
+    // — every v6.6 dossier should ship pages).
+    return (
+      <p className="text-[12px] text-muted-foreground">
+        Document de référence indisponible en image.
+      </p>
+    );
+  }
+
+  return (
+    <div className="flex flex-col gap-4">
+      <p className="text-[11px] text-muted-foreground">
+        {doc.kind_label} — {pages.length} page{pages.length > 1 ? "s" : ""}
+        {typeof doc.n_figures === "number" && doc.n_figures > 0
+          ? ` · ${doc.n_figures} figure${doc.n_figures > 1 ? "s" : ""}`
+          : ""}
+      </p>
+      {pages.map((p) => {
+        const figs = figuresByPage.get(p.page_index) ?? [];
+        return (
+          <div
+            key={p.page_index}
+            className="flex flex-col gap-2"
+            data-dossier-page={p.page_index}
+          >
+            <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+              Page {p.page_index + 1}
+            </div>
+            <FigureThumb
+              url={p.url}
+              alt={`${alt} — page ${p.page_index + 1}`}
+              size="lg"
+            />
+            {figs.length > 0 && (
+              <ul className="flex flex-col gap-1 pl-3 text-[11px] text-muted-foreground">
+                {figs.map((fig) => (
+                  <li
+                    key={fig.id}
+                    data-dossier-figure={fig.id}
+                    className="leading-snug"
+                  >
+                    <span className="font-medium text-foreground">
+                      {fig.label}
+                    </span>
+                    {fig.description ? ` — ${fig.description}` : ""}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /**
  * Pull and parse the assets payload off a `tool-show_question_assets`
  * part. Reads from `output` (the server's response carries the URLs)
@@ -528,7 +665,8 @@ function extractAssetsPayload(
   const anyFigure =
     pickFigures(payload, "enonce").length > 0 ||
     pickFigures(payload, "corrige").length > 0;
-  if (!anyImage && !anyFigure) return null;
+  const anyDossier = hasRenderableDossier(payload.reference_doc);
+  if (!anyImage && !anyFigure && !anyDossier) return null;
   return payload;
 }
 
@@ -578,7 +716,28 @@ function availableTabs(payload: QuestionAssetsPayload): TabDef[] {
   if (images.exam_full_enonce || images.exam_full_corrige) {
     tabs.push({ key: "exam_full", label: "Exam complet" });
   }
+  if (hasRenderableDossier(payload.reference_doc)) {
+    tabs.push({
+      key: "dossier",
+      label: payload.reference_doc?.kind_label ?? "Dossier",
+    });
+  }
   return tabs;
+}
+
+function hasRenderableDossier(
+  doc: ReferenceDocPayload | null | undefined,
+): doc is ReferenceDocPayload {
+  if (!doc) return false;
+  const pages = doc.pages ?? [];
+  const figures = doc.figures ?? [];
+  const hasPage = pages.some(
+    (p) => typeof p.url === "string" && p.url.length > 0,
+  );
+  const hasFigure = figures.some(
+    (f) => typeof f.page_png === "string" && f.page_png.length > 0,
+  );
+  return hasPage || hasFigure || (doc.text?.length ?? 0) > 0;
 }
 
 function chooseInitialTab(
@@ -594,6 +753,9 @@ function chooseInitialTab(
   }
   if (want === "exam_full" && tabs.some((t) => t.key === "exam_full")) {
     return "exam_full";
+  }
+  if (want === "dossier" && tabs.some((t) => t.key === "dossier")) {
+    return "dossier";
   }
   // "enonce" and "both" both default to the énoncé tab; fall back to
   // the first available if énoncé isn't there.

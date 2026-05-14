@@ -42,12 +42,12 @@ export function CapabilityPreviewTile({
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: -6, scale: 0.97 }}
           transition={{ duration: 0.25, ease: "easeOut" }}
-          className="flex flex-col items-start"
+          className="flex flex-col items-start pt-6"
         >
-          <div className="mb-1 ml-1 inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-primary" />
-            Sneak peek
-          </div>
+          {/* The WorkflowCard renders its own "output" tab label
+              `absolute -top-6 left-0`. The wrapper above adds `pt-6` so the
+              tab sits cleanly inside the tile's gradient halo without
+              clipping the outer column. */}
           <WorkflowCard data={output} type="output" delay={0} className="w-full" />
         </motion.div>
       </AnimatePresence>

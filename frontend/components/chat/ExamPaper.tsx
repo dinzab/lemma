@@ -104,10 +104,13 @@ export function ExamPaper({ part }: ExamPaperProps) {
     setRevealed(new Set());
   }, []);
 
-  // Print handler — clones the rendered paper into a top-level
-  // `[data-exam-paper-print-portal]` appended directly to <body>,
-  // toggles a `print-mode-*` body class which the print stylesheet
-  // keys off of, fires `window.print()`, then cleans up.
+  // Print handler — clones the rendered paper, mutates the clone
+  // so it already reflects the chosen print mode (énoncé / corrigé
+  // / both), appends it into a top-level
+  // `[data-exam-paper-print-portal]` attached directly to <body>,
+  // adds the `print-mode-active` body class (the stylesheet keys
+  // off of it to hide every other body child), fires
+  // `window.print()`, then cleans up.
   //
   // Why the portal? The dashboard wraps everything in a
   // `fixed inset-0 overflow-hidden` shell with nested
@@ -128,17 +131,53 @@ export function ExamPaper({ part }: ExamPaperProps) {
       const node = paperRef.current;
       if (!node) return;
 
+      // Clone the rendered paper, then mutate the clone so the
+      // portal already reflects the requested print mode. Pre-
+      // processing the DOM is more robust than trying to override
+      // the React-managed `hidden` attribute through `@media print`
+      // CSS — print engines have historically been inconsistent
+      // about resolving `[hidden]` selectors against attribute
+      // overrides, and clones lose any associated event handlers
+      // anyway, so there's no behavioural downside to baking the
+      // mode into the clone.
+      const clone = node.cloneNode(true) as HTMLElement;
+
+      if (mode === "enonce") {
+        // Drop the disclosure trigger + correction body entirely.
+        clone
+          .querySelectorAll(".exam-correction-wrapper")
+          .forEach((el) => el.remove());
+      } else {
+        // "corrige" and "both" both need every correction visible,
+        // regardless of on-screen reveal state.
+        clone
+          .querySelectorAll(".exam-correction[hidden]")
+          .forEach((el) => el.removeAttribute("hidden"));
+        // Hide the disclosure trigger button — the printed paper
+        // doesn't need a clickable "Voir la correction" affordance.
+        clone
+          .querySelectorAll(".exam-correction-trigger")
+          .forEach((el) => el.remove());
+      }
+
+      if (mode === "corrige") {
+        // Drop every prompt (énoncé text + part labels + exercise
+        // intro paragraph). Only the corrigé remains.
+        clone
+          .querySelectorAll(".exam-prompt")
+          .forEach((el) => el.remove());
+      }
+
       const portal = document.createElement("div");
       portal.setAttribute("data-exam-paper-print-portal", "");
-      portal.appendChild(node.cloneNode(true));
+      portal.appendChild(clone);
       document.body.appendChild(portal);
 
-      const cls = `print-mode-${mode}`;
-      document.body.classList.add(cls);
+      document.body.classList.add("print-mode-active");
       try {
         window.print();
       } finally {
-        document.body.classList.remove(cls);
+        document.body.classList.remove("print-mode-active");
         portal.remove();
       }
     },

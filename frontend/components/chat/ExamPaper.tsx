@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
   Eye,
@@ -64,6 +64,11 @@ export function ExamPaper({ part }: ExamPaperProps) {
   // gently nudged to try the question before peeking.
   const [revealed, setRevealed] = useState<Set<string>>(() => new Set());
 
+  // Ref to the rendered <aside data-exam-paper> so the print
+  // handler can clone it into a top-level portal — see
+  // `handlePrint` below for why this matters.
+  const paperRef = useRef<HTMLElement>(null);
+
   // Pre-compute the flat list of leaf-part IDs that *have* a
   // correction. Used by the global *Tout afficher / Tout masquer*
   // toolbar buttons and to suppress those buttons entirely when
@@ -99,21 +104,42 @@ export function ExamPaper({ part }: ExamPaperProps) {
     setRevealed(new Set());
   }, []);
 
-  // Print handler — toggles a body class (`print-mode-enonce` /
-  // `print-mode-corrige` / `print-mode-both`) which the print
-  // stylesheet keys off of, fires `window.print()`, then cleans
-  // up. The cleanup runs synchronously after the (blocking)
-  // print dialog returns; if the user cancels, the body class is
-  // still removed so subsequent interactions are unaffected.
+  // Print handler — clones the rendered paper into a top-level
+  // `[data-exam-paper-print-portal]` appended directly to <body>,
+  // toggles a `print-mode-*` body class which the print stylesheet
+  // keys off of, fires `window.print()`, then cleans up.
+  //
+  // Why the portal? The dashboard wraps everything in a
+  // `fixed inset-0 overflow-hidden` shell with nested
+  // `overflow: hidden` + `h-full` scrollers; trying to print the
+  // paper from its in-place position traps it inside a single
+  // viewport-sized page (the containing block is the fixed shell,
+  // not the document) so anything past page 1 gets clipped. The
+  // portal lives as a direct child of <body>, free of those
+  // ancestor constraints, so the printed paper paginates
+  // naturally across as many pages as it needs.
+  //
+  // The cleanup runs synchronously after the (blocking) print
+  // dialog returns; if the user cancels, the portal + body class
+  // are still removed so subsequent interactions are unaffected.
   const handlePrint = useCallback(
     (mode: "enonce" | "corrige" | "both") => {
       if (typeof window === "undefined") return;
+      const node = paperRef.current;
+      if (!node) return;
+
+      const portal = document.createElement("div");
+      portal.setAttribute("data-exam-paper-print-portal", "");
+      portal.appendChild(node.cloneNode(true));
+      document.body.appendChild(portal);
+
       const cls = `print-mode-${mode}`;
       document.body.classList.add(cls);
       try {
         window.print();
       } finally {
         document.body.classList.remove(cls);
+        portal.remove();
       }
     },
     [],
@@ -125,13 +151,14 @@ export function ExamPaper({ part }: ExamPaperProps) {
 
   return (
     <aside
+      ref={paperRef}
       aria-label="Exam paper"
       data-exam-paper
       className={cn(
         // Screen styling — the paper sits inside a card so it
         // visually pairs with the other emit_* surfaces, but in
         // print we strip every chrome layer (see globals.css).
-        "exam-paper my-3 w-full overflow-hidden rounded-xl border border-border bg-card text-foreground shadow-sm",
+        "exam-paper my-3 w-full overflow-hidden rounded-lg border border-border bg-card text-foreground shadow-sm sm:rounded-xl",
       )}
     >
       <ExamToolbar
@@ -142,7 +169,7 @@ export function ExamPaper({ part }: ExamPaperProps) {
         onPrint={handlePrint}
       />
 
-      <div className="exam-paper-surface bg-background/40 px-4 py-5 sm:px-8 sm:py-7">
+      <div className="exam-paper-surface bg-background/40 px-3 py-4 sm:px-8 sm:py-7">
         {showBanner && paper.header ? (
           <ExamBannerHeader header={paper.header} />
         ) : null}
@@ -191,27 +218,35 @@ function ExamToolbar({
   onHideAll,
   onPrint,
 }: ExamToolbarProps) {
+  // On mobile, the toolbar buttons would either crowd the toolbar
+  // off the right edge or wrap into a tall stack — we shorten the
+  // visible labels to fit two rows max while keeping a screen-reader
+  // friendly full label in `aria-label` / a hidden `<span>`.
   return (
-    <div className="exam-paper-toolbar flex flex-wrap items-center justify-between gap-2 border-b border-border bg-muted/30 px-3 py-2 text-xs">
+    <div className="exam-paper-toolbar flex flex-wrap items-center justify-between gap-1.5 border-b border-border bg-muted/30 px-2 py-2 text-xs sm:gap-2 sm:px-3">
       <div className="flex items-center gap-1.5">
         {hasAnyCorrection ? (
           allRevealed ? (
             <button
               type="button"
               onClick={onHideAll}
+              aria-label="Tout masquer"
               className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1 font-medium text-foreground/80 hover:bg-muted"
             >
               <EyeOff className="size-3.5" aria-hidden />
-              Tout masquer
+              <span className="hidden sm:inline">Tout masquer</span>
+              <span className="sm:hidden">Masquer</span>
             </button>
           ) : (
             <button
               type="button"
               onClick={onRevealAll}
+              aria-label="Tout afficher"
               className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1 font-medium text-foreground/80 hover:bg-muted"
             >
               <Eye className="size-3.5" aria-hidden />
-              Tout afficher
+              <span className="hidden sm:inline">Tout afficher</span>
+              <span className="sm:hidden">Afficher</span>
             </button>
           )
         ) : null}
@@ -220,28 +255,34 @@ function ExamToolbar({
         <button
           type="button"
           onClick={() => onPrint("enonce")}
+          aria-label="Imprimer le sujet"
           className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1 font-medium text-foreground/80 hover:bg-muted"
         >
           <Printer className="size-3.5" aria-hidden />
-          Imprimer le sujet
+          <span className="hidden sm:inline">Imprimer le sujet</span>
+          <span className="sm:hidden">Sujet</span>
         </button>
         {hasAnyCorrection ? (
           <>
             <button
               type="button"
               onClick={() => onPrint("both")}
+              aria-label="Imprimer le sujet et le corrigé"
               className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1 font-medium text-foreground/80 hover:bg-muted"
             >
               <FileText className="size-3.5" aria-hidden />
-              Sujet + corrigé
+              <span className="hidden sm:inline">Sujet + corrigé</span>
+              <span className="sm:hidden">Sujet+Corr.</span>
             </button>
             <button
               type="button"
               onClick={() => onPrint("corrige")}
+              aria-label="Imprimer le corrigé seul"
               className="inline-flex items-center gap-1.5 rounded-md border border-border bg-card px-2 py-1 font-medium text-foreground/80 hover:bg-muted"
             >
               <ScrollText className="size-3.5" aria-hidden />
-              Corrigé seul
+              <span className="hidden sm:inline">Corrigé seul</span>
+              <span className="sm:hidden">Corrigé</span>
             </button>
           </>
         ) : null}
@@ -352,7 +393,7 @@ function ExerciseBlock({ exercise, revealed, onToggle }: ExerciseBlockProps) {
       // `page-break-inside: avoid` is set in print CSS so an
       // exercise tries to stay on one page when feasible.
     >
-      <div className="flex items-baseline gap-3 border-b border-border pb-1.5">
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 border-b border-border pb-1.5">
         <h3 className="font-serif text-[15px] font-semibold tracking-wide text-foreground sm:text-[16px]">
           {exercise.label}
           {exercise.title ? (
@@ -417,20 +458,22 @@ function PartNode({ node, depth, revealed, onToggle }: PartNodeProps) {
   const hasCorrection = !hasChildren && Boolean(node.correction);
   const isRevealed = revealed.has(node.id);
 
-  // Indent each nesting level by ~14 px on mobile / ~18 px on
+  // Indent each nesting level by ~10 px on mobile / ~18 px on
   // desktop. Capped at depth 4 — beyond that the indentation
-  // would push prompts off the right margin.
-  const indent = Math.min(depth, 4) * 14;
+  // would push prompts off the right margin. We use a CSS custom
+  // property + a stylesheet rule (in `globals.css`) so the
+  // breakpoint applies via `@media` rather than inline style.
+  const depthLevel = Math.min(depth, 4);
 
   return (
     <li
       className="exam-part flex flex-col gap-1"
-      style={{ paddingLeft: `${indent}px` }}
+      style={{ "--exam-depth": depthLevel } as React.CSSProperties}
       data-part-id={node.id}
       data-part-depth={depth}
     >
-      <div className="exam-prompt flex items-start gap-2">
-        <span className="mt-0.5 inline-block min-w-[2.2rem] shrink-0 font-serif text-[13px] font-semibold text-foreground/80 sm:text-[14px]">
+      <div className="exam-prompt flex flex-wrap items-start gap-x-2 gap-y-0.5 sm:flex-nowrap">
+        <span className="mt-0.5 inline-block min-w-[1.8rem] shrink-0 font-serif text-[13px] font-semibold text-foreground/80 sm:min-w-[2.2rem] sm:text-[14px]">
           {node.label}
         </span>
         <div className="min-w-0 flex-1 text-[13px] leading-relaxed text-foreground/90 sm:text-[14px]">
@@ -439,7 +482,7 @@ function PartNode({ node, depth, revealed, onToggle }: PartNodeProps) {
         {!hasChildren &&
         node.marks !== undefined &&
         node.marks !== null ? (
-          <span className="mt-0.5 whitespace-nowrap text-[12px] font-medium text-muted-foreground">
+          <span className="ml-auto mt-0.5 whitespace-nowrap text-[12px] font-medium text-muted-foreground sm:ml-0">
             ({formatMarks(node.marks)} pt
             {node.marks > 1 ? "s" : ""})
           </span>
@@ -503,7 +546,7 @@ function CorrectionDisclosure({
 }: CorrectionDisclosureProps) {
   const labelId = `exam-correction-trigger-${id}`;
   return (
-    <div className="exam-correction-wrapper ml-[2.7rem] mt-1">
+    <div className="exam-correction-wrapper ml-7 mt-1 sm:ml-[2.7rem]">
       <button
         type="button"
         id={labelId}

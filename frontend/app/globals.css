@@ -262,6 +262,24 @@
   .katex-display::-webkit-scrollbar {
     height: 4px;
   }
+
+  /*
+   * `<ExamPaper>` nested-part indentation — driven by the
+   * `--exam-depth` CSS custom property set inline on each
+   * `.exam-part` `<li>` (capped at depth 4 in the component).
+   * Mobile gets a tighter 10 px per level so the prompts don't
+   * get squeezed off the right edge on narrow viewports; the
+   * sm+ breakpoint matches the BAC paper's visual indentation
+   * at 18 px per level.
+   */
+  .exam-part {
+    padding-left: calc(var(--exam-depth, 0) * 10px);
+  }
+  @media (min-width: 640px) {
+    .exam-part {
+      padding-left: calc(var(--exam-depth, 0) * 18px);
+    }
+  }
 }
 
 @layer base {
@@ -299,13 +317,16 @@
  *
  * The `<ExamPaper>` chip renders a Tunisian BAC-format paper inline
  * in the chat transcript. When the student hits one of the
- * `[Imprimer …]` toolbar buttons we temporarily add a body class
+ * `[Imprimer …]` toolbar buttons, the chip clones the rendered
+ * paper into a `[data-exam-paper-print-portal]` appended directly
+ * to <body>, then adds a `print-mode-*` body class
  * (`print-mode-enonce` / `print-mode-corrige` / `print-mode-both`)
- * and call `window.print()` — the rules below take it from there:
+ * and calls `window.print()` — the rules below take it from there:
  *
- *  1. Hide ALL chrome except the active exam paper (so the printed
- *     output isn't a screenshot of the chat — sidebar, toolbar,
- *     message bubbles, hint ladders, etc. all disappear).
+ *  1. Hide every direct child of <body> except the print portal
+ *     (so the printed output isn't a screenshot of the chat —
+ *     sidebar, toolbar, message bubbles, hint ladders, etc. all
+ *     disappear).
  *  2. Strip cards / borders / shadows from the paper itself so it
  *     reads as a clean monochrome BAC paper, not a chat card.
  *  3. Toggle `.exam-prompt` / `.exam-correction` visibility based on
@@ -315,6 +336,16 @@
  *     keeps both visible.
  *  4. Set @page A4 with sensible margins; avoid splitting an
  *     exercise across pages when feasible.
+ *
+ * Why the portal? The dashboard wraps the chat in a
+ * `fixed inset-0 overflow-hidden` shell with nested `overflow:
+ * hidden` + `h-full` scrollers; printing the paper from its
+ * in-place position traps it inside a single viewport-sized page
+ * (the containing block is the fixed shell, not the document) so
+ * anything past page 1 gets clipped. The portal sidesteps that
+ * entirely — it's a direct child of <body>, free of the dashboard
+ * layout, so the printed paper paginates across as many pages as
+ * it needs.
  *
  * When NONE of the print-mode body classes is set, `@media print`
  * still applies (e.g. if the user fires the browser-native Ctrl/Cmd+P
@@ -327,31 +358,20 @@
     margin: 18mm 15mm;
   }
 
-  /* When a print mode is active, hide everything outside the paper
-   * (sidebar, chat header, toolbars, other messages, etc.) so the
-   * printed output is just the paper itself. We don't need the
-   * granularity of "hide this, hide that" — we hide the body's
-   * direct children by default and re-show the ancestor chain of
-   * any `[data-exam-paper]` so the paper survives. */
-  body.print-mode-enonce *,
-  body.print-mode-corrige *,
-  body.print-mode-both * {
-    visibility: hidden;
+  /* When a print mode is active, hide every direct child of <body>
+   * except the print portal. `display: none` (rather than
+   * `visibility: hidden`) is intentional — it removes the chat
+   * chrome from layout entirely, so the printed paper starts at
+   * the top of page 1 instead of after pages of blank chat. */
+  body.print-mode-enonce > *,
+  body.print-mode-corrige > *,
+  body.print-mode-both > * {
+    display: none !important;
   }
-  body.print-mode-enonce [data-exam-paper],
-  body.print-mode-enonce [data-exam-paper] *,
-  body.print-mode-corrige [data-exam-paper],
-  body.print-mode-corrige [data-exam-paper] *,
-  body.print-mode-both [data-exam-paper],
-  body.print-mode-both [data-exam-paper] * {
-    visibility: visible;
-  }
-  body.print-mode-enonce [data-exam-paper],
-  body.print-mode-corrige [data-exam-paper],
-  body.print-mode-both [data-exam-paper] {
-    position: absolute;
-    inset: 0;
-    width: 100%;
+  body.print-mode-enonce > [data-exam-paper-print-portal],
+  body.print-mode-corrige > [data-exam-paper-print-portal],
+  body.print-mode-both > [data-exam-paper-print-portal] {
+    display: block !important;
   }
 
   /* Strip the chat-card chrome from the paper itself — a printed

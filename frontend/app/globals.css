@@ -281,27 +281,6 @@
     }
   }
 
-  /* Barème row layout — the criterion `reason` is rendered through
-   * `<MessageResponse>` (Streamdown) so it supports LaTeX (e.g.
-   * `0.5 pt: $\lim_{x \to +\infty}$ correct`). Streamdown wraps the
-   * top-level text in a `<p>` block, which would otherwise break the
-   * "1 pt : reason" pair onto two lines. Flatten the paragraph back
-   * to inline-flow inside a barème row so each criterion reads as a
-   * single sentence, but keep multiple criteria stacked vertically
-   * via the `<li>` block-level layout. */
-  .exam-bareme-row .exam-bareme-marks {
-    display: inline;
-  }
-  .exam-bareme-row .exam-bareme-reason,
-  .exam-bareme-row .exam-bareme-reason > div,
-  .exam-bareme-row .exam-bareme-reason > div > p,
-  .exam-bareme-row .exam-bareme-reason p {
-    display: inline;
-    margin: 0;
-  }
-  .exam-bareme-row .exam-bareme-reason .katex {
-    display: inline;
-  }
 }
 
 @layer base {
@@ -334,151 +313,257 @@
   }
 }
 
-[data-exam-paper-print-portal] {
-  display: none;
-}
-
-/* Print-mode header injected by ExamPaper.handlePrint() (ÉNONCÉ /
+/* Mode heading injected by ExamPaper.handleDownload() (ÉNONCÉ /
  * SUJET + CORRIGÉ / CORRIGÉ). Hidden on-screen (the toolbar already
- * tells the user which mode they picked); shown in print so the
- * resulting paper carries the same banner a real BAC paper would.
+ * tells the user which mode they picked); shown inside the PDF
+ * export tree (via `.exam-pdf-export`) so the resulting paper
+ * carries the same banner a real Tunisian BAC paper would.
  */
 .exam-print-mode-heading {
   display: none;
 }
 
 /*
- * --- Exam Paper print stylesheet -------------------------------------
+ * --- Exam Paper PDF export stylesheet --------------------------------
  *
  * The `<ExamPaper>` chip renders a Tunisian BAC-format paper inline
  * in the chat transcript. When the student hits one of the
- * `[Imprimer …]` toolbar buttons, the chip:
+ * `[Télécharger …]` toolbar buttons, the chip:
  *   1. clones the rendered paper,
- *   2. pre-processes the clone to bake the chosen print mode into
+ *   2. pre-processes the clone to bake the chosen export mode into
  *      the DOM (drop corrections for "énoncé", drop prompts for
  *      "corrigé", reveal hidden correction blocks for "corrigé" /
  *      "both"),
- *   3. appends the clone into a `[data-exam-paper-print-portal]`
- *      attached directly to <body>,
- *   4. adds the `print-mode-active` body class,
- *   5. calls `window.print()`.
+ *   3. hands the clone to `downloadExamPdf` (see `lib/exam-pdf.ts`),
+ *      which mounts it off-screen inside a `[data-exam-pdf-host]`
+ *      container with the `.exam-pdf-export` class on the cloned
+ *      `<aside data-exam-paper>`, screenshots it with
+ *      html2canvas-pro, and writes the result into a paginated A4
+ *      jsPDF document.
  *
- * The rules below take it from there:
- *  - Hide every direct child of <body> except the print portal
- *    (so the printed output isn't a screenshot of the chat —
- *    sidebar, toolbar, message bubbles, hint ladders, etc. all
- *    disappear).
- *  - Strip cards / borders / shadows from the paper itself so it
- *    reads as a clean monochrome BAC paper, not a chat card.
- *  - Set @page A4 with sensible margins; avoid splitting an
- *    exercise across pages when feasible.
+ * The rules below take it from there. They are NOT inside
+ * `@media print` — they apply on-screen, only inside the off-screen
+ * export host, so the html2canvas-pro capture sees the same
+ * monochrome BAC-paper styling regardless of the device's viewport,
+ * dark/light theme, or whether the student happens to be in a
+ * print preview.
  *
  * Per-mode visibility (énoncé / corrigé / both) is handled in the
- * React component, NOT here — pre-processing the cloned DOM is
- * more robust than fighting `[hidden]` attribute overrides through
- * `@media print` CSS.
+ * React component by pre-processing the cloned DOM before the host
+ * is appended; there are no `[hidden]` overrides to fight here.
+ */
+
+/* Force a clean monochrome paper regardless of the theme that was
+ * active on-screen. Dark mode in particular would otherwise leak
+ * its near-black `--card` + warm-cream `--foreground` into the
+ * cloned DOM and make the corrigé cards render as unreadable
+ * brown-on-white blocks. We re-declare every relevant CSS variable
+ * on the export root so descendant Tailwind utilities (`bg-card`,
+ * `text-foreground`, `border-border`, etc.) all resolve to a
+ * BAC-paper-style B/W palette. */
+.exam-paper.exam-pdf-export,
+.exam-paper.exam-pdf-export * {
+  --background: #ffffff !important;
+  --foreground: #000000 !important;
+  --card: #ffffff !important;
+  --card-foreground: #000000 !important;
+  --popover: #ffffff !important;
+  --popover-foreground: #000000 !important;
+  --muted: #ffffff !important;
+  --muted-foreground: #333333 !important;
+  --accent: #ffffff !important;
+  --accent-foreground: #000000 !important;
+  --border: #888888 !important;
+  --input: #888888 !important;
+  --ring: transparent !important;
+  --chart-1: #000000 !important;
+  --chart-2: #000000 !important;
+  --chart-3: #000000 !important;
+  --chart-4: #000000 !important;
+  --chart-5: #000000 !important;
+}
+
+/* Strip the chat-card chrome from the paper itself — an exported
+ * BAC paper has no rounded corners, no border, no toolbar, no
+ * shadow. Force a serif body font so the prose matches the
+ * Times-style typography of an official paper. */
+.exam-paper.exam-pdf-export {
+  background: #ffffff !important;
+  color: #000000 !important;
+  border: none !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  margin: 0 !important;
+  width: 100% !important;
+  max-width: none !important;
+  overflow: visible !important;
+  font-family: "Times New Roman", "Liberation Serif", "Nimbus Roman",
+    Times, serif !important;
+  font-size: 11pt !important;
+  line-height: 1.4 !important;
+}
+.exam-paper.exam-pdf-export .exam-paper-toolbar {
+  display: none !important;
+}
+.exam-paper.exam-pdf-export .exam-paper-surface {
+  background: #ffffff !important;
+  padding: 0 !important;
+}
+
+/* Export-only mode heading injected by handleDownload — sits
+ * between the banner and the exercises, centred, uppercase,
+ * mirrors the "ÉPREUVE" / "CORRIGÉ" label printed at the top of a
+ * real Tunisian BAC paper. Hidden on-screen via the default rule
+ * above; here we make it visible. */
+.exam-paper.exam-pdf-export .exam-print-mode-heading {
+  display: block !important;
+  margin: 8pt 0 12pt;
+  text-align: center;
+  font-weight: 700;
+  font-size: 13pt;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #000000 !important;
+  border-bottom: 1pt solid #000000;
+  padding-bottom: 4pt;
+}
+
+/* Banner — use a solid dark rule underneath (was theme-coloured
+ * border) and force pure black text so the official-paper header
+ * doesn't render as faded warm-brown. */
+.exam-paper.exam-pdf-export .exam-banner {
+  border-color: #000000 !important;
+  color: #000000 !important;
+}
+.exam-paper.exam-pdf-export .exam-banner * {
+  color: #000000 !important;
+}
+
+/* Exercise heading + body — black on white, regardless of the
+ * `text-foreground/85` etc. opacity utilities applied on-screen. */
+.exam-paper.exam-pdf-export .exam-exercise,
+.exam-paper.exam-pdf-export .exam-exercise * {
+  color: #000000 !important;
+}
+.exam-paper.exam-pdf-export .exam-exercise {
+  margin-top: 6pt;
+}
+.exam-paper.exam-pdf-export .exam-exercise > div:first-child {
+  border-bottom: 0.75pt solid #000000 !important;
+}
+
+/* Part nesting — use a slightly tighter indent so deep
+ * sub-questions don't push the prompt off the right margin on
+ * A4. Cap at depth 4 the same way the on-screen rules do. */
+.exam-paper.exam-pdf-export .exam-part {
+  padding-left: calc(var(--exam-depth, 0) * 10px) !important;
+}
+
+/* Correction blocks — these read as little chat-style cards on
+ * screen (rounded, tinted background) but in an exported BAC
+ * paper the corrigé is just prose. Strip the card chrome, keep a
+ * light left rule so the reader can still see where the answer
+ * block begins. */
+.exam-paper.exam-pdf-export .exam-correction-wrapper {
+  margin-left: 0 !important;
+}
+.exam-paper.exam-pdf-export .exam-correction-trigger {
+  display: none !important;
+}
+.exam-paper.exam-pdf-export .exam-correction {
+  background: #ffffff !important;
+  border: none !important;
+  border-left: 1.5pt solid #555555 !important;
+  border-radius: 0 !important;
+  padding: 2pt 0 2pt 8pt !important;
+  margin-top: 4pt !important;
+  color: #000000 !important;
+}
+.exam-paper.exam-pdf-export .exam-correction > div:first-child {
+  color: #000000 !important;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+/* Barème / Remarque / Erreur classique callouts — the on-screen
+ * coloured callouts (amber / chart-3 backgrounds) export as muddy
+ * tints. Strip the background, keep a thin left rule so the
+ * label-block grouping is still legible in B/W. */
+.exam-paper.exam-pdf-export .exam-correction > div:not(:first-child) {
+  background: #ffffff !important;
+  border: none !important;
+  border-left: 0.75pt solid #888888 !important;
+  border-radius: 0 !important;
+  padding: 0 0 0 6pt !important;
+  margin-top: 4pt !important;
+}
+
+/* KaTeX display math — on-screen we use `overflow-x: auto` to
+ * keep long equations from breaking the chat card. In the PDF
+ * export there's no scroll affordance, so that rule would
+ * silently clip the right side of long display equations. Force
+ * visible overflow + a max-width so KaTeX wraps to the next line
+ * instead of disappearing off the page edge. */
+.exam-paper.exam-pdf-export .katex-display {
+  overflow: visible !important;
+  max-width: 100% !important;
+  padding-bottom: 0 !important;
+}
+.exam-paper.exam-pdf-export .katex-display > .katex {
+  max-width: 100%;
+  white-space: normal;
+}
+
+/* Barème row layout inside the export tree — mirror the on-screen
+ * inline-flow behaviour we apply via `@media print` so the
+ * exported "N pt : reason" line stays on a single line in the
+ * PDF. */
+.exam-paper.exam-pdf-export .exam-bareme-row .exam-bareme-marks {
+  display: inline;
+}
+.exam-paper.exam-pdf-export .exam-bareme-row .exam-bareme-reason,
+.exam-paper.exam-pdf-export .exam-bareme-row .exam-bareme-reason > div,
+.exam-paper.exam-pdf-export .exam-bareme-row .exam-bareme-reason > div > p,
+.exam-paper.exam-pdf-export .exam-bareme-row .exam-bareme-reason p {
+  display: inline;
+  margin: 0;
+}
+.exam-paper.exam-pdf-export .exam-bareme-row .exam-bareme-reason .katex {
+  display: inline;
+}
+
+/* Footer — same monochrome treatment, slightly larger top margin
+ * so the "Total : N points" line doesn't collide with the last
+ * exercise. */
+.exam-paper.exam-pdf-export footer {
+  color: #000000 !important;
+  border-color: #000000 !important;
+  margin-top: 10pt !important;
+  padding-top: 4pt !important;
+}
+.exam-paper.exam-pdf-export footer * {
+  color: #000000 !important;
+}
+
+/*
+ * --- Browser-native print fallback -----------------------------------
  *
- * Why the portal? The dashboard wraps the chat in a
- * `fixed inset-0 overflow-hidden` shell with nested `overflow:
- * hidden` + `h-full` scrollers; printing the paper from its
- * in-place position traps it inside a single viewport-sized page
- * (the containing block is the fixed shell, not the document) so
- * anything past page 1 gets clipped. The portal sidesteps that
- * entirely — it's a direct child of <body>, free of the dashboard
- * layout, so the printed paper paginates across as many pages as
- * it needs.
- *
- * When `print-mode-active` is NOT set, `@media print` still
- * applies (e.g. if the user fires the browser-native Ctrl/Cmd+P
- * over the page) — default to printing the page as-is, but with
- * the paper styled cleanly.
+ * The PDF download is the primary way students export an exam.
+ * If a user happens to hit Ctrl/Cmd+P from the chat anyway, we
+ * still want the paper to print reasonably well — strip the chat
+ * chrome from around it, force monochrome, and set A4 margins.
+ * This is best-effort, not the main supported flow.
  */
 @media print {
   @page {
     size: A4;
     margin: 14mm 12mm;
   }
-
-  /* Force a clean monochrome paper regardless of the theme that was
-   * active on-screen. Dark mode in particular would otherwise leak
-   * its near-black `--card` + warm-cream `--foreground` into the
-   * cloned DOM and make the corrigé cards print as unreadable
-   * brown-on-white blocks. We re-declare every relevant CSS variable
-   * on the print portal so descendant Tailwind utilities (`bg-card`,
-   * `text-foreground`, `border-border`, etc.) all resolve to a
-   * BAC-paper-style B/W palette. */
-  body.print-mode-active,
-  body.print-mode-active > [data-exam-paper-print-portal],
-  body.print-mode-active > [data-exam-paper-print-portal] * {
-    --background: #ffffff !important;
-    --foreground: #000000 !important;
-    --card: #ffffff !important;
-    --card-foreground: #000000 !important;
-    --popover: #ffffff !important;
-    --popover-foreground: #000000 !important;
-    --muted: #ffffff !important;
-    --muted-foreground: #333333 !important;
-    --accent: #ffffff !important;
-    --accent-foreground: #000000 !important;
-    --border: #888888 !important;
-    --input: #888888 !important;
-    --ring: transparent !important;
-    --chart-1: #000000 !important;
-    --chart-2: #000000 !important;
-    --chart-3: #000000 !important;
-    --chart-4: #000000 !important;
-    --chart-5: #000000 !important;
-  }
-  html,
-  body,
-  body.print-mode-active {
-    background: #ffffff !important;
-    color: #000000 !important;
-  }
-
-  /* When a print is active, hide every direct child of <body>
-   * except the print portal. `display: none` (rather than
-   * `visibility: hidden`) is intentional — it removes the chat
-   * chrome from layout entirely, so the printed paper starts at
-   * the top of page 1 instead of after pages of blank chat.
-   *
-   * Per-mode visibility (énoncé / corrigé / both) is handled in
-   * the React component by pre-processing the cloned DOM before
-   * the portal is appended; there are no `[hidden]` overrides to
-   * fight here. */
-  body.print-mode-active > * {
-    display: none !important;
-  }
-  body.print-mode-active > [data-exam-paper-print-portal] {
-    display: block !important;
-  }
-  body.print-mode-active,
-  body.print-mode-active > [data-exam-paper-print-portal] {
-    width: auto !important;
-    min-width: 0 !important;
-    height: auto !important;
-    min-height: 0 !important;
-    overflow: visible !important;
-  }
-  body.print-mode-active > [data-exam-paper-print-portal] {
-    position: static !important;
-    isolation: auto !important;
-  }
-
-  /* Strip the chat-card chrome from the paper itself — a printed
-   * BAC paper has no rounded corners, no border, no toolbar, no
-   * shadow. Force a serif body font so the prose matches the
-   * Times-style typography of an official paper. */
   .exam-paper {
     background: #ffffff !important;
     color: #000000 !important;
     border: none !important;
     border-radius: 0 !important;
     box-shadow: none !important;
-    margin: 0 !important;
-    width: 100% !important;
-    max-width: none !important;
-    overflow: visible !important;
     font-family: "Times New Roman", "Liberation Serif", "Nimbus Roman",
       Times, serif !important;
     font-size: 11pt !important;
@@ -487,139 +572,7 @@
   .exam-paper-toolbar {
     display: none !important;
   }
-  .exam-paper-surface {
-    background: #ffffff !important;
-    padding: 0 !important;
-  }
-
-  /* Print-only mode heading injected by handlePrint — sits between
-   * the banner and the exercises, centered, uppercase, mirrors the
-   * "ÉPREUVE" / "CORRIGÉ" label printed at the top of a real
-   * Tunisian BAC paper. Hidden on-screen via the default rule
-   * above; here we make it visible. */
-  .exam-print-mode-heading {
-    display: block !important;
-    margin: 8pt 0 12pt;
-    text-align: center;
-    font-weight: 700;
-    font-size: 13pt;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: #000000 !important;
-    border-bottom: 1pt solid #000000;
-    padding-bottom: 4pt;
-  }
-
-  /* Banner — use a solid dark rule underneath (was theme-coloured
-   * border) and force pure black text so the official-paper header
-   * doesn't print as faded warm-brown. */
-  .exam-banner {
-    border-color: #000000 !important;
-    color: #000000 !important;
-  }
-  .exam-banner * {
-    color: #000000 !important;
-  }
-
-  /* Exercise heading + body — black on white, regardless of the
-   * `text-foreground/85` etc. opacity utilities applied on-screen. */
-  .exam-exercise,
-  .exam-exercise * {
-    color: #000000 !important;
-  }
-  .exam-exercise {
-    page-break-inside: auto;
-    break-inside: auto;
-    margin-top: 6pt;
-  }
-  .exam-exercise > div:first-child {
-    border-bottom: 0.75pt solid #000000 !important;
-  }
-
-  /* Part nesting — use a slightly tighter indent in print so deep
-   * sub-questions don't push the prompt off the right margin on
-   * A4. Cap at depth 4 the same way the on-screen rules do. */
-  .exam-part {
-    padding-left: calc(var(--exam-depth, 0) * 10px) !important;
-  }
-
-  /* Correction blocks — these read as little chat-style cards on
-   * screen (rounded, tinted background) but on a printed BAC paper
-   * the corrigé is just prose. Strip the card chrome, keep a light
-   * left rule so the reader can still see where the answer block
-   * begins. */
-  .exam-correction-wrapper {
-    margin-left: 0 !important;
-    break-inside: avoid;
-    page-break-inside: avoid;
-  }
-  .exam-correction-trigger {
-    display: none !important;
-  }
-  .exam-correction {
-    background: #ffffff !important;
-    border: none !important;
-    border-left: 1.5pt solid #555555 !important;
-    border-radius: 0 !important;
-    padding: 2pt 0 2pt 8pt !important;
-    margin-top: 4pt !important;
-    color: #000000 !important;
-    break-inside: avoid;
-    page-break-inside: avoid;
-  }
-  .exam-correction > div:first-child {
-    color: #000000 !important;
-    font-weight: 700;
-    letter-spacing: 0.06em;
-  }
-  /* Barème / Remarque / Erreur classique callouts — the on-screen
-   * coloured callouts (amber / chart-3 backgrounds) print as muddy
-   * tints. Strip the background, keep a thin left rule so the
-   * label-block grouping is still legible in B/W. */
-  .exam-correction > div:not(:first-child) {
-    background: #ffffff !important;
-    border: none !important;
-    border-left: 0.75pt solid #888888 !important;
-    border-radius: 0 !important;
-    padding: 0 0 0 6pt !important;
-    margin-top: 4pt !important;
-  }
-
-  /* KaTeX display math — on-screen we use `overflow-x: auto` to keep
-   * long equations from breaking the chat card. In print there's no
-   * scrolling, so that rule silently *clipped* the right side of
-   * long display equations. Force visible overflow + a max-width so
-   * KaTeX wraps to the next line instead of disappearing off the
-   * page edge. */
-  .katex-display {
-    overflow: visible !important;
-    max-width: 100% !important;
-    padding-bottom: 0 !important;
-  }
-  .katex-display > .katex {
-    max-width: 100%;
-    white-space: normal;
-  }
-  /* Hint ladder / tool-call surfaces — if the user prints from a
-   * thread that also has tool chips, the portal still contains only
-   * the paper so this is a safety net for the (rare) case where the
-   * paper itself nests other emit_* blocks. */
-  .lemma-tool-call,
-  [data-streamdown-mermaid] {
-    background: #ffffff !important;
-    color: #000000 !important;
-  }
-
-  /* Footer — same monochrome treatment, slightly larger top margin
-   * so the "Total : N points" line doesn't collide with the last
-   * exercise. */
-  .exam-paper footer {
-    color: #000000 !important;
-    border-color: #000000 !important;
-    margin-top: 10pt !important;
-    padding-top: 4pt !important;
-  }
-  .exam-paper footer * {
-    color: #000000 !important;
+  .exam-correction[hidden] {
+    display: revert !important;
   }
 }

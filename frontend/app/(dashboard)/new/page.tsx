@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Languages, TimerReset } from "lucide-react";
-import { AnimatePresence, motion } from "motion/react";
 
 import { createThread, extractTitleFromMessage } from "@/lib/api/threads";
 import { useUser } from "@/context/user-context";
@@ -11,11 +10,7 @@ import {
   PromptComposer,
   type PromptComposerMode,
 } from "@/components/chat/PromptComposer";
-import { CapabilityPreviewTile } from "@/components/chat/CapabilityPreviewTile";
-import {
-  TUTOR_CAPABILITY_TABS,
-  type TutorCapabilityTab,
-} from "@/components/landing/tutor-capability-tabs";
+import { TUTOR_CAPABILITY_TABS } from "@/components/landing/tutor-capability-tabs";
 import { cn } from "@/lib/utils";
 
 const DEFAULT_PLACEHOLDER =
@@ -36,8 +31,7 @@ export default function NewChatPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // Currently-selected capability chip inside the composer. Drives the
-  // composer placeholder text, the chip-active styling, and whether the
-  // companion preview tile renders next to the composer.
+  // composer placeholder text and the chip-active styling.
   const [selectedCapabilityId, setSelectedCapabilityId] = useState<string | null>(
     null,
   );
@@ -52,14 +46,6 @@ export default function NewChatPage() {
         icon: tab.icon,
       })),
     [],
-  );
-
-  const activeCapability: TutorCapabilityTab | null = useMemo(
-    () =>
-      selectedCapabilityId
-        ? TUTOR_CAPABILITY_TABS.find((t) => t.id === selectedCapabilityId) ?? null
-        : null,
-    [selectedCapabilityId],
   );
 
   const placeholder = selectedCapabilityId
@@ -135,11 +121,10 @@ export default function NewChatPage() {
         </button>
       </div>
 
-      {/* Centered hero + composer column. We vertically center on the viewport
-          so the composer is the focal point. The optional companion preview
-          tile floats to the right on lg+ — at narrower widths it stacks below
-          the composer. */}
-      <div className="relative mx-auto flex w-full max-w-2xl flex-1 flex-col items-center justify-center gap-6 px-4 pb-10 pt-6 text-center sm:max-w-3xl sm:gap-8 sm:px-6 sm:pt-12 lg:px-8">
+      {/* Centered hero + composer column. The composer is the focal point;
+          we vertically center the column inside the page so it sits in the
+          middle of the screen. */}
+      <div className="relative mx-auto flex w-full max-w-2xl flex-1 flex-col items-center justify-center gap-6 px-4 pb-10 pt-6 text-center sm:max-w-3xl sm:gap-8 sm:px-6 sm:pt-12 lg:max-w-4xl lg:px-8">
         {/* Hero */}
         <div className="flex flex-col items-center gap-3 sm:gap-4">
           <span className="inline-flex max-w-full items-center gap-2 rounded-full border border-border/60 px-3 py-1 text-xs font-medium text-muted-foreground">
@@ -166,10 +151,10 @@ export default function NewChatPage() {
           </p>
         </div>
 
-        {/* Composer + companion preview tile. `lg:relative` lets the tile
-            anchor its absolute position to this wrapper so it sits to the
-            right of the composer without disturbing horizontal centring. */}
-        <div className="relative w-full lg:relative">
+        {/* Composer. Capability chips live inside it (replacing the previous
+            three generic mode chips) so the input is the only thing the
+            student needs to interact with. */}
+        <div className="w-full">
           <PromptComposer
             value={message}
             onChange={setMessage}
@@ -188,29 +173,6 @@ export default function NewChatPage() {
               {error}
             </div>
           )}
-
-          {/* Companion preview tile.
-              - On lg+ the tile is absolutely positioned to the right of the
-                composer (floating, decoupled from the centred column flow).
-              - On <lg it stacks below the composer in normal flow.
-              - Only renders when a capability chip is active. */}
-          <AnimatePresence>
-            {activeCapability && (
-              <motion.div
-                key="capability-preview"
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: 4 }}
-                transition={{ duration: 0.22, ease: "easeOut" }}
-                className={cn(
-                  "mt-6 flex justify-center text-left",
-                  "lg:absolute lg:left-full lg:top-1/2 lg:mt-0 lg:ml-6 lg:-translate-y-1/2 lg:justify-start",
-                )}
-              >
-                <CapabilityPreviewTile capability={activeCapability} />
-              </motion.div>
-            )}
-          </AnimatePresence>
         </div>
       </div>
     </div>

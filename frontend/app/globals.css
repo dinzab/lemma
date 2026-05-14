@@ -312,6 +312,10 @@
   }
 }
 
+[data-exam-paper-print-portal] {
+  display: none;
+}
+
 /*
  * --- Exam Paper print stylesheet -------------------------------------
  *
@@ -361,7 +365,7 @@
 @media print {
   @page {
     size: A4;
-    margin: 18mm 15mm;
+    margin: 12mm 10mm;
   }
 
   /* When a print is active, hide every direct child of <body>
@@ -380,6 +384,18 @@
   body.print-mode-active > [data-exam-paper-print-portal] {
     display: block !important;
   }
+  body.print-mode-active,
+  body.print-mode-active > [data-exam-paper-print-portal] {
+    width: auto !important;
+    min-width: 0 !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+  body.print-mode-active > [data-exam-paper-print-portal] {
+    position: static !important;
+    isolation: auto !important;
+  }
 
   /* Strip the chat-card chrome from the paper itself — a printed
    * BAC paper has no rounded corners, no border, no toolbar, no
@@ -391,6 +407,9 @@
     border-radius: 0 !important;
     box-shadow: none !important;
     margin: 0 !important;
+    width: 100% !important;
+    max-width: none !important;
+    overflow: visible !important;
   }
   .exam-paper-toolbar {
     display: none !important;
@@ -403,11 +422,19 @@
     border-color: #444 !important;
   }
   .exam-exercise {
-    page-break-inside: avoid;
+    page-break-inside: auto;
+    break-inside: auto;
+  }
+  .exam-part,
+  .exam-correction-wrapper,
+  .exam-correction {
     break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .exam-part {
+    padding-left: calc(var(--exam-depth, 0) * 8px) !important;
   }
   .exam-correction-wrapper {
     margin-left: 0 !important;
   }
 }
-

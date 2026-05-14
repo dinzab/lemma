@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
 import {
+  buildDossierFigureCitation,
   buildExamCitation,
   buildExerciseCitation,
   buildFigureCitation,
@@ -14,6 +15,12 @@ import {
   formatFiguresForLLM,
   readFigureEntries,
 } from '../agent/tools';
+import {
+  formatReferenceDocForLLM,
+  readReferenceDoc,
+  referenceDocKindLabel,
+  type FormattedReferenceDocFigure,
+} from '../agent/tools/reference-doc';
 import {
   QdrantClientProvider,
   type QdrantPoint,
@@ -115,11 +122,23 @@ export interface ResolvedExamResponse {
   exam_full_corrige_url: string | null;
 }
 
+export interface ResolvedDossierFigureResponse {
+  kind: 'dossier_figure';
+  uri: string;
+  citation: Citation | null;
+  exam: ExamMeta;
+  /** The dossier kind label (e.g. `"Dossier technique"`). */
+  reference_doc_kind: string;
+  reference_doc_kind_label: string;
+  figure: FormattedReferenceDocFigure;
+}
+
 export type ResolvedReference =
   | ResolvedFigureResponse
   | ResolvedExerciseResponse
   | ResolvedPairResponse
-  | ResolvedExamResponse;
+  | ResolvedExamResponse
+  | ResolvedDossierFigureResponse;
 
 export class InvalidLemmaUriError extends Error {
   constructor(public readonly uri: string) {
@@ -160,7 +179,8 @@ type ParsedUri =
       exercise_handle: string;
       question_handle: string;
     }
-  | { kind: 'exam'; exam_handle: string };
+  | { kind: 'exam'; exam_handle: string }
+  | { kind: 'dossier_fig'; exam_handle: string; figure_id: string };
 
 /**
  * Resolve `lemma:` URIs against the corpus so the frontend's inline
@@ -208,7 +228,64 @@ export class ReferencesService {
         return this.resolvePair(uri, parsed);
       case 'exam':
         return this.resolveExam(uri, parsed);
+      case 'dossier_fig':
+        return this.resolveDossierFigure(uri, parsed);
     }
+  }
+
+  /**
+   * Resolve a `lemma:dossier_fig:<exam>:<figure_id>` URI to the
+   * matching figure inside the exam's `reference_doc`. Every pair
+   * in a given exam carries the same denormalised dossier on its
+   * Qdrant payload, so we only need to scroll one point under the
+   * exam to find the figure list.
+   */
+  private async resolveDossierFigure(
+    uri: string,
+    parsed: Extract<ParsedUri, { kind: 'dossier_fig' }>,
+  ): Promise<ResolvedDossierFigureResponse> {
+    const points = await this.scrollExamPairs(parsed.exam_handle);
+    if (points.length === 0) throw new LemmaUriNotFoundError(uri);
+
+    // The dossier is denormalised onto every pair, but only the
+    // pairs ingested under `omni_v6.6` carry the new fields. Find
+    // the first point with a populated dossier.
+    let dossierPoint: QdrantPoint | null = null;
+    for (const p of points) {
+      if (readReferenceDoc(p.payload) !== null) {
+        dossierPoint = p;
+        break;
+      }
+    }
+    if (!dossierPoint) throw new LemmaUriNotFoundError(uri);
+
+    const raw = readReferenceDoc(dossierPoint.payload);
+    if (!raw) throw new LemmaUriNotFoundError(uri);
+
+    const formatted = formatReferenceDocForLLM(raw, {
+      cdnBase: this.cdnBase,
+      examHandle: parsed.exam_handle,
+    });
+    const figure = formatted.figures.find((f) => f.id === parsed.figure_id);
+    if (!figure) throw new LemmaUriNotFoundError(uri);
+
+    const meta = readMetaFromPoint(dossierPoint, parsed.exam_handle, null);
+    return {
+      kind: 'dossier_figure',
+      uri,
+      citation:
+        figure.citation ??
+        buildDossierFigureCitation({
+          exam_handle: parsed.exam_handle,
+          figure_id: parsed.figure_id,
+          label: figure.label,
+          kind: formatted.kind,
+        }),
+      exam: meta.exam,
+      reference_doc_kind: formatted.kind,
+      reference_doc_kind_label: referenceDocKindLabel(formatted.kind),
+      figure,
+    };
   }
 
   private async resolveFigure(
@@ -793,6 +870,22 @@ function parseLemmaUri(uri: string): ParsedUri | null {
     const rest = uri.slice('lemma:exam:'.length);
     if (!rest) return null;
     return { kind: 'exam', exam_handle: rest };
+  }
+
+  if (uri.startsWith('lemma:dossier_fig:')) {
+    const rest = uri.slice('lemma:dossier_fig:'.length);
+    const parts = rest.split(':');
+    // The exam handle has no colons (matches v6 grammar); figure_id
+    // is one trailing segment with no colons either. Anything more
+    // is malformed.
+    if (parts.length !== 2) return null;
+    const [examHandle, figureId] = parts;
+    if (!examHandle || !figureId) return null;
+    return {
+      kind: 'dossier_fig',
+      exam_handle: examHandle,
+      figure_id: figureId,
+    };
   }
 
   return null;

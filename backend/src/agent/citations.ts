@@ -20,6 +20,7 @@
  *   lemma:fig:<exam_handle>:<exercise_handle>:<side>:<index_zero_based>   (legacy)
  *   lemma:exercise:<exam_handle>:<exercise_handle>
  *   lemma:exam:<exam_handle>
+ *   lemma:dossier_fig:<exam_handle>:<figure_id>
  *
  * Where `exam_handle` is the v6 hyphenated form
  * (`<matiere>-<year>-<session>-<filiere>`, e.g.
@@ -373,6 +374,58 @@ export function buildExamCitation(ctx: {
   if (matiere) longPieces.push(matiere);
   if (ctx.track) longPieces.push(`section ${ctx.track}`);
   const label = longPieces.filter(Boolean).join(' · ');
+  return {
+    ref_uri: refUri,
+    short_label,
+    label,
+    inline_link: buildInlineLink(short_label, refUri),
+  };
+}
+
+/**
+ * Build the citation block for one figure inside an exam-scoped
+ * *reference document* (the technique-exam "dossier technique", the
+ * gestion "dossier comptable", etc.). Dossier figures are scoped to
+ * the **exam**, not a specific pair — every pair on an exam shares
+ * the same dossier — which is why this URI omits the
+ * exercise/question handles the regular `lemma:fig:…` URI carries.
+ *
+ *   ref_uri:     lemma:dossier_fig:technique-2022-principale-technique:enonce_p2_f1
+ *   short_label: "figure 1 du dossier"
+ *   label:       "Figure 1 du dossier technique"
+ *   inline_link: "[figure 1 du dossier](lemma:dossier_fig:…:enonce_p2_f1)"
+ *
+ * `figure_id` is the canonical id emitted by the RAG ingest (e.g.
+ * `enonce_p2_f1` — `<side>_p<zero-based-page>_f<one-based-figure>`).
+ * It MUST be a string with no `:` — we reject inputs that contain a
+ * colon rather than escape them, because the URI grammar has no
+ * escaping rules.
+ */
+export function buildDossierFigureCitation(ctx: {
+  exam_handle: string;
+  figure_id: string;
+  /** Optional human-readable figure label (e.g. `"figure 3"`); falls
+   * back to `"figure"` when absent. */
+  label?: string | null;
+  /** Optional reference_doc_kind, used in the long label only. */
+  kind?: string | null;
+}): Citation | null {
+  if (!ctx.exam_handle || !ctx.figure_id) return null;
+  if (ctx.exam_handle.includes(':') || ctx.figure_id.includes(':')) {
+    return null;
+  }
+  const refUri = `lemma:dossier_fig:${ctx.exam_handle}:${ctx.figure_id}`;
+  const figLabel = ctx.label && ctx.label.length > 0 ? ctx.label : 'figure';
+  const short_label = `${figLabel.toLowerCase()} du dossier`;
+  const kindWord =
+    ctx.kind === 'dossier_technique' || !ctx.kind
+      ? 'dossier technique'
+      : ctx.kind.replace(/_/g, ' ');
+  const capLabel =
+    figLabel.length === 0
+      ? 'Figure'
+      : figLabel[0].toUpperCase() + figLabel.slice(1);
+  const label = `${capLabel} du ${kindWord}`;
   return {
     ref_uri: refUri,
     short_label,

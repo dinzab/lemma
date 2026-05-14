@@ -6,6 +6,7 @@ import {
   readFigureEntries,
 } from './index';
 import {
+  buildDossierFigureCitation,
   buildExamCitation,
   buildExerciseCitation,
   buildFigureCitation,
@@ -447,6 +448,69 @@ describe('formatPairForLLM', () => {
     expect(out.has_figure_enonce).toBe(false);
     expect(out.has_figure_corrige).toBe(false);
   });
+
+  it('emits a compact reference_doc summary when the v6.6 payload carries a dossier', () => {
+    const point = {
+      id: 'p4',
+      payload: {
+        pair_id_logical: 'technique-2022-principale-technique:ex_B2:q_4',
+        matiere: 'technique',
+        exam_id: 'technique-2022-principale-technique',
+        question_text: 'q',
+        answer_text: 'a',
+        has_reference_doc: true,
+        reference_doc_kind: 'dossier_technique',
+        reference_doc_text: 'a'.repeat(14_237),
+        reference_doc_figures: [
+          {
+            id: 'enonce_p2_f1',
+            label: 'figure 1',
+            description: 'Diagramme cin\u00e9matique du levage.',
+            page_index: 1,
+            bbox_pct: [0.1, 0.1, 0.9, 0.5],
+          },
+        ],
+        reference_doc_pages_relpaths: [
+          'technique-2022-principale-technique/dossier/p1.png',
+          'technique-2022-principale-technique/dossier/p2.png',
+        ],
+        reference_doc_pages: [0, 1],
+        reference_doc_split_method: 'fast_block_v1',
+        n_reference_doc_figures: 1,
+        n_reference_doc_pages: 2,
+        ingest_version: 'omni_v6.6',
+      },
+    };
+    const out = formatPairForLLM(point);
+    const doc = out.reference_doc as {
+      kind: string;
+      kind_label: string;
+      n_pages: number;
+      n_figures: number;
+      text_full_length: number;
+      split_method: string | null;
+    };
+    expect(doc.kind).toBe('dossier_technique');
+    expect(doc.kind_label).toBe('Dossier technique');
+    expect(doc.n_pages).toBe(2);
+    expect(doc.n_figures).toBe(1);
+    expect(doc.text_full_length).toBe(14_237);
+    expect(doc.split_method).toBe('fast_block_v1');
+  });
+
+  it('returns reference_doc=null on non-technique pairs (no v6.6 fields)', () => {
+    const point = {
+      id: 'p5',
+      payload: {
+        pair_id_logical: 'math-2024-principale-math:ex_1:q_1.a',
+        matiere: 'math',
+        question_text: 'q',
+        answer_text: 'a',
+      },
+    };
+    const out = formatPairForLLM(point);
+    expect(out.reference_doc).toBeNull();
+  });
 });
 
 /**
@@ -656,6 +720,60 @@ describe('citation builders', () => {
         'lemma:exercise:math-2024-principale-math:ex_1',
       );
       expect(citation!.short_label).toMatch(/Ex\s*1/);
+    });
+  });
+
+  describe('buildDossierFigureCitation', () => {
+    it('produces a lemma:dossier_fig URI with the exam handle + figure id', () => {
+      const cit = buildDossierFigureCitation({
+        exam_handle: 'technique-2022-principale-technique',
+        figure_id: 'enonce_p2_f1',
+        label: 'figure 1',
+        kind: 'dossier_technique',
+      });
+      expect(cit).not.toBeNull();
+      expect(cit!.ref_uri).toBe(
+        'lemma:dossier_fig:technique-2022-principale-technique:enonce_p2_f1',
+      );
+      expect(cit!.short_label).toBe('figure 1 du dossier');
+      expect(cit!.label).toBe('Figure 1 du dossier technique');
+      expect(cit!.inline_link).toContain(
+        'lemma:dossier_fig:technique-2022-principale-technique:enonce_p2_f1',
+      );
+    });
+
+    it('falls back to a kind-agnostic label for future dossier kinds', () => {
+      const cit = buildDossierFigureCitation({
+        exam_handle: 'gestion-2024-principale-eg',
+        figure_id: 'p0_f1',
+        label: 'figure 2',
+        kind: 'dossier_comptable',
+      });
+      expect(cit!.label).toBe('Figure 2 du dossier comptable');
+    });
+
+    it('rejects URIs whose handle / figure id would split the URI grammar', () => {
+      expect(
+        buildDossierFigureCitation({
+          exam_handle: 'tech:bogus',
+          figure_id: 'enonce_p0_f1',
+        }),
+      ).toBeNull();
+      expect(
+        buildDossierFigureCitation({
+          exam_handle: 'tech',
+          figure_id: 'bog:us',
+        }),
+      ).toBeNull();
+    });
+
+    it('returns null when either segment is missing', () => {
+      expect(
+        buildDossierFigureCitation({ exam_handle: '', figure_id: 'x' }),
+      ).toBeNull();
+      expect(
+        buildDossierFigureCitation({ exam_handle: 'x', figure_id: '' }),
+      ).toBeNull();
     });
   });
 

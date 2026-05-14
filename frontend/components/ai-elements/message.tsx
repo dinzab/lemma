@@ -38,6 +38,7 @@ import type { UrlTransform } from "streamdown";
 import type { PluggableList } from "unified";
 import {
   LemmaInlineCitation,
+  LemmaInlineCitationDossierFigure,
   LemmaInlineCitationFigure,
 } from "@/components/chat/LemmaInlineCitation";
 
@@ -418,6 +419,16 @@ function LemmaAwareAnchor({
   ...rest
 }: AnchorComponentProps) {
   void _node;
+  if (typeof href === "string" && href.startsWith("lemma:dossier_fig:")) {
+    return (
+      <LemmaInlineCitationDossierFigure
+        refUri={href}
+        className={className}
+      >
+        {children}
+      </LemmaInlineCitationDossierFigure>
+    );
+  }
   if (typeof href === "string" && href.startsWith("lemma:fig:")) {
     return (
       <LemmaInlineCitationFigure refUri={href} className={className}>

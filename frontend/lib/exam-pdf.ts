@@ -49,9 +49,22 @@
  *      keeps the PDF small and lets every page have a clean
  *      white background, even if the original capture has any
  *      transparency.
- *   6. We call `pdf.save(filename)` — jsPDF builds a Blob and
- *      triggers a native download on every modern browser
- *      including iOS Safari (>=14) and Android Chrome.
+ *   6. We build a Blob via `pdf.output("blob")` and trigger the
+ *      download ourselves through a DOM-attached `<a download>`
+ *      anchor that we click() and immediately remove. We
+ *      deliberately do NOT call jsPDF's own `pdf.save(filename)`
+ *      because internally it creates a *detached* anchor and
+ *      dispatches a synthetic, untrusted `MouseEvent("click")`
+ *      via `setTimeout(..., 0)` — a pattern Chrome's "automatic
+ *      downloads from a single origin" throttle silently
+ *      swallows after the first successful download in the same
+ *      tab (no console.error, no print dialog, no permission
+ *      prompt — the file just never appears). A real, DOM-
+ *      attached anchor + native `.click()` is what Chrome treats
+ *      as a user-initiated download every time, so the
+ *      second/third clicks of the toolbar's other PDF buttons
+ *      reliably trigger their own downloads instead of getting
+ *      dropped.
  *
  * The function is *async* and resolves once the download has been
  * triggered. Errors propagate to the caller — the caller is
@@ -248,9 +261,64 @@ export async function downloadExamPdf(
       pageIndex += 1;
     }
 
-    pdf.save(filename);
+    triggerBlobDownload(pdf.output("blob"), filename);
   } finally {
     host.remove();
+  }
+}
+
+/**
+ * Trigger a real browser download of `blob` under `filename`.
+ *
+ * This is what jsPDF's `pdf.save()` is *supposed* to do but
+ * doesn't reliably on Chrome (see the file header for the full
+ * explanation). The key differences vs jsPDF's internal `saveAs`:
+ *
+ *   - We attach the anchor to `document.body` before clicking it.
+ *     Some browsers refuse to fire a click event on a detached
+ *     element, and even where they don't, an attached anchor is
+ *     the closest thing to a "real" user-initiated download from
+ *     Chrome's perspective.
+ *   - We call `a.click()` directly (the native method) instead of
+ *     dispatching a synthetic `MouseEvent("click")`. The native
+ *     `.click()` call inherits the originating user-activation,
+ *     which Chrome uses to decide whether a download counts as
+ *     user-initiated or "automatic" (the latter is what triggers
+ *     the silent-swallow throttle after the first download).
+ *   - We do NOT defer the click with `setTimeout(0)`. Pushing
+ *     the click out to a fresh task tick is what loses any
+ *     remaining activation signal Chrome was tracking.
+ *
+ * `URL.revokeObjectURL` runs on a 40s delay (same as jsPDF) — we
+ * give the browser plenty of time to finish writing the blob to
+ * disk before tearing the object URL down, otherwise a slow disk
+ * or a save-to-Drive integration can race the revoke and end up
+ * with a zero-byte file.
+ */
+function triggerBlobDownload(blob: Blob, filename: string): void {
+  if (typeof document === "undefined" || typeof URL === "undefined") {
+    return;
+  }
+  const objectUrl = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectUrl;
+  anchor.download = filename;
+  anchor.rel = "noopener";
+  // Hide the anchor — it's only here long enough to receive the
+  // click; we don't want it briefly visible in the layout.
+  anchor.style.position = "fixed";
+  anchor.style.top = "0";
+  anchor.style.left = "-100000px";
+  anchor.style.opacity = "0";
+  anchor.style.pointerEvents = "none";
+  document.body.appendChild(anchor);
+  try {
+    anchor.click();
+  } finally {
+    anchor.remove();
+    setTimeout(() => {
+      URL.revokeObjectURL(objectUrl);
+    }, 40_000);
   }
 }
 
